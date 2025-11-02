@@ -19,6 +19,7 @@ import { apiLimiter } from './middleware/rateLimiter';
 // Import routes
 import healthRoutes from './routes/health';
 import userRoutes from './routes/users';
+import webhookRoutes from './routes/webhooks';
 
 class App {
   public app: Application;
@@ -58,6 +59,9 @@ class App {
     } else {
       this.app.use(morgan('combined'));
     }
+
+    // Webhooks (before rate limiting)
+    this.app.use('/api/webhooks', webhookRoutes);
 
     // Rate limiting for API protection
     this.app.use('/api/', apiLimiter);
