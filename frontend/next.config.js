@@ -17,10 +17,6 @@ const nextConfig = {
       },
     ],
   },
-  // Environment variables will be read from Vercel environment settings
-  eslint: {
-    ignoreDuringBuilds: false,
-  },
   typescript: {
     ignoreBuildErrors: false,
   },
