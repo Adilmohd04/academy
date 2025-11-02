@@ -1,10 +1,17 @@
 import { Webhook } from 'svix';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+);
 
 /**
  * Clerk Webhook Handler
- * Receives user events from Clerk and syncs to your backend/database
+ * Receives user events from Clerk and syncs to Supabase database in real-time
  */
 export async function POST(req: Request) {
   try {
@@ -68,24 +75,79 @@ export async function POST(req: Request) {
           lastName: data.last_name,
         });
 
-        // TODO: Send to your backend API to store in Supabase
-        // Example:
-        // await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/webhooks/clerk`, {
-        //   method: 'POST',
-        //   headers: { 'Content-Type': 'application/json' },
-        //   body: JSON.stringify({ type, data }),
-        // });
+        // Save user to Supabase in real-time
+        try {
+          const fullName = [data.first_name, data.last_name]
+            .filter(Boolean)
+            .join(' ') || null;
 
+          const { data: newUser, error } = await supabase
+            .from('profiles')
+            .insert({
+              clerk_user_id: data.id,
+              email: data.email_addresses?.[0]?.email_address || '',
+              full_name: fullName,
+              role: (data.public_metadata?.role as string) || 'student',
+            })
+            .select()
+            .single();
+
+          if (error) {
+            console.error('❌ Failed to create user in database:', error);
+          } else {
+            console.log('✅ User saved to database:', newUser);
+          }
+        } catch (error: any) {
+          console.error('❌ Database error:', error.message);
+        }
         break;
 
       case 'user.updated':
         console.log('✏️ User updated:', data.id);
-        // TODO: Update user in your backend
+        
+        // Update user in Supabase
+        try {
+          const fullName = [data.first_name, data.last_name]
+            .filter(Boolean)
+            .join(' ') || null;
+
+          const { error } = await supabase
+            .from('profiles')
+            .update({
+              email: data.email_addresses?.[0]?.email_address || '',
+              full_name: fullName,
+              role: (data.public_metadata?.role as string) || 'student',
+            })
+            .eq('clerk_user_id', data.id);
+
+          if (error) {
+            console.error('❌ Failed to update user:', error);
+          } else {
+            console.log('✅ User updated in database');
+          }
+        } catch (error: any) {
+          console.error('❌ Database error:', error.message);
+        }
         break;
 
       case 'user.deleted':
         console.log('🗑️ User deleted:', data.id);
-        // TODO: Delete user in your backend
+        
+        // Delete user from database
+        try {
+          const { error } = await supabase
+            .from('profiles')
+            .delete()
+            .eq('clerk_user_id', data.id);
+
+          if (error) {
+            console.error('❌ Failed to delete user:', error);
+          } else {
+            console.log('✅ User deleted from database');
+          }
+        } catch (error: any) {
+          console.error('❌ Database error:', error.message);
+        }
         break;
 
       default:
