@@ -1,5 +1,4 @@
 node_modules
-src
 *.mjs
 test-start.js
 .env
