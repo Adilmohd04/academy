@@ -10,6 +10,35 @@ const supabase = createClient(
 );
 
 /**
+ * Determine user role based on email address
+ */
+function determineUserRole(email: string): 'admin' | 'teacher' | 'student' {
+  const lowerEmail = email.toLowerCase();
+  
+  // Admin emails (add your admin emails here)
+  const adminEmails = [
+    'sadilmohammed2002@gmail.com',
+    'admin@academy.com',
+    'admin.test@gmail.com',
+    // Add more admin emails here
+  ];
+  
+  // Check if email is admin
+  if (adminEmails.includes(lowerEmail)) {
+    return 'admin';
+  }
+  
+  // Check if email domain is for teachers
+  // You can customize this logic based on your needs
+  if (lowerEmail.includes('teacher') || lowerEmail.includes('instructor')) {
+    return 'teacher';
+  }
+  
+  // Default role is student
+  return 'student';
+}
+
+/**
  * Clerk Webhook Handler
  * Receives user events from Clerk and syncs to Supabase database in real-time
  */
@@ -81,13 +110,16 @@ export async function POST(req: Request) {
             .filter(Boolean)
             .join(' ') || null;
 
+          const email = data.email_addresses?.[0]?.email_address || '';
+          const role = determineUserRole(email);
+
           const { data: newUser, error } = await supabase
             .from('profiles')
             .insert({
               clerk_user_id: data.id,
-              email: data.email_addresses?.[0]?.email_address || '',
+              email: email,
               full_name: fullName,
-              role: (data.public_metadata?.role as string) || 'student',
+              role: role,
             })
             .select()
             .single();
@@ -95,7 +127,7 @@ export async function POST(req: Request) {
           if (error) {
             console.error('❌ Failed to create user in database:', error);
           } else {
-            console.log('✅ User saved to database:', newUser);
+            console.log(`✅ User saved to database with role: ${role}`, newUser);
           }
         } catch (error: any) {
           console.error('❌ Database error:', error.message);

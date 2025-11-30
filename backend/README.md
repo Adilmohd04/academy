@@ -1,8 +1,8 @@
-# 🎓 Education Platform - Backend API
+# 🎓 Islamic Academy Platform - Backend API
 
 > Scalable education management platform backend supporting **10,000+ concurrent users**
 
-A modern, production-ready RESTful API built with Node.js, Express, TypeScript, and PostgreSQL. Features authentication with Clerk, role-based access control, and a modular architecture designed for easy feature additions.
+A modern, production-ready RESTful API built with Node.js, Express, TypeScript, and PostgreSQL. Features authentication with Clerk, role-based access control, payment integration with Stripe, and a modular architecture designed for scalability and maintainability.
 
 ---
 
@@ -15,8 +15,7 @@ A modern, production-ready RESTful API built with Node.js, Express, TypeScript, 
 - [Environment Setup](#-environment-setup)
 - [Database Setup](#-database-setup)
 - [Running the Server](#-running-the-server)
-- [API Endpoints](#-api-endpoints)
-- [Adding New Features](#-adding-new-features)
+- [API Documentation](#-api-documentation)
 - [Architecture Overview](#-architecture-overview)
 - [Scaling for 10K+ Users](#-scaling-for-10k-users)
 
@@ -26,15 +25,21 @@ A modern, production-ready RESTful API built with Node.js, Express, TypeScript, 
 
 - ✅ **Clerk Authentication** - JWT-based authentication with Google OAuth support
 - ✅ **Role-Based Access Control** - Admin, Teacher, and Student roles
-- ✅ **PostgreSQL Database** - With connection pooling for scalability
+- ✅ **PostgreSQL Database** - With connection pooling via Supabase
+- ✅ **Stripe Payments** - Secure payment processing for bookings
+- ✅ **Google Calendar Integration** - Automated meeting scheduling
+- ✅ **Email Notifications** - Automated emails for bookings and updates
+- ✅ **Meeting Management** - Complete booking workflow with approval system
+- ✅ **Teacher Availability** - Dynamic scheduling and slot management
 - ✅ **TypeScript** - Full type safety across the application
-- ✅ **Modular Architecture** - Easy to add new features and services
+- ✅ **Modular Architecture** - Clean separation: Controllers → Services → Database
 - ✅ **Rate Limiting** - API protection against abuse
 - ✅ **Security** - Helmet, CORS, and input validation
 - ✅ **Error Handling** - Centralized error management
 - ✅ **Request Logging** - Morgan for development and production
 - ✅ **Compression** - Gzip compression for responses
 - ✅ **Health Checks** - Monitor system and database status
+- ✅ **Background Jobs** - Email scheduling and notifications
 
 ---
 
@@ -42,11 +47,14 @@ A modern, production-ready RESTful API built with Node.js, Express, TypeScript, 
 
 | Technology | Purpose |
 |------------|---------|
-| **Node.js** | JavaScript runtime |
+| **Node.js 18+** | JavaScript runtime |
 | **Express** | Web framework |
 | **TypeScript** | Type safety |
-| **PostgreSQL** | Relational database |
+| **PostgreSQL** | Relational database (via Supabase) |
 | **Clerk** | Authentication & user management |
+| **Stripe** | Payment processing |
+| **Google Calendar API** | Meeting scheduling |
+| **Nodemailer** | Email notifications |
 | **Helmet** | Security headers |
 | **Morgan** | HTTP request logging |
 | **CORS** | Cross-origin resource sharing |

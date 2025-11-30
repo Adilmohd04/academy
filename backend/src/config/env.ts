@@ -3,13 +3,14 @@
  * 
  * Centralized configuration management.
  * All environment variables are validated and exported here.
+ * Now loads from root .env for single source of truth.
  */
 
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load .env from root directory (one level up from backend)
-dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+// Load .env from backend directory
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 interface Config {
   port: number;

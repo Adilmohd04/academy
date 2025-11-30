@@ -1,10 +1,14 @@
 import type { Metadata } from "next";
-import { ClerkProvider } from '@clerk/nextjs';
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+import { Providers } from "./providers";
+import { Toaster } from "react-hot-toast";
+
+const font = Plus_Jakarta_Sans({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Education Platform - Learn, Teach, Grow",
-  description: "Scalable education management platform for students, teachers, and administrators",
+  title: "Academy",
+  description: "Learning Management System",
 };
 
 export default function RootLayout({
@@ -13,12 +17,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <ClerkProvider>
-      <html lang="en">
-        <body className="antialiased">
+    <html lang="en">
+      <body className={font.className}>
+        <Providers>
+          <div className="aurora-bg" />
           {children}
-        </body>
-      </html>
-    </ClerkProvider>
+          <Toaster position="bottom-right" toastOptions={{
+            style: {
+              background: '#1e293b',
+              color: '#fff',
+              border: '1px solid rgba(255,255,255,0.1)',
+            },
+          }} />
+        </Providers>
+      </body>
+    </html>
   );
 }

@@ -4,12 +4,15 @@
  * System health check and monitoring endpoints.
  * 
  * Routes:
- * - GET /api/health        - Health check
- * - GET /api/health/info   - API information
+ * - GET /api/health             - Health check
+ * - GET /api/health/info        - API information
+ * - GET /api/health/metrics     - Performance metrics (10K+ users)
  */
 
 import { Router, Request, Response } from 'express';
 import { HealthService } from '../services/healthService';
+import { performanceMonitor } from '../utils/performanceMonitor';
+import { cache } from '../utils/cache';
 
 const router = Router();
 
@@ -45,6 +48,28 @@ router.get('/info', (req: Request, res: Response) => {
   res.json({
     success: true,
     ...info,
+  });
+});
+
+/**
+ * GET /api/health/metrics
+ * Performance metrics for monitoring 10K+ concurrent users
+ */
+router.get('/metrics', (req: Request, res: Response) => {
+  const perfMetrics = performanceMonitor.getHealthStatus();
+  const cacheStats = cache.getStats();
+
+  res.json({
+    success: true,
+    timestamp: new Date().toISOString(),
+    performance: perfMetrics,
+    cache: cacheStats,
+    uptime: process.uptime(),
+    memory: {
+      used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+      unit: 'MB',
+    },
   });
 });
 

@@ -1,4 +1,4 @@
-# 🎓 Education Management Platform - Complete Project Vision
+s# 🎓 Education Management Platform - Complete Project Vision
 
 ## 🎯 Project Goal
 Build a **scalable distributed education management platform** (like Firdaus Academy or Artium Academy) that supports **10,000+ concurrent users** with web and mobile access, featuring course management, live class scheduling, payments, and real-time chat.

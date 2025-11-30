@@ -1,126 +1,151 @@
 /**
  * User Service
  * 
- * Business logic for user management.
+ * Business logic for user management using Supabase.
  * Handles CRUD operations and user-related functionality.
  */
 
-import { query } from '../config/database';
+import { supabase } from '../config/database';
 import { User, UserRole } from '../types';
 
 export class UserService {
   /**
-   * Create or update user in database after Clerk authentication
+   * Create or update user in database
    */
   static async upsertUser(clerkId: string, userData: {
     email: string;
     firstName?: string;
     lastName?: string;
     role?: UserRole;
-  }): Promise<User> {
+  }): Promise<any> {
     const { email, firstName, lastName, role = UserRole.STUDENT } = userData;
+    const fullName = [firstName, lastName].filter(Boolean).join(' ') || null;
 
-    const result = await query(
-      `INSERT INTO users (clerk_id, email, first_name, last_name, role)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (clerk_id)
-       DO UPDATE SET
-         email = EXCLUDED.email,
-         first_name = EXCLUDED.first_name,
-         last_name = EXCLUDED.last_name,
-         updated_at = CURRENT_TIMESTAMP
-       RETURNING *`,
-      [clerkId, email, firstName, lastName, role]
-    );
+    const { data, error } = await supabase
+      .from('profiles')
+      .upsert({
+        clerk_user_id: clerkId,
+        email,
+        full_name: fullName,
+        role,
+      }, {
+        onConflict: 'clerk_user_id',
+      })
+      .select()
+      .single();
 
-    return result.rows[0];
+    if (error) throw error;
+    return data;
   }
 
   /**
    * Get user by Clerk ID
    */
-  static async getUserByClerkId(clerkId: string): Promise<User | null> {
-    const result = await query(
-      'SELECT * FROM users WHERE clerk_id = $1',
-      [clerkId]
-    );
+  static async getUserByClerkId(clerkId: string): Promise<any | null> {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('clerk_user_id', clerkId)
+      .single();
 
-    return result.rows[0] || null;
-  }
-
-  /**
-   * Get user by database ID
-   */
-  static async getUserById(id: string): Promise<User | null> {
-    const result = await query(
-      'SELECT * FROM users WHERE id = $1',
-      [id]
-    );
-
-    return result.rows[0] || null;
-  }
-
-  /**
-   * Update user role (Admin only)
-   */
-  static async updateUserRole(userId: string, role: UserRole): Promise<User> {
-    const result = await query(
-      `UPDATE users 
-       SET role = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2
-       RETURNING *`,
-      [role, userId]
-    );
-
-    if (result.rows.length === 0) {
-      throw new Error('User not found');
+    if (error) {
+      if (error.code === 'PGRST116') return null; // Not found
+      throw error;
     }
 
-    return result.rows[0];
+    return data;
   }
 
   /**
-   * Get all users (Admin only)
+   * Get user by ID
+   */
+  static async getUserById(id: string): Promise<any | null> {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return null; // Not found
+      throw error;
+    }
+
+    return data;
+  }
+
+  /**
+   * Get user by email
+   */
+  static async getUserByEmail(email: string): Promise<any | null> {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('email', email)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return null; // Not found
+      throw error;
+    }
+
+    return data;
+  }
+
+  /**
+   * Get all users with optional filtering
    */
   static async getAllUsers(filters?: {
     role?: UserRole;
     limit?: number;
     offset?: number;
-  }): Promise<{ users: User[]; total: number }> {
+  }): Promise<{ users: any[]; total: number }> {
     const { role, limit = 50, offset = 0 } = filters || {};
 
-    let queryText = 'SELECT * FROM users';
-    const params: any[] = [];
+    let query = supabase
+      .from('profiles')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
 
     if (role) {
-      queryText += ' WHERE role = $1';
-      params.push(role);
+      query = query.eq('role', role);
     }
 
-    queryText += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
-    params.push(limit, offset);
+    const { data, error, count } = await query;
 
-    const result = await query(queryText, params);
-
-    // Get total count
-    const countResult = await query(
-      role ? 'SELECT COUNT(*) FROM users WHERE role = $1' : 'SELECT COUNT(*) FROM users',
-      role ? [role] : []
-    );
+    if (error) throw error;
 
     return {
-      users: result.rows,
-      total: parseInt(countResult.rows[0].count),
+      users: data || [],
+      total: count || 0,
     };
   }
 
   /**
-   * Delete user (soft delete)
+   * Update user role
+   */
+  static async updateUserRole(userId: string, role: UserRole): Promise<any> {
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ role })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+
+  /**
+   * Delete user
    */
   static async deleteUser(userId: string): Promise<void> {
-    await query(
-      'UPDATE users SET deleted_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [userId]
-    );
+    const { error } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', userId);
+
+    if (error) throw error;
   }
 }

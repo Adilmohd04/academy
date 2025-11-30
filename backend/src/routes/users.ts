@@ -157,6 +157,27 @@ router.put(
 );
 
 /**
+ * GET /api/users/teachers
+ * Get all teachers for admin to assign to meetings
+ */
+router.get('/teachers', requireAuth, async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await UserService.getAllUsers({ role: UserRole.TEACHER });
+
+    res.json({
+      success: true,
+      data: result.users,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch teachers',
+      error: error.message,
+    });
+  }
+});
+
+/**
  * DELETE /api/users/:id
  * Delete user (Admin only)
  */
