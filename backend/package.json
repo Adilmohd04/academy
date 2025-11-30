@@ -8,12 +8,11 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "vercel-build": "tsc",
-    "postinstall": "tsc",
     "test": "jest",
     "check-env": "node src/scripts/check-env.js"
   },
   "engines": {
-    "node": "18.x"
+    "node": "24.x"
   },
   "keywords": [
     "education",
