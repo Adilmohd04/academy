@@ -37,6 +37,7 @@
     "lucide-react": "^0.552.0",
     "morgan": "^1.10.0",
     "nodemailer": "^7.0.10",
+    "pdfkit": "^0.15.0",
     "pg": "^8.11.3",
     "pg-pool": "^3.6.1",
     "razorpay": "^2.9.6",
@@ -51,6 +52,7 @@
     "@types/morgan": "^1.9.9",
     "@types/node": "^20.10.5",
     "@types/pg": "^8.15.6",
+    "@types/pdfkit": "^0.13.0",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
