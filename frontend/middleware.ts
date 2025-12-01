@@ -65,11 +65,12 @@ export default clerkMiddleware(async (auth, request) => {
     return
   }
 
-  // Handle /dashboard redirect
+  // Handle /dashboard redirect - send users to their role page
   if (pathname === '/dashboard') {
     const role = await getUserRole(userId)
     
     if (role) {
+      // Admin goes to /admin, teacher to /teacher, student to /student
       return NextResponse.redirect(new URL(`/${role}`, request.url))
     }
     
@@ -87,18 +88,23 @@ export default clerkMiddleware(async (auth, request) => {
       return NextResponse.next()
     }
 
-    // Check if user is accessing the correct role page
     const requestedRole = pathname.split('/')[1] // Extract 'teacher', 'student', or 'admin'
     
-    // Allow admin to access everything
+    // Admin can access all pages (admin, teacher, student)
     if (role === 'admin') {
       return NextResponse.next()
     }
     
-    // Redirect if user is accessing wrong role page
-    if (requestedRole !== role) {
-      console.log(`Redirecting ${role} from /${requestedRole} to /${role}`)
-      return NextResponse.redirect(new URL(`/${role}`, request.url))
+    // Teachers can only access /teacher
+    if (role === 'teacher' && requestedRole !== 'teacher') {
+      console.log(`Redirecting teacher from /${requestedRole} to /teacher`)
+      return NextResponse.redirect(new URL('/teacher', request.url))
+    }
+    
+    // Students can only access /student
+    if (role === 'student' && requestedRole !== 'student') {
+      console.log(`Redirecting student from /${requestedRole} to /student`)
+      return NextResponse.redirect(new URL('/student', request.url))
     }
   }
 
