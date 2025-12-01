@@ -98,13 +98,17 @@ export default clerkMiddleware(async (auth, request) => {
     // Teachers can only access /teacher
     if (role === 'teacher' && requestedRole !== 'teacher') {
       console.log(`Redirecting teacher from /${requestedRole} to /teacher`)
-      return NextResponse.redirect(new URL('/teacher', request.url))
+      const redirectUrl = new URL('/teacher', request.url)
+      redirectUrl.searchParams.set('redirected', 'true') // Prevent loop
+      return NextResponse.redirect(redirectUrl)
     }
     
     // Students can only access /student
     if (role === 'student' && requestedRole !== 'student') {
       console.log(`Redirecting student from /${requestedRole} to /student`)
-      return NextResponse.redirect(new URL('/student', request.url))
+      const redirectUrl = new URL('/student', request.url)
+      redirectUrl.searchParams.set('redirected', 'true') // Prevent loop
+      return NextResponse.redirect(redirectUrl)
     }
   }
 
