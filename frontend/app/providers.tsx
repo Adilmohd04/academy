@@ -20,8 +20,9 @@ function PrefetchRoutes({ children }: { children: React.ReactNode }) {
 
   // Prefetch common routes for faster navigation
   useEffect(() => {
-    router.prefetch('/student/dashboard');
-    router.prefetch('/teacher/dashboard');
+    router.prefetch('/student');
+    router.prefetch('/teacher');
+    router.prefetch('/admin');
     router.prefetch('/sign-in');
     router.prefetch('/sign-up');
   }, [router]);
