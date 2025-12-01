@@ -7,6 +7,7 @@
 
 import { supabase } from '../config/database';
 import { User, UserRole } from '../types';
+import { clerkClient } from '@clerk/clerk-sdk-node';
 
 export class UserService {
   /**
@@ -126,6 +127,7 @@ export class UserService {
    * Update user role
    */
   static async updateUserRole(userId: string, role: UserRole): Promise<any> {
+    // Update role in Supabase database
     const { data, error } = await supabase
       .from('profiles')
       .update({ role })
@@ -134,6 +136,22 @@ export class UserService {
       .single();
 
     if (error) throw error;
+
+    // Also update Clerk metadata to keep it in sync
+    if (data && data.clerk_user_id) {
+      try {
+        await clerkClient.users.updateUserMetadata(data.clerk_user_id, {
+          publicMetadata: {
+            role: role,
+          },
+        });
+        console.log(`✅ Updated Clerk metadata for user ${data.clerk_user_id}: ${role}`);
+      } catch (clerkError) {
+        console.error('⚠️ Failed to update Clerk metadata:', clerkError);
+        // Don't throw - database update succeeded, Clerk sync can be done later
+      }
+    }
+
     return data;
   }
 
