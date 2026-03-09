@@ -1,0 +1,10 @@
+This file contains the code updates for Schedule and Grades views.
+
+I need to add after the "About Course View" section in the main content area:
+
+1. Schedule Table View (when showSchedule is true)
+2. Comprehensive Grades View (when leftSidebarTab === 'grades')
+3. Quiz review after submission
+4. Certificate eligibility view
+
+Let me implement these systematically.
