@@ -134,6 +134,10 @@ export default function TeacherAvailabilityPage() {
       }
       
       const slots = Array.isArray(slotsResponse.data) ? slotsResponse.data : [];
+      console.log('📋 Loaded time slots:', slots.length);
+      if (slots.length === 0) {
+        toast.error('No time slots available. Ask your admin to create time slots.');
+      }
       setTimeSlots(slots);
       
       // Load existing weekly availability
