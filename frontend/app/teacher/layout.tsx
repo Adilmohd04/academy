@@ -22,7 +22,6 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
     { label: 'Announcements', href: '/teacher/announcements', icon: Bell },
     { label: 'My Classes', href: '/teacher/classes', icon: GraduationCap },
     { label: 'My Courses', href: '/teacher/courses', icon: BookOpen },
-    { label: 'Students', href: '/teacher/students', icon: Users },
     { label: 'Resources', href: '/teacher/resources', icon: FileText },
     { label: 'Availability', href: '/teacher/availability', icon: Calendar },
     { label: 'Analytics', href: '/teacher/analytics', icon: TrendingUp },
