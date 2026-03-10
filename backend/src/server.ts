@@ -133,18 +133,21 @@ const startWorker = async () => {
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-  // ── Memory guard ──────────────────────────────────────────────
-  // If a worker's heap exceeds the threshold it stops accepting new
-  // connections and exits.  The cluster primary will immediately fork
-  // a fresh worker so there is zero downtime.
-  const HEAP_LIMIT_MB = parseInt(process.env.WORKER_HEAP_LIMIT_MB || '2048', 10);
-  setInterval(() => {
-    const heapMB = process.memoryUsage().heapUsed / 1024 / 1024;
-    if (heapMB > HEAP_LIMIT_MB) {
-      console.warn(`⚠️  Worker ${workerId} heap ${Math.round(heapMB)} MB > ${HEAP_LIMIT_MB} MB limit — restarting`);
-      gracefulShutdown('HEAP_LIMIT');
-    }
-  }, 15_000).unref();
+  // ── Memory guard (production cluster only) ─────────────────────
+  // In production the cluster primary immediately forks a replacement
+  // worker, so restarting on high heap is safe.  In development there
+  // is no cluster primary — nodemon handles restarts — so the guard
+  // would just kill the only server process in a crash loop.
+  if (shouldUseCluster && cluster.isWorker) {
+    const HEAP_LIMIT_MB = parseInt(process.env.WORKER_HEAP_LIMIT_MB || '4096', 10);
+    setInterval(() => {
+      const heapMB = process.memoryUsage().heapUsed / 1024 / 1024;
+      if (heapMB > HEAP_LIMIT_MB) {
+        console.warn(`⚠️  Worker ${workerId} heap ${Math.round(heapMB)} MB > ${HEAP_LIMIT_MB} MB limit — restarting`);
+        gracefulShutdown('HEAP_LIMIT');
+      }
+    }, 15_000).unref();
+  }
 };
 
 if (shouldUseCluster && cluster.isPrimary) {
