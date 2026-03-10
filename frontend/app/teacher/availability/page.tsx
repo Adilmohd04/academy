@@ -548,7 +548,12 @@ export default function TeacherAvailabilityPage() {
                 {(() => {
                   const daysWithSlots = weeklyAvailability.filter(day => {
                     const dayDate = getDateForDay(selectedWeek, day.dayOfWeek);
-                    const slots = slotsToConfig.filter(s => s.date === formatDate(dayDate));
+                    const slots = slotsToConfig
+                      .filter(s => s.date === formatDate(dayDate))
+                      .filter(s => {
+                        const ts = timeSlots.find(t => t.id === s.timeSlotId);
+                        return !ts || !isSlotPastForDate(ts.end_time, dayDate);
+                      });
                     return slots.length > 0;
                   });
 
@@ -566,6 +571,10 @@ export default function TeacherAvailabilityPage() {
                     const dayDate = getDateForDay(selectedWeek, day.dayOfWeek);
                     const slotsForDay = slotsToConfig
                       .filter(slot => slot.date === formatDate(dayDate))
+                      .filter(slot => {
+                        const ts = timeSlots.find(t => t.id === slot.timeSlotId);
+                        return !ts || !isSlotPastForDate(ts.end_time, dayDate);
+                      })
                       .sort((a, b) => {
                         const slotA = timeSlots.find(ts => ts.id === a.timeSlotId);
                         const slotB = timeSlots.find(ts => ts.id === b.timeSlotId);
@@ -713,7 +722,9 @@ export default function TeacherAvailabilityPage() {
                                           className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                                         >
                                           <option value="">Select time...</option>
-                                          {timeSlots.map(ts => (
+                                          {timeSlots
+                                            .filter(ts => !isSlotPastForDate(ts.end_time, dayDate))
+                                            .map(ts => (
                                             <option key={ts.id} value={ts.id}>{ts.slot_name}</option>
                                           ))}
                                         </select>
@@ -953,4 +964,22 @@ function isFutureDate(date: Date): boolean {
   const checkDate = new Date(date);
   checkDate.setHours(0, 0, 0, 0);
   return checkDate >= today;
+}
+
+/**
+ * Check if a time slot has already passed for a given date.
+ * Returns true only when the date is today AND the slot's end_time is before now.
+ */
+function isSlotPastForDate(endTime: string, date: Date): boolean {
+  const now = new Date();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const checkDate = new Date(date);
+  checkDate.setHours(0, 0, 0, 0);
+  if (checkDate.getTime() !== today.getTime()) return false;
+  // endTime is "HH:MM:SS"
+  const [h, m] = endTime.split(':').map(Number);
+  const slotEnd = new Date();
+  slotEnd.setHours(h, m, 0, 0);
+  return now >= slotEnd;
 }
