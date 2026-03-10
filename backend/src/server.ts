@@ -24,6 +24,7 @@ import autoApprovalCronJob from './jobs/autoApprovalCron';
 import { startMeetingStatusJob } from './jobs/updateMeetingStatus';
 import { autoPublishContent } from './jobs/autoPublishContent';
 import { isCalendarConfigured } from './modules/shared/services/calendarService';
+import { ensureDefaultTimeSlots } from './modules/shared/services/timeSlotService';
 import cluster from 'cluster';
 import os from 'os';
 import type { Server } from 'http';
@@ -48,6 +49,11 @@ const startWorker = async () => {
     // Start server
     server = await app.listen();
     console.log('✅ Listen method called');
+
+    // Seed default time slots if the table is empty
+    if (shouldRunBackgroundJobs) {
+      await ensureDefaultTimeSlots();
+    }
 
     if (shouldRunBackgroundJobs) {
       // Start meeting status update job
@@ -131,7 +137,7 @@ const startWorker = async () => {
   // If a worker's heap exceeds the threshold it stops accepting new
   // connections and exits.  The cluster primary will immediately fork
   // a fresh worker so there is zero downtime.
-  const HEAP_LIMIT_MB = parseInt(process.env.WORKER_HEAP_LIMIT_MB || '512', 10);
+  const HEAP_LIMIT_MB = parseInt(process.env.WORKER_HEAP_LIMIT_MB || '2048', 10);
   setInterval(() => {
     const heapMB = process.memoryUsage().heapUsed / 1024 / 1024;
     if (heapMB > HEAP_LIMIT_MB) {

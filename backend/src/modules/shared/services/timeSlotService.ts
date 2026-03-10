@@ -73,6 +73,50 @@ export interface CreateBlockedTimeSlotInput {
 // TIME SLOTS
 // ============================================
 
+const DEFAULT_TIME_SLOTS = [
+  { slot_name: '09:00 AM - 10:00 AM IST', start_time: '09:00:00', end_time: '10:00:00', duration_minutes: 60, display_order: 1 },
+  { slot_name: '10:00 AM - 11:00 AM IST', start_time: '10:00:00', end_time: '11:00:00', duration_minutes: 60, display_order: 2 },
+  { slot_name: '11:00 AM - 12:00 PM IST', start_time: '11:00:00', end_time: '12:00:00', duration_minutes: 60, display_order: 3 },
+  { slot_name: '12:00 PM - 01:00 PM IST', start_time: '12:00:00', end_time: '13:00:00', duration_minutes: 60, display_order: 4 },
+  { slot_name: '01:00 PM - 02:00 PM IST', start_time: '13:00:00', end_time: '14:00:00', duration_minutes: 60, display_order: 5 },
+  { slot_name: '02:00 PM - 03:00 PM IST', start_time: '14:00:00', end_time: '15:00:00', duration_minutes: 60, display_order: 6 },
+  { slot_name: '03:00 PM - 04:00 PM IST', start_time: '15:00:00', end_time: '16:00:00', duration_minutes: 60, display_order: 7 },
+  { slot_name: '04:00 PM - 05:00 PM IST', start_time: '16:00:00', end_time: '17:00:00', duration_minutes: 60, display_order: 8 },
+  { slot_name: '05:00 PM - 06:00 PM IST', start_time: '17:00:00', end_time: '18:00:00', duration_minutes: 60, display_order: 9 },
+];
+
+/**
+ * Seed default time slots if the table is empty.
+ * Called once at server startup.
+ */
+export const ensureDefaultTimeSlots = async (): Promise<void> => {
+  try {
+    const { count, error: countError } = await supabase
+      .from('time_slots')
+      .select('*', { count: 'exact', head: true });
+
+    if (countError) {
+      console.error('⚠️ Could not check time_slots table:', countError.message);
+      return;
+    }
+
+    if (count === 0) {
+      console.log('📋 time_slots table is empty — seeding defaults...');
+      const { error } = await supabase
+        .from('time_slots')
+        .insert(DEFAULT_TIME_SLOTS.map(s => ({ ...s, is_active: true })));
+
+      if (error) {
+        console.error('⚠️ Failed to seed default time slots:', error.message);
+      } else {
+        console.log('✅ Seeded', DEFAULT_TIME_SLOTS.length, 'default time slots');
+      }
+    }
+  } catch (err) {
+    console.error('⚠️ ensureDefaultTimeSlots error:', err);
+  }
+};
+
 /**
  * Get all time slots
  */
