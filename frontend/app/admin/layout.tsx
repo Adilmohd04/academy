@@ -1,10 +1,10 @@
 'use client';
 
-import { useAuth, useUser } from '@clerk/nextjs';
+import { useUser } from '@clerk/nextjs';
 import { usePathname } from 'next/navigation';
 import { 
   Users, Calendar, Settings, CheckCircle, 
-  LayoutDashboard, School, Bell, FileText, BookOpen, ClipboardCheck
+  LayoutDashboard, School, Bell, FileText, BookOpen
 } from 'lucide-react';
 import { IslamicSidebar } from '@/components/ui/IslamicSidebar';
 

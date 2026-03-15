@@ -67,7 +67,6 @@ import languageRoutes from './routes/language';
 import userPreferenceRoutes from './routes/user';
 import studentExamRoutes from './routes/studentExam';
 import notificationCenterRoutes from './routes/notificationCenter';
-import teacherStudentsRoutes from './routes/teacherStudents';
 import teacherStudentManagementRoutes from './routes/teacherStudentManagement';
 import studentTrackingRoutes from './routes/studentTracking';
 import studentCourseRoutes from './modules/student/routes/studentCourseRoutes';
@@ -212,7 +211,6 @@ class App {
     this.app.use('/api/user', userPreferenceRoutes);
     this.app.use('/api/student', studentExamRoutes);
     this.app.use('/api/notification-center', notificationCenterRoutes);
-    // this.app.use('/api/teacher', teacherStudentsRoutes); // ❌ DISABLED: Old route with pg-pool, conflicts with comprehensive tracking below
     this.app.use('/api', teacherStudentManagementRoutes); // ✅ Comprehensive student tracking with grades
     this.app.use('/api', studentTrackingRoutes); // ✅ Detailed per-student tracking (quiz attempts, assignment submissions)
     this.app.use('/api', enrollmentRoutes);

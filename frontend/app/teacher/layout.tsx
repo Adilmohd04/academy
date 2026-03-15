@@ -1,17 +1,15 @@
 'use client';
 
-import { useAuth, useUser } from '@clerk/nextjs';
-import { useState } from 'react';
+import { useUser } from '@clerk/nextjs';
 import { usePathname } from 'next/navigation';
 import { 
-  Activity, GraduationCap, Users, Video, BookOpen, 
-  CheckCircle, Calendar, TrendingUp, FileText, Bell, Award
+  Activity, GraduationCap, BookOpen, 
+  Calendar, TrendingUp, FileText, Bell
 } from 'lucide-react';
 import { IslamicSidebar } from '@/components/ui/IslamicSidebar';
 
 export default function TeacherLayout({ children }: { children: React.ReactNode }) {
   const { user } = useUser();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const pathname = usePathname();
   
   // Check if we're on a specific course page (not the courses list)
