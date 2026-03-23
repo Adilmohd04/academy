@@ -1,5 +1,5 @@
 import { supabase } from '../../../config/database';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 interface Assignment {
   id: string;
@@ -128,7 +128,7 @@ export const submitAssignment = async (
   } else if (file) {
     // Upload file to Supabase Storage
     const fileExt = file.originalname.split('.').pop() || 'bin';
-    const fileKey = `${lessonId}/${studentId}/${uuidv4()}.${fileExt}`;
+    const fileKey = `${lessonId}/${studentId}/${randomUUID()}.${fileExt}`;
 
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('assignments')
