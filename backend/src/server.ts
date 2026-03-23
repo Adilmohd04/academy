@@ -28,8 +28,29 @@ import { ensureDefaultTimeSlots } from './modules/shared/services/timeSlotServic
 import cluster from 'cluster';
 import os from 'os';
 import type { Server } from 'http';
+import type { Application, Request, Response } from 'express';
 
-const shouldUseCluster = process.env.NODE_ENV === 'production' && process.env.ENABLE_CLUSTER !== 'false';
+const isVercelServerless = Boolean(
+  process.env.VERCEL || process.env.AWS_REGION || process.env.LAMBDA_TASK_ROOT
+);
+
+let cachedServerlessApp: Application | null = null;
+
+const getServerlessApp = () => {
+  if (!cachedServerlessApp) {
+    cachedServerlessApp = new App().app;
+  }
+  return cachedServerlessApp;
+};
+
+export default function handler(req: Request, res: Response) {
+  return getServerlessApp()(req, res);
+}
+
+const shouldUseCluster =
+  !isVercelServerless &&
+  process.env.NODE_ENV === 'production' &&
+  process.env.ENABLE_CLUSTER !== 'false';
 
 const startWorker = async () => {
   let server: Server | null = null;
@@ -150,20 +171,22 @@ const startWorker = async () => {
   }
 };
 
-if (shouldUseCluster && cluster.isPrimary) {
-  const workerCount = parseInt(process.env.WEB_CONCURRENCY || '', 10) || Math.max(2, Math.min(os.cpus().length, 8));
-  console.log(`🧩 Cluster mode enabled: starting ${workerCount} workers`);
+if (!isVercelServerless) {
+  if (shouldUseCluster && cluster.isPrimary) {
+    const workerCount = parseInt(process.env.WEB_CONCURRENCY || '', 10) || Math.max(2, Math.min(os.cpus().length, 8));
+    console.log(`🧩 Cluster mode enabled: starting ${workerCount} workers`);
 
-  for (let i = 0; i < workerCount; i += 1) {
-    cluster.fork();
+    for (let i = 0; i < workerCount; i += 1) {
+      cluster.fork();
+    }
+
+    cluster.on('exit', (worker, code, signal) => {
+      console.error(`❌ Worker ${worker.process.pid} exited (code=${code}, signal=${signal}). Restarting...`);
+      cluster.fork();
+    });
+  } else {
+    startWorker();
   }
-
-  cluster.on('exit', (worker, code, signal) => {
-    console.error(`❌ Worker ${worker.process.pid} exited (code=${code}, signal=${signal}). Restarting...`);
-    cluster.fork();
-  });
-} else {
-  startWorker();
 }
 
 // Handle unhandled promise rejections — log but do NOT crash in production
