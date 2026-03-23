@@ -1,0 +1,382 @@
+{
+  "meta": {
+    "generatedAt": "2026-03-22T13:51:16.559Z",
+    "baseUrl": "http://localhost:5000"
+  },
+  "summary": {
+    "scenarios": 7,
+    "passed": 3,
+    "failed": 4
+  },
+  "scenarios": [
+    {
+      "name": "functional_student_teacher_admin_flow",
+      "ok": false,
+      "details": {
+        "courseId": null,
+        "statuses": {
+          "fetchCourses": 503,
+          "createCourse": 503,
+          "submitStatus": 0,
+          "approveStatus": 0,
+          "studentReceives": 503
+        },
+        "retries": {
+          "fetchCourses": 3,
+          "createCourse": 3,
+          "studentReceives": 3
+        },
+        "fallbackUsed": true
+      }
+    },
+    {
+      "name": "admin_delay_should_not_freeze",
+      "ok": true,
+      "details": {
+        "decision": {
+          "decision": "rejected"
+        },
+        "elapsedMs": 0,
+        "thresholdMs": 16000
+      }
+    },
+    {
+      "name": "teacher_failure_retry_or_fallback",
+      "ok": true,
+      "details": {
+        "attempts": 3,
+        "usedFallback": true,
+        "fallbackStatus": 503,
+        "lastError": "Simulated teacher generation failure"
+      }
+    },
+    {
+      "name": "deadlock_detection_and_escape",
+      "ok": true,
+      "details": {
+        "deadlocked": true,
+        "resolved": true
+      }
+    },
+    {
+      "name": "load_10_concurrent_users",
+      "ok": false,
+      "details": {
+        "concurrency": 10,
+        "fulfilled": 0,
+        "rejected": 10,
+        "durationMs": 967,
+        "successRate": 0
+      }
+    },
+    {
+      "name": "load_50_concurrent_users",
+      "ok": false,
+      "details": {
+        "concurrency": 50,
+        "fulfilled": 0,
+        "rejected": 50,
+        "durationMs": 1599,
+        "successRate": 0
+      }
+    },
+    {
+      "name": "load_100_concurrent_users",
+      "ok": false,
+      "details": {
+        "concurrency": 100,
+        "fulfilled": 0,
+        "rejected": 100,
+        "durationMs": 1801,
+        "successRate": 0
+      }
+    }
+  ],
+  "performanceIssues": [
+    {
+      "scenario": "load_10_concurrent_users",
+      "details": {
+        "concurrency": 10,
+        "fulfilled": 0,
+        "rejected": 10,
+        "durationMs": 967,
+        "successRate": 0
+      }
+    },
+    {
+      "scenario": "load_50_concurrent_users",
+      "details": {
+        "concurrency": 50,
+        "fulfilled": 0,
+        "rejected": 50,
+        "durationMs": 1599,
+        "successRate": 0
+      }
+    },
+    {
+      "scenario": "load_100_concurrent_users",
+      "details": {
+        "concurrency": 100,
+        "fulfilled": 0,
+        "rejected": 100,
+        "durationMs": 1801,
+        "successRate": 0
+      }
+    }
+  ],
+  "deadlocks": [
+    {
+      "deadlocked": true,
+      "resolved": true
+    }
+  ],
+  "logs": [
+    {
+      "ts": "2026-03-22T13:51:08.158Z",
+      "actor": "Orchestrator",
+      "action": "start",
+      "status": "running",
+      "details": {
+        "baseUrl": "http://localhost:5000",
+        "e2eBypass": true,
+        "timeoutMs": 8000
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:08.234Z",
+      "actor": "Orchestrator",
+      "action": "student_request_lesson",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 1,
+        "message": "fetch failed"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:08.236Z",
+      "actor": "Orchestrator",
+      "action": "student_request_lesson",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 2,
+        "message": "fetch failed"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:08.239Z",
+      "actor": "Orchestrator",
+      "action": "student_request_lesson",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 3,
+        "message": "fetch failed"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:08.239Z",
+      "actor": "TeacherSimulator",
+      "action": "student_request_lesson",
+      "status": "flagged",
+      "details": {
+        "issues": [
+          "unexpected_status_503"
+        ]
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:09.943Z",
+      "actor": "Orchestrator",
+      "action": "teacher_generate_content",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 1,
+        "message": "fetch failed"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:09.947Z",
+      "actor": "Orchestrator",
+      "action": "teacher_generate_content",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 2,
+        "message": "fetch failed"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:10.418Z",
+      "actor": "Orchestrator",
+      "action": "teacher_generate_content",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 3,
+        "message": "fetch failed"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:10.419Z",
+      "actor": "TeacherSimulator",
+      "action": "teacher_generate_content",
+      "status": "flagged",
+      "details": {
+        "issues": [
+          "unexpected_status_503"
+        ]
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:12.174Z",
+      "actor": "Orchestrator",
+      "action": "student_receive_course",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 1,
+        "message": "fetch failed"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:12.181Z",
+      "actor": "Orchestrator",
+      "action": "student_receive_course",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 2,
+        "message": "fetch failed"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:12.189Z",
+      "actor": "Orchestrator",
+      "action": "student_receive_course",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 3,
+        "message": "fetch failed"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:12.189Z",
+      "actor": "TeacherSimulator",
+      "action": "student_receive_course",
+      "status": "flagged",
+      "details": {
+        "issues": [
+          "unexpected_status_503"
+        ]
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:12.189Z",
+      "actor": "AdminSimulator",
+      "action": "delay_resilience_review",
+      "status": "rejected",
+      "details": {
+        "reason": "random_rejection_for_resilience"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:12.190Z",
+      "actor": "Orchestrator",
+      "action": "forced_teacher_failure",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 1,
+        "message": "Simulated teacher generation failure"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:12.190Z",
+      "actor": "Orchestrator",
+      "action": "forced_teacher_failure",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 2,
+        "message": "Simulated teacher generation failure"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:12.190Z",
+      "actor": "Orchestrator",
+      "action": "forced_teacher_failure",
+      "status": "retry_failed",
+      "details": {
+        "attempt": 3,
+        "message": "Simulated teacher generation failure"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:12.190Z",
+      "actor": "Orchestrator",
+      "action": "deadlock_detected",
+      "status": "detected",
+      "details": {
+        "graph": [
+          [
+            "StudentAgent",
+            "TeacherAgent"
+          ],
+          [
+            "TeacherAgent",
+            "AdminAgent"
+          ],
+          [
+            "AdminAgent",
+            "StudentAgent"
+          ]
+        ]
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:12.190Z",
+      "actor": "Orchestrator",
+      "action": "deadlock_detected",
+      "status": "resolved",
+      "details": {
+        "strategy": "force_clear_wait_graph"
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:13.158Z",
+      "actor": "StudentSimulator",
+      "action": "spam",
+      "status": "completed",
+      "details": {
+        "concurrency": 10,
+        "fulfilled": 0,
+        "rejected": 10,
+        "durationMs": 967
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:14.757Z",
+      "actor": "StudentSimulator",
+      "action": "spam",
+      "status": "completed",
+      "details": {
+        "concurrency": 50,
+        "fulfilled": 0,
+        "rejected": 50,
+        "durationMs": 1599
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:16.558Z",
+      "actor": "StudentSimulator",
+      "action": "spam",
+      "status": "completed",
+      "details": {
+        "concurrency": 100,
+        "fulfilled": 0,
+        "rejected": 100,
+        "durationMs": 1801
+      }
+    },
+    {
+      "ts": "2026-03-22T13:51:16.558Z",
+      "actor": "Orchestrator",
+      "action": "complete",
+      "status": "done",
+      "details": {}
+    }
+  ]
+}

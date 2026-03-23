@@ -20,6 +20,8 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
+  // Allow Clerk to work across multiple domains
+    // Removed headers async function to avoid build warnings
 }
 
 module.exports = nextConfig

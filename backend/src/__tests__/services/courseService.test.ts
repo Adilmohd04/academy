@@ -34,6 +34,14 @@ import * as courseService from '../../modules/teacher/services/courseService';
 describe('Course Service', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockSupabase.from.mockReturnThis();
+    mockSupabase.select.mockReturnThis();
+    mockSupabase.insert.mockReturnThis();
+    mockSupabase.update.mockReturnThis();
+    mockSupabase.delete.mockReturnThis();
+    mockSupabase.eq.mockReturnThis();
+    mockSupabase.or.mockReturnThis();
+    mockSupabase.in.mockReturnThis();
   });
 
   describe('getAllCourses', () => {
