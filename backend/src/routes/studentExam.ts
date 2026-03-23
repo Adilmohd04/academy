@@ -24,6 +24,12 @@ const authRequired = [requireAuth];
 router.get('/exams/available', ...authRequired, studentExamController.getAvailableExams);
 
 /**
+ * GET /api/student/exams/upcoming
+ * Compat endpoint used by student exams page
+ */
+router.get('/exams/upcoming', ...authRequired, studentExamController.getUpcomingExams);
+
+/**
  * GET /api/student/exams/:examId
  * Get exam details (questions without answers)
  */

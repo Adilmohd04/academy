@@ -3,17 +3,15 @@
 import { useState, useEffect } from 'react';
 import { useAuth, useUser } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
-import { api } from '@/lib/api';
+import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 import toast from 'react-hot-toast';
 import { 
   Calendar, 
-  Clock, 
   User, 
   FileText, 
   Link as LinkIcon,
   Save,
   Loader2,
-  ChevronLeft,
   ExternalLink,
   CheckCircle
 } from 'lucide-react';
@@ -306,391 +304,312 @@ export default function TeacherMeetingsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="w-12 h-12 animate-spin text-blue-600" />
-          <p className="text-gray-600">Loading your meetings...</p>
-        </div>
+      <div className="min-h-full bg-slate-50/40">
+        <TeacherPageContainer>
+          <div className="flex h-56 items-center justify-center rounded-2xl border border-slate-200 bg-white">
+            <div className="flex flex-col items-center gap-3">
+              <Loader2 className="h-10 w-10 animate-spin text-emerald-600" />
+              <p className="text-sm text-slate-600">Loading your meetings...</p>
+            </div>
+          </div>
+        </TeacherPageContainer>
       </div>
     );
   }
 
   if (user && user.publicMetadata?.role !== 'teacher') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-red-50">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">🚫 Access Denied</h1>
-          <p className="text-gray-600">This page is for teachers only.</p>
-        </div>
+      <div className="min-h-full bg-slate-50/40">
+        <TeacherPageContainer>
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center">
+            <h1 className="text-xl font-bold text-rose-700">Access Denied</h1>
+            <p className="mt-2 text-sm text-rose-600">This page is for teachers only.</p>
+          </div>
+        </TeacherPageContainer>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <button
-            onClick={() => router.push('/teacher')}
-            className="mb-6 flex items-center gap-2 px-4 py-2 text-gray-700 hover:text-blue-600 transition-colors"
-          >
-            <ChevronLeft className="w-5 h-5" />
-            <span>Back to Dashboard</span>
-          </button>
-          
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-            My Assigned Meetings
-          </h1>
-          <p className="text-gray-600">
-            View your scheduled meetings and upload study materials for students
-          </p>
-        </div>
+  const getAttendanceBadge = (attendance: 'present' | 'absent' | null | undefined) => {
+    if (attendance === 'present') {
+      return <span className="rounded-lg bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">Present</span>;
+    }
+    if (attendance === 'absent') {
+      return <span className="rounded-lg bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-700">Absent</span>;
+    }
+    return <span className="rounded-lg bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">Pending</span>;
+  };
 
-        {/* Meetings List */}
-        {meetings.length === 0 ? (
-          <div className="bg-white rounded-lg shadow-md p-12 text-center">
-            <div className="text-6xl mb-4">📅</div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">No Meetings Yet</h2>
-            <p className="text-gray-600">
-              When admin assigns meetings to you, they will appear here
-            </p>
+  return (
+    <div className="min-h-full bg-slate-50/40">
+      <TeacherPageContainer className="space-y-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900">My Assigned Meetings</h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Manage scheduled meetings and share materials with students.
+              </p>
+            </div>
+            <button
+              onClick={() => router.push('/teacher')}
+              className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            >
+              Back to Dashboard
+            </button>
           </div>
+        </section>
+
+        {meetings.length === 0 ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-12 text-center shadow-sm">
+            <div className="mb-3 text-4xl">📅</div>
+            <h2 className="text-lg font-semibold text-slate-900">No Meetings Yet</h2>
+            <p className="mt-1 text-sm text-slate-600">Assigned meetings will appear here.</p>
+          </section>
         ) : (
           <div className="space-y-8">
-            {/* Upcoming Meetings */}
             {upcomingMeetings.length > 0 && (
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-4">Upcoming Meetings</h2>
-                <div className="space-y-4">
-                  {upcomingMeetings.map((meeting) => (
-                    <div key={meeting.id} className="bg-white rounded-xl shadow-md p-6 border-l-4 border-green-500">
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Meeting Details */}
-                        <div>
-                          <h3 className="text-lg font-semibold text-gray-900 mb-4">Meeting Details</h3>
-                          <div className="space-y-3">
-                            <div className="flex items-center gap-3">
-                              <User className="w-5 h-5 text-blue-600" />
-                              <div>
-                                <p className="font-medium text-gray-900">{meeting.student_name}</p>
-                                <p className="text-sm text-gray-600">{meeting.student_email}</p>
-                                {meeting.student_phone && (
-                                  <p className="text-sm text-gray-600">{meeting.student_phone}</p>
-                                )}
-                              </div>
+              <section className="space-y-4">
+                <h2 className="text-lg font-semibold text-slate-900">Upcoming Meetings</h2>
+                {upcomingMeetings.map((meeting) => (
+                  <article key={meeting.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="grid gap-5 xl:grid-cols-2">
+                      <div className="space-y-4">
+                        <h3 className="font-semibold text-slate-900">Meeting Details</h3>
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                          <div className="mb-2 flex items-start gap-2">
+                            <User className="mt-0.5 h-4 w-4 text-slate-500" />
+                            <div>
+                              <p className="font-medium text-slate-900">{meeting.student_name}</p>
+                              <p>{meeting.student_email}</p>
+                              {meeting.student_phone && <p>{meeting.student_phone}</p>}
                             </div>
-                            
-                            <div className="flex items-center gap-3">
-                              <Calendar className="w-5 h-5 text-purple-600" />
-                              <div>
-                                <p className="font-medium text-gray-900">{formatDate(meeting.preferred_date || meeting.meeting_date)}</p>
-                                <p className="text-sm text-gray-600">
-                                  {meeting.time_slot_start && meeting.time_slot_end 
-                                    ? `${formatTime(meeting.time_slot_start)} - ${formatTime(meeting.time_slot_end)}`
-                                    : meeting.slot_name || 'Time not set'
-                                  }
-                                </p>
-                              </div>
-                            </div>
-
-                            {meeting.topic && (
-                              <div className="bg-purple-50 p-3 rounded-lg">
-                                <p className="text-xs text-purple-600 font-semibold mb-1">📚 ISLAMIC TOPIC</p>
-                                <p className="font-semibold text-purple-900">{meeting.topic}</p>
-                                {meeting.description && (
-                                  <p className="text-sm text-gray-700 mt-1">{meeting.description}</p>
-                                )}
-                              </div>
-                            )}
-
-                            <div className="bg-gradient-to-r from-teal-50 to-emerald-50 p-3 rounded-lg border border-teal-200">
-                              <p className="text-xs text-teal-700 font-semibold mb-1">💰 AMOUNT</p>
-                              <p className="font-bold text-xl">
-                                {meeting.is_free || meeting.amount_paid === 0 ? (
-                                  <span className="text-emerald-600">FREE</span>
-                                ) : (
-                                  <span className="text-gray-900">₹{meeting.amount_paid}</span>
-                                )}
+                          </div>
+                          <div className="mb-2 flex items-start gap-2">
+                            <Calendar className="mt-0.5 h-4 w-4 text-slate-500" />
+                            <div>
+                              <p className="font-medium text-slate-900">{formatDate(meeting.preferred_date || meeting.meeting_date)}</p>
+                              <p>
+                                {meeting.time_slot_start && meeting.time_slot_end
+                                  ? `${formatTime(meeting.time_slot_start)} - ${formatTime(meeting.time_slot_end)}`
+                                  : meeting.slot_name || 'Time not set'}
                               </p>
                             </div>
-
-                            {meeting.meeting_link && (
-                              <div className="flex items-center gap-3">
-                                <LinkIcon className="w-5 h-5 text-green-600" />
-                                <a
-                                  href={meeting.meeting_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 hover:underline flex items-center gap-1"
-                                >
-                                  Join Google Meet <ExternalLink className="w-4 h-4" />
-                                </a>
-                              </div>
-                            )}
                           </div>
-                        </div>
-
-                        {/* Study Materials Upload */}
-                        <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-xl p-6 border-2 border-indigo-100">
-                          <div className="flex items-center space-x-3 mb-4">
-                            <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg">
-                              <FileText className="w-5 h-5 text-white" />
+                          {meeting.topic && (
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Topic</p>
+                              <p className="mt-1 font-medium text-emerald-900">{meeting.topic}</p>
+                              {meeting.description && <p className="mt-1 text-xs text-emerald-800">{meeting.description}</p>}
                             </div>
-                            <h3 className="text-lg font-bold text-gray-900">Study Materials</h3>
-                          </div>
-                          
-                          <div className="space-y-4">
-                            {/* Resource Link Input */}
-                            <div>
-                              <label className="flex items-center space-x-2 text-sm font-bold text-gray-700 mb-3">
-                                <FileText className="w-4 h-4 text-teal-600" />
-                                <span>📂 Resource Link (Study Materials)</span>
-                              </label>
-                              <input
-                                type="url"
-                                value={resourceLinks[meeting.id] || ''}
-                                onChange={(e) => setResourceLinks({ ...resourceLinks, [meeting.id]: e.target.value })}
-                                placeholder="https://drive.google.com/..."
-                                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-teal-100 focus:border-teal-500 transition-all duration-300 text-gray-900 font-medium placeholder-gray-400 hover:border-teal-300"
-                                disabled={savingResource === meeting.id}
-                              />
-                            </div>
-                            
-                            <button
-                              onClick={() => handleSaveResourceLink(meeting.id)}
-                              disabled={savingResource === meeting.id}
-                              className="group w-full px-6 py-3 bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-bold rounded-xl hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 relative overflow-hidden"
+                          )}
+                          {meeting.meeting_link && (
+                            <a
+                              href={meeting.meeting_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-3 inline-flex items-center gap-1 font-medium text-emerald-700 hover:text-emerald-800"
                             >
-                              <div className="absolute inset-0 bg-gradient-to-r from-emerald-600 to-green-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                              {savingResource === meeting.id ? (
-                                <span className="relative z-10 flex items-center space-x-2">
-                                  <Loader2 className="w-5 h-5 animate-spin" />
-                                  <span>Saving...</span>
-                                </span>
-                              ) : (
-                                <span className="relative z-10 flex items-center space-x-2">
-                                  <Save className="w-5 h-5" />
-                                  <span>Save Resource Link</span>
-                                </span>
-                              )}
-                            </button>
-
-                            {meeting.resource_link && (
-                              <div className="flex items-center space-x-3 p-4 bg-teal-50 border-2 border-teal-200 rounded-xl">
-                                <div className="w-8 h-8 bg-teal-500 rounded-full flex items-center justify-center flex-shrink-0">
-                                  <CheckCircle className="w-5 h-5 text-white" />
-                                </div>
-                                <div className="flex-1">
-                                  <p className="text-sm font-bold text-teal-900">Resource Shared!</p>
-                                  <p className="text-xs text-teal-700">Student can access your resources</p>
-                                </div>
-                                <a
-                                  href={meeting.resource_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-teal-600 hover:text-teal-700 transition-colors"
-                                >
-                                  <ExternalLink className="w-5 h-5" />
-                                </a>
-                              </div>
-                            )}
-
-                            {/* Notes Link Input */}
-                            <div className="pt-4 border-t-2 border-gray-200">
-                              <label className="flex items-center space-x-2 text-sm font-bold text-gray-700 mb-3">
-                                <LinkIcon className="w-4 h-4 text-indigo-600" />
-                                <span>📝 Notes Link (Lesson Notes)</span>
-                              </label>
-                              <input
-                                type="url"
-                                value={notesLinks[meeting.id] || ''}
-                                onChange={(e) => setNotesLinks({ ...notesLinks, [meeting.id]: e.target.value })}
-                                placeholder="https://docs.google.com/document/..."
-                                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-indigo-100 focus:border-indigo-500 transition-all duration-300 text-gray-900 font-medium placeholder-gray-400 hover:border-indigo-300"
-                                disabled={savingNotes === meeting.id}
-                              />
-                              <div className="mt-2 flex items-start space-x-2 text-xs text-gray-600 bg-white rounded-lg p-3">
-                                <span className="text-lg">💡</span>
-                                <div>
-                                  <p className="font-semibold mb-1">How to share materials:</p>
-                                  <ol className="list-decimal list-inside space-y-1">
-                                    <li>Upload notes/documents to Google Drive</li>
-                                    <li>Set sharing to "Anyone with the link"</li>
-                                    <li>Copy and paste the link here</li>
-                                  </ol>
-                                </div>
-                              </div>
-                            </div>
-                            
-                            <button
-                              onClick={() => handleSaveNotesLink(meeting.id)}
-                              disabled={savingNotes === meeting.id}
-                              className="group w-full px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold rounded-xl hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 relative overflow-hidden"
-                            >
-                              <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-pink-600 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                              {savingNotes === meeting.id ? (
-                                <span className="relative z-10 flex items-center space-x-2">
-                                  <Loader2 className="w-5 h-5 animate-spin" />
-                                  <span>Saving...</span>
-                                </span>
-                              ) : (
-                                <span className="relative z-10 flex items-center space-x-2">
-                                  <Save className="w-5 h-5" />
-                                  <span>Save Notes Link</span>
-                                </span>
-                              )}
-                            </button>
-
-                            {meeting.notes_link && (
-                              <div className="flex items-center space-x-3 p-4 bg-green-50 border-2 border-green-200 rounded-xl">
-                                <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0">
-                                  <CheckCircle className="w-5 h-5 text-white" />
-                                </div>
-                                <div className="flex-1">
-                                  <p className="text-sm font-bold text-green-900">Notes Shared!</p>
-                                  <p className="text-xs text-green-700">Student can access your lesson notes</p>
-                                </div>
-                                <a
-                                  href={meeting.notes_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-green-600 hover:text-green-700 transition-colors"
-                                >
-                                  <ExternalLink className="w-5 h-5" />
-                                </a>
-                              </div>
-                            )}
-                          </div>
+                              Join Meeting <ExternalLink className="h-4 w-4" />
+                            </a>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
-            {/* Past Meetings */}
-            {pastMeetings.length > 0 && (
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-4">Past Meetings</h2>
-                <div className="space-y-4">
-                  {pastMeetings.map((meeting) => (
-                    <div key={meeting.id} className="bg-white rounded-xl shadow-md p-6 border-l-4 border-gray-400">
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <h3 className="font-semibold text-slate-900">Study Materials</h3>
+
                         <div>
-                          <h3 className="text-lg font-semibold text-gray-900 mb-3">Meeting Details</h3>
-                          <div className="space-y-2 text-sm text-gray-900">
-                            <p><span className="font-medium text-gray-700">Student:</span> {meeting.student_name}</p>
-                            <p><span className="font-medium text-gray-700">Date:</span> {formatDate(meeting.preferred_date || meeting.meeting_date)}</p>
-                            <p><span className="font-medium text-gray-700">Time:</span> {meeting.time_slot_start ? `${formatTime(meeting.time_slot_start)} - ${formatTime(meeting.time_slot_end)}` : meeting.slot_name || 'Time not set'}</p>
-                            {meeting.topic && (
-                              <p><span className="font-medium text-gray-700">Topic:</span> {meeting.topic}</p>
-                            )}
-                            
-                            {/* Attendance Status */}
-                            <div className="pt-3 border-t">
-                              <p className="font-medium text-gray-700 mb-2">Attendance:</p>
-                              <div className="flex gap-2">
-                                {meeting.attendance === 'present' ? (
-                                  <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-xs font-semibold">✓ Present</span>
-                                ) : meeting.attendance === 'absent' ? (
-                                  <span className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-xs font-semibold">✗ Absent</span>
-                                ) : (
-                                  <>
-                                    <button
-                                      onClick={() => handleMarkAttendance(meeting.id, 'present')}
-                                      disabled={updatingAttendance === meeting.id}
-                                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-semibold disabled:opacity-50"
-                                    >
-                                      Mark Present
-                                    </button>
-                                    <button
-                                      onClick={() => handleMarkAttendance(meeting.id, 'absent')}
-                                      disabled={updatingAttendance === meeting.id}
-                                      className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-semibold disabled:opacity-50"
-                                    >
-                                      Mark Absent
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">Resource Link</label>
+                          <input
+                            type="url"
+                            value={resourceLinks[meeting.id] || ''}
+                            onChange={(e) => setResourceLinks({ ...resourceLinks, [meeting.id]: e.target.value })}
+                            placeholder="https://drive.google.com/..."
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-emerald-500/30 transition focus:ring"
+                            disabled={savingResource === meeting.id}
+                          />
+                          <button
+                            onClick={() => handleSaveResourceLink(meeting.id)}
+                            disabled={savingResource === meeting.id}
+                            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            {savingResource === meeting.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            Save Resource Link
+                          </button>
                         </div>
-                        
+
                         <div>
-                          <h3 className="text-sm font-semibold text-gray-900 mb-3">Study Materials & Resources</h3>
-                          <div className="space-y-4">
-                            {/* Notes Link Input */}
-                            <div>
-                              <label className="text-xs font-medium text-gray-700 mb-1 block">📝 Lesson Notes Link</label>
-                              <input
-                                type="url"
-                                value={notesLinks[meeting.id] || ''}
-                                onChange={(e) => setNotesLinks({ ...notesLinks, [meeting.id]: e.target.value })}
-                                placeholder="https://docs.google.com/..."
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900"
-                              />
-                              <button
-                                onClick={() => handleSaveNotesLink(meeting.id)}
-                                disabled={savingNotes === meeting.id}
-                                className="mt-2 w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-semibold disabled:opacity-50"
-                              >
-                                {savingNotes === meeting.id ? 'Saving...' : 'Save Notes Link'}
-                              </button>
-                              {meeting.notes_link && (
-                                <a
-                                  href={meeting.notes_link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="mt-2 text-blue-600 hover:underline flex items-center gap-1 text-sm"
-                                >
-                                  View Notes <ExternalLink className="w-3 h-3" />
-                                </a>
-                              )}
+                          <label className="mb-2 block text-sm font-medium text-slate-700">Notes Link</label>
+                          <input
+                            type="url"
+                            value={notesLinks[meeting.id] || ''}
+                            onChange={(e) => setNotesLinks({ ...notesLinks, [meeting.id]: e.target.value })}
+                            placeholder="https://docs.google.com/document/..."
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-emerald-500/30 transition focus:ring"
+                            disabled={savingNotes === meeting.id}
+                          />
+                          <button
+                            onClick={() => handleSaveNotesLink(meeting.id)}
+                            disabled={savingNotes === meeting.id}
+                            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-900 disabled:opacity-60"
+                          >
+                            {savingNotes === meeting.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            Save Notes Link
+                          </button>
+                        </div>
+
+                        {(meeting.resource_link || meeting.notes_link) && (
+                          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                            <div className="flex items-center gap-2 font-medium">
+                              <CheckCircle className="h-4 w-4" />
+                              Links shared successfully
                             </div>
-                            
-                            {/* Resource Link Input */}
-                            <div>
-                              <label className="text-xs font-medium text-gray-700 mb-1 block">📚 Study Materials Link</label>
-                              <input
-                                type="url"
-                                value={resourceLinks[meeting.id] || ''}
-                                onChange={(e) => setResourceLinks({ ...resourceLinks, [meeting.id]: e.target.value })}
-                                placeholder="https://drive.google.com/..."
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900"
-                              />
-                              <button
-                                onClick={() => handleSaveResourceLink(meeting.id)}
-                                disabled={savingResource === meeting.id}
-                                className="mt-2 w-full px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 text-sm font-semibold disabled:opacity-50"
-                              >
-                                {savingResource === meeting.id ? 'Saving...' : 'Save Resource Link'}
-                              </button>
+                            <div className="mt-2 space-y-1">
                               {meeting.resource_link && (
                                 <a
                                   href={meeting.resource_link}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="mt-2 text-teal-600 hover:underline flex items-center gap-1 text-sm"
+                                  className="inline-flex items-center gap-1 hover:underline"
                                 >
-                                  View Materials <ExternalLink className="w-3 h-3" />
+                                  View Resource <ExternalLink className="h-3.5 w-3.5" />
+                                </a>
+                              )}
+                              {meeting.notes_link && (
+                                <a
+                                  href={meeting.notes_link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block inline-flex items-center gap-1 hover:underline"
+                                >
+                                  View Notes <ExternalLink className="h-3.5 w-3.5" />
                                 </a>
                               )}
                             </div>
                           </div>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </section>
+            )}
+
+            {pastMeetings.length > 0 && (
+              <section className="space-y-4">
+                <h2 className="text-lg font-semibold text-slate-900">Past Meetings</h2>
+                {pastMeetings.map((meeting) => (
+                  <article key={meeting.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="grid gap-5 xl:grid-cols-2">
+                      <div className="space-y-3">
+                        <h3 className="font-semibold text-slate-900">Meeting Details</h3>
+                        <div className="space-y-1 text-sm text-slate-700">
+                          <p><span className="font-medium text-slate-900">Student:</span> {meeting.student_name}</p>
+                          <p><span className="font-medium text-slate-900">Date:</span> {formatDate(meeting.preferred_date || meeting.meeting_date)}</p>
+                          <p>
+                            <span className="font-medium text-slate-900">Time:</span>{' '}
+                            {meeting.time_slot_start
+                              ? `${formatTime(meeting.time_slot_start)} - ${formatTime(meeting.time_slot_end)}`
+                              : meeting.slot_name || 'Time not set'}
+                          </p>
+                          {meeting.topic && <p><span className="font-medium text-slate-900">Topic:</span> {meeting.topic}</p>}
+                        </div>
+
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Attendance</p>
+                          {meeting.attendance ? (
+                            getAttendanceBadge(meeting.attendance)
+                          ) : (
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleMarkAttendance(meeting.id, 'present')}
+                                disabled={updatingAttendance === meeting.id}
+                                className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                              >
+                                Mark Present
+                              </button>
+                              <button
+                                onClick={() => handleMarkAttendance(meeting.id, 'absent')}
+                                disabled={updatingAttendance === meeting.id}
+                                className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:opacity-60"
+                              >
+                                Mark Absent
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <h3 className="font-semibold text-slate-900">Study Materials & Resources</h3>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">Notes Link</label>
+                          <input
+                            type="url"
+                            value={notesLinks[meeting.id] || ''}
+                            onChange={(e) => setNotesLinks({ ...notesLinks, [meeting.id]: e.target.value })}
+                            placeholder="https://docs.google.com/..."
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-emerald-500/30 transition focus:ring"
+                          />
+                          <button
+                            onClick={() => handleSaveNotesLink(meeting.id)}
+                            disabled={savingNotes === meeting.id}
+                            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-900 disabled:opacity-60"
+                          >
+                            {savingNotes === meeting.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            Save Notes Link
+                          </button>
+                          {meeting.notes_link && (
+                            <a
+                              href={meeting.notes_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 inline-flex items-center gap-1 text-sm text-slate-700 hover:underline"
+                            >
+                              View Notes <ExternalLink className="h-3.5 w-3.5" />
+                            </a>
+                          )}
+                        </div>
+
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">Resource Link</label>
+                          <input
+                            type="url"
+                            value={resourceLinks[meeting.id] || ''}
+                            onChange={(e) => setResourceLinks({ ...resourceLinks, [meeting.id]: e.target.value })}
+                            placeholder="https://drive.google.com/..."
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-emerald-500/30 transition focus:ring"
+                          />
+                          <button
+                            onClick={() => handleSaveResourceLink(meeting.id)}
+                            disabled={savingResource === meeting.id}
+                            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            {savingResource === meeting.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            Save Resource Link
+                          </button>
+                          {meeting.resource_link && (
+                            <a
+                              href={meeting.resource_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-2 inline-flex items-center gap-1 text-sm text-slate-700 hover:underline"
+                            >
+                              View Materials <ExternalLink className="h-3.5 w-3.5" />
+                            </a>
+                          )}
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </article>
+                ))}
+              </section>
             )}
           </div>
         )}
-      </div>
+      </TeacherPageContainer>
     </div>
   );
 }

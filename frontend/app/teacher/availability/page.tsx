@@ -24,6 +24,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { IslamicPatternBackground } from '@/components/ui/IslamicPatterns';
 import { IslamicPageHeader } from '@/components/ui/IslamicPageHeader';
+import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 
 interface TimeSlot {
   id: string;
@@ -462,21 +463,22 @@ export default function TeacherAvailabilityPage() {
   }
 
   return (
-    <div className="min-h-screen bg-amber-50/30 relative">
+    <div className="min-h-screen bg-slate-100/40 relative">
       <IslamicPatternBackground>
-        
-        <IslamicPageHeader 
-          title="My Availability" 
-          subtitle="Manage your weekly schedule and teaching slots"
-          actions={[
-            {
-              label: isEditing ? 'Cancel Editing' : 'Update Availability',
-              icon: isEditing ? X : Edit2,
-              onClick: () => setIsEditing(!isEditing),
-              variant: isEditing ? 'secondary' : 'primary'
-            }
-          ]}
-        />
+        <TeacherPageContainer className="relative z-10">
+          <IslamicPageHeader 
+            title="My Availability" 
+            subtitle="Manage your weekly schedule and teaching slots"
+            className="!static"
+            actions={[
+              {
+                label: isEditing ? 'Cancel Editing' : 'Update Availability',
+                icon: isEditing ? X : Edit2,
+                onClick: () => setIsEditing(!isEditing),
+                variant: isEditing ? 'secondary' : 'primary'
+              }
+            ]}
+          />
 
         {/* Loading Overlay for week changes */}
         <AnimatePresence>
@@ -506,7 +508,7 @@ export default function TeacherAvailabilityPage() {
           )}
         </AnimatePresence>
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
+        <div>
           {/* Week Navigation */}
           <div className="mb-8 bg-white rounded-xl shadow-sm border border-amber-100 p-6 flex items-center justify-between">
             <button
@@ -914,6 +916,7 @@ export default function TeacherAvailabilityPage() {
             )}
           </AnimatePresence>
         </div>
+        </TeacherPageContainer>
       </IslamicPatternBackground>
     </div>
   );

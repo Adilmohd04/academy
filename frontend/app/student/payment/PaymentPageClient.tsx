@@ -29,16 +29,27 @@ export default function PaymentPageClient() {
   const [paymentMethod, setPaymentMethod] = useState<'card'>('card');
   const [error, setError] = useState('');
 
-  // Load Razorpay script
-  useEffect(() => {
-    const script = document.createElement('script');
-    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.async = true;
-    document.body.appendChild(script);
-    return () => {
-      document.body.removeChild(script);
-    };
-  }, []);
+  const loadRazorpayScript = async (): Promise<boolean> => {
+    if (window.Razorpay) return true;
+
+    const existingScript = document.getElementById('razorpay-checkout-js') as HTMLScriptElement | null;
+    if (existingScript) {
+      return new Promise((resolve) => {
+        existingScript.addEventListener('load', () => resolve(true), { once: true });
+        existingScript.addEventListener('error', () => resolve(false), { once: true });
+      });
+    }
+
+    return new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.id = 'razorpay-checkout-js';
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
 
   const handlePayment = async () => {
     if (amount === 0) {
@@ -60,10 +71,21 @@ export default function PaymentPageClient() {
       }, token);
 
       const order = orderResponse.data;
+      const razorpayKey = order?.key_id || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+      const normalizedRazorpayKey = String(razorpayKey || '').trim();
+
+      if (!normalizedRazorpayKey || normalizedRazorpayKey === 'undefined' || normalizedRazorpayKey === 'null') {
+        throw new Error('Razorpay key is missing. Please set NEXT_PUBLIC_RAZORPAY_KEY_ID in frontend env or RAZORPAY_KEY_ID in backend env.');
+      }
+
+      const sdkLoaded = await loadRazorpayScript();
+      if (!sdkLoaded || !window.Razorpay) {
+        throw new Error('Razorpay SDK failed to load. Please check your network and try again.');
+      }
 
       // Razorpay checkout options
       const options = {
-        key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+        key: normalizedRazorpayKey,
         amount: order.amount,
         currency: order.currency,
         name: 'Islamic Academy',
@@ -112,7 +134,7 @@ export default function PaymentPageClient() {
 
     } catch (err: any) {
       console.error('Payment error:', err);
-      setError(err.response?.data?.error || 'Failed to initiate payment');
+      setError(err.response?.data?.error || err?.message || 'Failed to initiate payment');
       setIsLoading(false);
     }
   };

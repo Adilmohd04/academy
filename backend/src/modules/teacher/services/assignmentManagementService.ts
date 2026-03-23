@@ -18,72 +18,148 @@ export const getAssignmentSubmissions = async (
   assignmentId: string,
   teacherId: string
 ): Promise<AssignmentSubmission[]> => {
-  // Verify teacher owns the course using raw SQL for complex join
-  const { data: courseCheck, error: courseCheckError } = await supabase.rpc('exec_sql', {
-    sql_query: `SELECT 1 
-     FROM assignments a
-     JOIN course_lessons l ON l.id = a.lesson_id
-     JOIN course_weeks w ON w.id = l.week_id
-     JOIN courses c ON c.id = w.course_id
-     WHERE a.id = '${assignmentId}' AND c.teacher_id = '${teacherId}'`
-  });
+  // Verify teacher owns the course that contains this assignment (safe parameterized query)
+  const { data: assignmentCheck, error: assignmentCheckError } = await supabase
+    .from('assignments')
+    .select('id, lesson_id')
+    .eq('id', assignmentId)
+    .single();
 
-  if (courseCheckError || !courseCheck || courseCheck.length === 0) {
-    throw new Error('Unauthorized or assignment not found');
+  if (assignmentCheckError || !assignmentCheck) {
+    throw new Error('Assignment not found');
   }
 
-  // Get submissions with student info
-  const { data: result, error } = await supabase.rpc('exec_sql', {
-    sql_query: `SELECT 
-      s.id,
-      s.assignment_id,
-      s.student_id,
-      p.full_name as student_name,
-      p.email as student_email,
-      s.file_url,
-      s.text_content,
-      s.score,
-      s.feedback,
-      s.status,
-      s.submitted_at
-     FROM assignment_submissions s
-     LEFT JOIN profiles p ON p.clerk_user_id = s.student_id
-     WHERE s.assignment_id = '${assignmentId}'
-     ORDER BY s.submitted_at DESC`
-  });
+  // Walk the join chain safely to verify teacher ownership
+  const { data: lessonCheck, error: lessonCheckError } = await supabase
+    .from('course_lessons')
+    .select('week_id')
+    .eq('id', assignmentCheck.lesson_id)
+    .single();
+
+  if (lessonCheckError || !lessonCheck) {
+    throw new Error('Assignment not found');
+  }
+
+  const { data: weekCheck, error: weekCheckError } = await supabase
+    .from('course_weeks')
+    .select('course_id')
+    .eq('id', lessonCheck.week_id)
+    .single();
+
+  if (weekCheckError || !weekCheck) {
+    throw new Error('Assignment not found');
+  }
+
+  const { data: courseCheck, error: courseCheckError } = await supabase
+    .from('courses')
+    .select('id')
+    .eq('id', weekCheck.course_id)
+    .eq('teacher_id', teacherId)
+    .single();
+
+  if (courseCheckError || !courseCheck) {
+    throw new Error('Unauthorized');
+  }
+
+  // Get submissions with student info using safe Supabase queries
+  const { data: submissions, error } = await supabase
+    .from('assignment_submissions')
+    .select('id, assignment_id, student_id, file_url, text_content, score, feedback, status, submitted_at')
+    .eq('assignment_id', assignmentId)
+    .order('submitted_at', { ascending: false });
 
   if (error) throw error;
-  return result || [];
+
+  // Fetch student profiles separately to avoid FK aliasing issues
+  const studentIds = [...new Set((submissions || []).map((s: any) => s.student_id))];
+  let profileMap: Record<string, { full_name: string; email: string }> = {};
+
+  if (studentIds.length > 0) {
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('clerk_user_id, full_name, email')
+      .in('clerk_user_id', studentIds);
+
+    (profiles || []).forEach((p: any) => {
+      profileMap[p.clerk_user_id] = { full_name: p.full_name, email: p.email };
+    });
+  }
+
+  return (submissions || []).map((s: any) => ({
+    id: s.id,
+    assignment_id: s.assignment_id,
+    student_id: s.student_id,
+    student_name: profileMap[s.student_id]?.full_name || 'Unknown',
+    student_email: profileMap[s.student_id]?.email || '',
+    file_url: s.file_url,
+    text_content: s.text_content,
+    score: s.score,
+    feedback: s.feedback,
+    status: s.status,
+    submitted_at: s.submitted_at,
+  }));
 };
 
 export const bulkGradeAssignments = async (
   grades: { id: string; score: number; feedback?: string }[],
   teacherId: string
 ): Promise<void> => {
-  // Process grades sequentially - Supabase handles connection management
-  try {
-    for (const grade of grades) {
-      // Verify ownership for each submission and update
-      // Using raw SQL for complex UPDATE with JOIN
-      const { error } = await supabase.rpc('exec_sql', {
-        sql_query: `UPDATE assignment_submissions s
-         SET score = ${grade.score}, 
-             feedback = ${grade.feedback ? `'${grade.feedback.replace(/'/g, "''")}'` : 'NULL'}, 
-             status = 'graded', 
-             graded_at = NOW()
-         FROM assignments a
-         JOIN course_lessons l ON l.id = a.lesson_id
-         JOIN course_weeks w ON w.id = l.week_id
-         JOIN courses c ON c.id = w.course_id
-         WHERE s.id = '${grade.id}' 
-         AND s.assignment_id = a.id 
-         AND c.teacher_id = '${teacherId}'`
-      });
+  for (const grade of grades) {
+    // First verify the submission belongs to a course owned by this teacher
+    const { data: submission, error: subError } = await supabase
+      .from('assignment_submissions')
+      .select('id, assignment_id')
+      .eq('id', grade.id)
+      .single();
 
-      if (error) throw error;
-    }
-  } catch (error) {
-    throw error;
+    if (subError || !submission) throw new Error(`Submission ${grade.id} not found`);
+
+    // Walk join chain to verify ownership
+    const { data: assignment } = await supabase
+      .from('assignments')
+      .select('lesson_id')
+      .eq('id', submission.assignment_id)
+      .single();
+
+    if (!assignment) throw new Error('Assignment not found');
+
+    const { data: lesson } = await supabase
+      .from('course_lessons')
+      .select('week_id')
+      .eq('id', assignment.lesson_id)
+      .single();
+
+    if (!lesson) throw new Error('Lesson not found');
+
+    const { data: week } = await supabase
+      .from('course_weeks')
+      .select('course_id')
+      .eq('id', lesson.week_id)
+      .single();
+
+    if (!week) throw new Error('Week not found');
+
+    const { data: course } = await supabase
+      .from('courses')
+      .select('id')
+      .eq('id', week.course_id)
+      .eq('teacher_id', teacherId)
+      .single();
+
+    if (!course) throw new Error(`Unauthorized to grade submission ${grade.id}`);
+
+    // Safe update using parameterized Supabase call (no string interpolation)
+    const { error: updateError } = await supabase
+      .from('assignment_submissions')
+      .update({
+        score: grade.score,
+        feedback: grade.feedback ?? null,
+        status: 'graded',
+        graded_at: new Date().toISOString(),
+      })
+      .eq('id', grade.id);
+
+    if (updateError) throw updateError;
   }
 };
 

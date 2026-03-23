@@ -85,7 +85,7 @@ router.post('/enrollments/enroll', requireAuth, async (req: any, res) => {
     // Get or create student profile
     let { data: profile } = await supabase
       .from('profiles')
-      .select('id, full_name, email, phone')
+      .select('id, full_name, email')
       .eq('clerk_user_id', userId)
       .single();
 
@@ -97,11 +97,10 @@ router.post('/enrollments/enroll', requireAuth, async (req: any, res) => {
           clerk_user_id: userId,
           full_name: fullName || email?.split('@')[0] || 'Student',
           email: email || '',
-          phone: mobileNumber || '',
           role: 'student',
           created_at: new Date().toISOString()
         })
-        .select('id, full_name, email, phone')
+        .select('id, full_name, email')
         .single();
 
       if (createError || !newProfile) {

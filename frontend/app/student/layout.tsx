@@ -8,7 +8,7 @@ export default function StudentLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-screen bg-[#FDFBF7] relative overflow-hidden font-sans text-[#1B365D] selection:bg-[#C5A059] selection:text-white">
+    <div className="flex min-h-screen bg-[#FDFBF7] relative font-sans text-[#1B365D] selection:bg-[#C5A059] selection:text-white">
       {/* Islamic Geometric Pattern Overlay - Ultra Subtle */}
       <div className="fixed inset-0 pointer-events-none z-0 opacity-[0.03]" 
         style={{

@@ -648,6 +648,7 @@ export const createRazorpayOrder = async (req: Request, res: Response) => {
       id: order.id,
       amount: order.amount,
       currency: order.currency,
+      key_id: process.env.RAZORPAY_KEY_ID || '',
       payment_record_id: payment.id,
     });
   } catch (error: any) {

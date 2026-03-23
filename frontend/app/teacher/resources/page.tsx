@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { IslamicPageHeader } from '@/components/ui/IslamicPageHeader';
 import { IslamicCard } from '@/components/ui/IslamicCards';
 import { IslamicButton } from '@/components/ui/IslamicButtons';
+import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 import { FileText, Music, Video, Link as LinkIcon, Plus, Trash2, Loader2, ExternalLink, Pencil, Folder, ChevronRight, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { format } from 'date-fns';
@@ -328,11 +329,11 @@ export default function TeacherResourcesPage() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <TeacherPageContainer className="space-y-6">
       <IslamicPageHeader
         title="My Resources"
         subtitle="Share learning materials with students"
-        className="!static !-mx-6 !-mt-6 mb-6"
+        className="!static"
         breadcrumbs={[
           { label: 'Dashboard', href: '/teacher' },
           { label: 'Resources' }
@@ -628,6 +629,6 @@ export default function TeacherResourcesPage() {
           ))}
         </div>
       )}
-    </div>
+    </TeacherPageContainer>
   );
 }

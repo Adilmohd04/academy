@@ -13,9 +13,11 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:ci": "jest --ci --coverage --reporters=default --reporters=jest-junit",
+    "test:chaos": "node scripts/multi-agent-chaos-orchestrator.js",
     "check-env": "node src/scripts/check-env.js",
     "load:smoke": "k6 run load/k6-smoke.js",
-    "load:10k": "k6 run load/k6-10k-ramp.js"
+    "load:10k": "k6 run load/k6-10k-ramp.js",
+    "load:10k:mixed": "k6 run load/k6-10k-mixed-activity.js"
   },
   "engines": {
     "node": ">=18.x"

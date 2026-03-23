@@ -13,7 +13,7 @@ import { IslamicCard } from '@/components/ui/IslamicCards';
 import { IslamicButton } from '@/components/ui/IslamicButtons';
 import { utcToLocal, localToUTC } from '@/lib/dateUtils';
 
-type TabType = 'about' | 'content' | 'students' | 'submissions' | 'discussion' | 'announcements' | 'schedule' | 'settings';
+type TabType = 'about' | 'content' | 'finalExams' | 'students' | 'submissions' | 'discussion' | 'announcements' | 'schedule' | 'settings';
 
 interface Week {
   id: string;
@@ -374,6 +374,7 @@ export default function CourseBuilderPage() {
   const tabs = [
     { id: 'about' as TabType, label: 'About Course', icon: BookOpen },
     { id: 'content' as TabType, label: 'Content', icon: FileText },
+    { id: 'finalExams' as TabType, label: 'Final Exams', icon: Award },
     { id: 'students' as TabType, label: 'Students', icon: Users },
     { id: 'submissions' as TabType, label: 'Submissions', icon: ClipboardList },
     { id: 'discussion' as TabType, label: 'Discussion', icon: MessageSquare },
@@ -555,6 +556,7 @@ export default function CourseBuilderPage() {
         <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
           {activeTab === 'about' && <AboutCourseTab course={course} setCourse={setCourse} setHasUnsavedChanges={setHasUnsavedChanges} availableCourses={availableCourses} />}
           {activeTab === 'content' && <ContentTab weeks={weeks} setWeeks={setWeeks} courseId={courseId} userId={userId} setHasUnsavedChanges={setHasUnsavedChanges} />}
+          {activeTab === 'finalExams' && <FinalExamsTab courseId={courseId} userId={userId} />}
           {activeTab === 'students' && <StudentsTab students={students} submissions={submissions} courseId={courseId} userId={userId} weeks={weeks} />}
           {activeTab === 'submissions' && <SubmissionsTab submissions={submissions} setSubmissions={setSubmissions} userId={userId} courseId={courseId} students={students} />}
           {activeTab === 'discussion' && <DiscussionTab courseId={courseId} userId={userId} />}
@@ -562,6 +564,958 @@ export default function CourseBuilderPage() {
           {activeTab === 'schedule' && <ScheduleTab scheduledClasses={scheduledClasses} setScheduledClasses={setScheduledClasses} courseId={courseId} userId={userId} />}
           {activeTab === 'settings' && <SettingsTab course={course} setCourse={setCourse} gradingPolicy={gradingPolicy} setGradingPolicy={setGradingPolicy} setHasUnsavedChanges={setHasUnsavedChanges} userId={userId} courseId={courseId} />}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Final Exams Tab Component
+function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string | null }) {
+  type FinalExamQuizQuestion = {
+    type?: 'mcq' | 'fill';
+    question: string;
+    options: string[];
+    correctOptionIndex?: number;
+    correctAnswer: string;
+    marks: number;
+  };
+
+  const createDefaultQuizQuestion = (): FinalExamQuizQuestion => ({
+    type: 'mcq',
+    question: '',
+    options: ['', '', '', ''],
+    correctOptionIndex: -1,
+    correctAnswer: '',
+    marks: 1
+  });
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [autoscheduling, setAutoscheduling] = useState(false);
+  const [interviewsLoading, setInterviewsLoading] = useState(false);
+  const [updatingInterviewId, setUpdatingInterviewId] = useState<string | null>(null);
+  const [finalExams, setFinalExams] = useState<any[]>([]);
+  const [interviews, setInterviews] = useState<any[]>([]);
+  const [interviewerOptions, setInterviewerOptions] = useState<Array<{ id: string; full_name: string; email: string }>>([]);
+  const [interviewEdits, setInterviewEdits] = useState<Record<string, any>>({});
+  const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
+
+  const [form, setForm] = useState({
+    title: '',
+    description: '',
+    exam_type: 'quiz',
+    points: 100,
+    due_date: '',
+    instructions: '',
+    is_published: false,
+    publish_at: ''
+  });
+
+  const [quizQuestions, setQuizQuestions] = useState<FinalExamQuizQuestion[]>([createDefaultQuizQuestion()]);
+
+  const [interviewConfig, setInterviewConfig] = useState({
+    timezone: 'Asia/Kolkata',
+    slot_duration_minutes: 15,
+    max_students_per_day: 30,
+    allow_multi_day: true,
+    auto_assign_co_teachers: true
+  });
+
+  const [interviewScheduleWindow, setInterviewScheduleWindow] = useState({
+    start_date: '',
+    end_date: '',
+    daily_start_time: '09:00',
+    daily_end_time: '17:00',
+    break_minutes: 0,
+    meeting_link: ''
+  });
+
+  const fetchFinalExams = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/final-exams`, {
+        headers: {
+          'x-clerk-user-id': userId || ''
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch final exams');
+      }
+
+      const data = await response.json();
+      const exams = data.finalExams || [];
+      setFinalExams(exams);
+
+      if (exams.length > 0 && !selectedExamId) {
+        loadExamIntoForm(exams[0]);
+      }
+    } catch (error) {
+      console.error('Error fetching final exams:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (courseId && userId) {
+      fetchFinalExams();
+    }
+  }, [courseId, userId]);
+
+  const fetchInterviewSchedule = async (examId: string) => {
+    if (!examId || !userId) return;
+
+    try {
+      setInterviewsLoading(true);
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/final-exams/${examId}/interviews`, {
+        headers: {
+          'x-clerk-user-id': userId || ''
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch interview schedule');
+      }
+
+      const data = await response.json();
+      const interviewItems = data.interviews || [];
+      setInterviews(interviewItems);
+      setInterviewerOptions(data.interviewers || []);
+      const mappedEdits = interviewItems.reduce((acc: any, item: any) => {
+        acc[item.id] = {
+          scheduled_date: item.scheduled_date ? new Date(item.scheduled_date).toISOString().slice(0, 16) : '',
+          duration_minutes: item.duration_minutes || 15,
+          meeting_link: item.meeting_link || '',
+          status: item.status || 'scheduled',
+          assigned_interviewer_id: item?.assignment_meta?.assigned_interviewer_id || ''
+        };
+        return acc;
+      }, {});
+      setInterviewEdits(mappedEdits);
+    } catch (error) {
+      console.error('Error fetching interview schedule:', error);
+      setInterviews([]);
+      setInterviewerOptions([]);
+      setInterviewEdits({});
+    } finally {
+      setInterviewsLoading(false);
+    }
+  };
+
+  const loadExamIntoForm = (exam: any) => {
+    let parsedResources: any = exam.resources || {};
+    if (typeof exam.resources === 'string') {
+      try {
+        parsedResources = JSON.parse(exam.resources);
+      } catch {
+        parsedResources = {};
+      }
+    }
+
+    setSelectedExamId(exam.id);
+    setForm({
+      title: exam.title || '',
+      description: exam.description || '',
+      exam_type: exam.exam_type || 'quiz',
+      points: exam.points || 100,
+      due_date: exam.due_date ? new Date(exam.due_date).toISOString().slice(0, 16) : '',
+      instructions: exam.instructions || '',
+      is_published: !!exam.is_published,
+      publish_at: parsedResources?.publish_at || ''
+    });
+
+    if (exam.exam_type === 'quiz' && parsedResources?.questions && Array.isArray(parsedResources.questions)) {
+      const normalizedQuestions = parsedResources.questions.map((item: any) => {
+        const normalizedType = item?.type === 'fill' ? 'fill' : 'mcq';
+        const normalizedOptions = Array.isArray(item?.options)
+          ? [...item.options, '', '', '', ''].slice(0, 4)
+          : ['', '', '', ''];
+
+        let correctOptionIndex = typeof item?.correctOptionIndex === 'number'
+          ? item.correctOptionIndex
+          : -1;
+
+        if (normalizedType === 'mcq' && correctOptionIndex < 0 && item?.correctAnswer) {
+          correctOptionIndex = normalizedOptions.findIndex((opt: string) => opt === item.correctAnswer);
+        }
+
+        return {
+          type: normalizedType,
+          question: item?.question || '',
+          options: normalizedOptions,
+          correctOptionIndex,
+          correctAnswer: item?.correctAnswer || '',
+          marks: Number(item?.marks) || 1
+        };
+      });
+
+      setQuizQuestions(normalizedQuestions.length > 0 ? normalizedQuestions : [createDefaultQuizQuestion()]);
+    }
+
+    if (exam.exam_type === 'interview' && parsedResources?.interview_config) {
+      setInterviewConfig({
+        timezone: parsedResources.interview_config.timezone || 'Asia/Kolkata',
+        slot_duration_minutes: parsedResources.interview_config.slot_duration_minutes || 15,
+        max_students_per_day: parsedResources.interview_config.max_students_per_day || 30,
+        allow_multi_day: parsedResources.interview_config.allow_multi_day !== false,
+        auto_assign_co_teachers: parsedResources.interview_config.auto_assign_co_teachers !== false
+      });
+
+      setInterviewScheduleWindow((prev) => ({
+        ...prev,
+        daily_start_time: parsedResources.interview_config.daily_start_time || prev.daily_start_time,
+        daily_end_time: parsedResources.interview_config.daily_end_time || prev.daily_end_time,
+        break_minutes: Number(parsedResources.interview_config.break_minutes || 0)
+      }));
+
+      fetchInterviewSchedule(exam.id);
+    } else {
+      setInterviews([]);
+    }
+  };
+
+  const buildResourcesPayload = () => {
+    const base: any = {
+      publish_at: form.publish_at || null
+    };
+
+    if (form.exam_type === 'quiz') {
+      base.questions = quizQuestions;
+    }
+
+    if (form.exam_type === 'interview') {
+      base.interview_config = interviewConfig;
+    }
+
+    return base;
+  };
+
+  const saveExam = async (publishNow = false) => {
+    if (!form.title.trim()) {
+      alert('Final exam title is required.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const payload: any = {
+        title: form.title,
+        description: form.description || null,
+        exam_type: form.exam_type,
+        points: Number(form.points) || 100,
+        due_date: form.due_date ? new Date(form.due_date).toISOString() : null,
+        instructions: form.instructions || null,
+        resources: buildResourcesPayload(),
+        is_published: publishNow ? true : form.is_published
+      };
+
+      const isEdit = !!selectedExamId;
+      const endpoint = isEdit
+        ? `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/final-exams/${selectedExamId}`
+        : `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/final-exams`;
+
+      const response = await fetch(endpoint, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-clerk-user-id': userId || ''
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to save final exam');
+      }
+
+      await fetchFinalExams();
+      alert(publishNow ? 'Final exam published successfully.' : 'Final exam saved as draft.');
+    } catch (error: any) {
+      console.error('Error saving final exam:', error);
+      alert(error.message || 'Failed to save final exam');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addQuizQuestion = () => {
+    setQuizQuestions((prev) => [...prev, createDefaultQuizQuestion()]);
+  };
+
+  const updateQuestion = (index: number, field: string, value: any) => {
+    setQuizQuestions((prev) =>
+      prev.map((item, i) => {
+        if (i !== index) return item;
+        return { ...item, [field]: value };
+      })
+    );
+  };
+
+  const removeQuestion = (index: number) => {
+    setQuizQuestions((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const autoScheduleInterviews = async () => {
+    if (!selectedExamId) {
+      alert('Save or select an interview final exam first.');
+      return;
+    }
+
+    const now = new Date();
+    const defaultStartDate = now.toISOString().slice(0, 10);
+    const payload = {
+      start_date: interviewScheduleWindow.start_date || defaultStartDate,
+      end_date: interviewScheduleWindow.end_date || interviewScheduleWindow.start_date || defaultStartDate,
+      daily_start_time: interviewScheduleWindow.daily_start_time,
+      daily_end_time: interviewScheduleWindow.daily_end_time,
+      slot_duration_minutes: interviewConfig.slot_duration_minutes,
+      break_minutes: Number(interviewScheduleWindow.break_minutes) || 0,
+      max_students_per_day: interviewConfig.max_students_per_day,
+      allow_multi_day: interviewConfig.allow_multi_day,
+      auto_assign_co_teachers: interviewConfig.auto_assign_co_teachers,
+      meeting_link: interviewScheduleWindow.meeting_link || null
+    };
+
+    try {
+      setAutoscheduling(true);
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/final-exams/${selectedExamId}/interviews/auto-schedule`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-clerk-user-id': userId || ''
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to auto-schedule interviews');
+      }
+
+      await fetchInterviewSchedule(selectedExamId);
+      alert(`Interview schedule created for ${data.created_count || 0} students.`);
+    } catch (error: any) {
+      console.error('Error auto-scheduling interviews:', error);
+      alert(error.message || 'Failed to auto-schedule interviews');
+    } finally {
+      setAutoscheduling(false);
+    }
+  };
+
+  const updateInterviewScheduleItem = async (interviewId: string, overrideEdit?: any) => {
+    if (!selectedExamId || !interviewId || !userId) return;
+
+    const edit = overrideEdit || interviewEdits[interviewId] || {};
+
+    try {
+      setUpdatingInterviewId(interviewId);
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/final-exams/${selectedExamId}/interviews/${interviewId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-clerk-user-id': userId || ''
+        },
+        body: JSON.stringify({
+          scheduled_date: edit.scheduled_date ? new Date(edit.scheduled_date).toISOString() : null,
+          duration_minutes: Number(edit.duration_minutes) || 15,
+          meeting_link: edit.meeting_link || null,
+          status: edit.status || 'scheduled',
+          assigned_interviewer_id: edit.assigned_interviewer_id || null
+        })
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to update interview');
+      }
+
+      await fetchInterviewSchedule(selectedExamId);
+      alert('Interview schedule updated successfully.');
+    } catch (error: any) {
+      console.error('Error updating interview:', error);
+      alert(error.message || 'Failed to update interview');
+    } finally {
+      setUpdatingInterviewId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-8 h-8 animate-spin text-gray-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-6xl space-y-6">
+      <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">Final Exam Module</h3>
+            <p className="text-sm text-gray-500 mt-1">Create end-of-course final exams outside weekly modules.</p>
+          </div>
+        </div>
+
+        {finalExams.length > 0 ? (
+          <div className="space-y-2 mb-5">
+            {finalExams.map((exam) => (
+              <button
+                key={exam.id}
+                onClick={() => loadExamIntoForm(exam)}
+                className={`w-full text-left px-3 py-2 rounded-lg border text-sm ${
+                  selectedExamId === exam.id
+                    ? 'bg-blue-50 border-blue-300 text-blue-800'
+                    : 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
+                }`}
+              >
+                {exam.title} · {String(exam.exam_type || '').toUpperCase()} · {exam.is_published ? 'Published' : 'Draft'}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500 mb-5">No final exams yet. Create your first final exam.</p>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Title *</label>
+            <input
+              type="text"
+              value={form.title}
+              onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+              placeholder="Final Exam - Quran Recitation"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Exam Mode</label>
+            <select
+              value={form.exam_type}
+              onChange={(e) => setForm((prev) => ({ ...prev, exam_type: e.target.value }))}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+            >
+              <option value="quiz">Quiz Based</option>
+              <option value="interview">Interview Based</option>
+              <option value="document">Document Submission</option>
+              <option value="project">Project Based</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Total Marks</label>
+            <input
+              type="number"
+              value={form.points}
+              onChange={(e) => setForm((prev) => ({ ...prev, points: Number(e.target.value) || 100 }))}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Due Date</label>
+            <input
+              type="datetime-local"
+              value={form.due_date}
+              onChange={(e) => setForm((prev) => ({ ...prev, due_date: e.target.value }))}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
+            <textarea
+              value={form.description}
+              onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+              rows={3}
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Instructions</label>
+            <textarea
+              value={form.instructions}
+              onChange={(e) => setForm((prev) => ({ ...prev, instructions: e.target.value }))}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+              rows={4}
+              placeholder="General instructions for students"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Scheduled Publish Time (optional)</label>
+            <input
+              type="datetime-local"
+              value={form.publish_at}
+              onChange={(e) => setForm((prev) => ({ ...prev, publish_at: e.target.value }))}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+            />
+            <p className="text-xs text-gray-500 mt-1">Stored for scheduling workflow; auto-publish worker can use this later.</p>
+          </div>
+        </div>
+      </div>
+
+      {form.exam_type === 'quiz' && (
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-sm font-semibold text-gray-900">Quiz Questions</h4>
+          </div>
+
+          <div className="space-y-4">
+            {quizQuestions.map((q, idx) => (
+              <div key={idx} className="border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold text-gray-500">Question {idx + 1}</p>
+                  <button onClick={() => removeQuestion(idx)} className="text-xs text-red-600 hover:text-red-700">Remove</button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
+                  <input
+                    type="text"
+                    value={q.question}
+                    onChange={(e) => updateQuestion(idx, 'question', e.target.value)}
+                    placeholder="Question text"
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                  />
+                  <select
+                    value={q.type || 'mcq'}
+                    onChange={(e) => {
+                      const newType = e.target.value === 'fill' ? 'fill' : 'mcq';
+                      if (newType === 'fill') {
+                        updateQuestion(idx, 'type', 'fill');
+                        updateQuestion(idx, 'correctOptionIndex', -1);
+                        updateQuestion(idx, 'correctAnswer', '');
+                      } else {
+                        const selectedIndex = typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : -1;
+                        const selectedAnswer = selectedIndex >= 0 ? (q.options?.[selectedIndex] || '') : '';
+                        setQuizQuestions((prev) =>
+                          prev.map((item, i) =>
+                            i !== idx
+                              ? item
+                              : {
+                                  ...item,
+                                  type: 'mcq' as const,
+                                  correctOptionIndex: selectedIndex,
+                                  correctAnswer: selectedAnswer
+                                }
+                          )
+                        );
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                  >
+                    <option value="mcq">MCQ</option>
+                    <option value="fill">Fill in the blank</option>
+                  </select>
+                </div>
+
+                {(q.type || 'mcq') === 'mcq' ? (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
+                      {q.options.map((opt, oIdx) => (
+                        <input
+                          key={oIdx}
+                          type="text"
+                          value={opt}
+                          onChange={(e) => {
+                            const newOptions = [...q.options];
+                            newOptions[oIdx] = e.target.value;
+                            const selectedIndex = typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : -1;
+                            const selectedAnswer = selectedIndex >= 0 ? (newOptions[selectedIndex] || '') : '';
+
+                            setQuizQuestions((prev) =>
+                              prev.map((item, i) =>
+                                i !== idx
+                                  ? item
+                                  : {
+                                      ...item,
+                                      options: newOptions,
+                                      correctAnswer: selectedAnswer
+                                    }
+                              )
+                            );
+                          }}
+                          placeholder={`Option ${oIdx + 1}`}
+                          className="px-3 py-2 border border-gray-300 rounded text-sm"
+                        />
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <select
+                        value={typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : -1}
+                        onChange={(e) => {
+                          const selectedIndex = Number(e.target.value);
+                          const selectedAnswer = selectedIndex >= 0 ? (q.options?.[selectedIndex] || '') : '';
+                          setQuizQuestions((prev) =>
+                            prev.map((item, i) =>
+                              i !== idx
+                                ? item
+                                : {
+                                    ...item,
+                                    correctOptionIndex: selectedIndex,
+                                    correctAnswer: selectedAnswer
+                                  }
+                            )
+                          );
+                        }}
+                        className="px-3 py-2 border border-gray-300 rounded text-sm"
+                      >
+                        <option value={-1}>Select correct option</option>
+                        {q.options.map((opt, oIdx) => (
+                          <option key={oIdx} value={oIdx}>
+                            {opt?.trim() ? `Option ${oIdx + 1}: ${opt}` : `Option ${oIdx + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="px-3 py-2 border border-gray-200 rounded text-xs bg-gray-50 text-gray-600 flex items-center">
+                        Teacher only selects the correct option for MCQ.
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={q.correctAnswer}
+                      onChange={(e) => updateQuestion(idx, 'correctAnswer', e.target.value)}
+                      placeholder="Correct answer for fill in the blank"
+                      className="px-3 py-2 border border-gray-300 rounded text-sm"
+                    />
+                    <div className="px-3 py-2 border border-gray-200 rounded text-xs bg-gray-50 text-gray-600 flex items-center">
+                      Teacher writes the expected answer for fill questions.
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                  <input
+                    type="number"
+                    value={q.marks}
+                    onChange={(e) => updateQuestion(idx, 'marks', Number(e.target.value) || 1)}
+                    placeholder="Marks"
+                    className="px-3 py-2 border border-gray-300 rounded text-sm"
+                  />
+                </div>
+
+                <div className="mt-3 pt-3 border-t border-gray-200 flex justify-end">
+                  <button
+                    onClick={addQuizQuestion}
+                    className="px-3 py-1.5 bg-gray-900 text-white rounded-lg text-xs"
+                  >
+                    + Add Question Below
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {form.exam_type === 'interview' && (
+        <div className="bg-white rounded-lg border border-gray-200 p-6">
+          <h4 className="text-sm font-semibold text-gray-900 mb-4">Interview Scheduling Settings</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Timezone</label>
+              <input
+                type="text"
+                value={interviewConfig.timezone}
+                onChange={(e) => setInterviewConfig((prev) => ({ ...prev, timezone: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Slot Duration (minutes)</label>
+              <input
+                type="number"
+                value={interviewConfig.slot_duration_minutes}
+                onChange={(e) => setInterviewConfig((prev) => ({ ...prev, slot_duration_minutes: Number(e.target.value) || 15 }))}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Max Students Per Day</label>
+              <input
+                type="number"
+                value={interviewConfig.max_students_per_day}
+                onChange={(e) => setInterviewConfig((prev) => ({ ...prev, max_students_per_day: Number(e.target.value) || 30 }))}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+            <div className="space-y-2 mt-7">
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={interviewConfig.allow_multi_day}
+                  onChange={(e) => setInterviewConfig((prev) => ({ ...prev, allow_multi_day: e.target.checked }))}
+                />
+                Allow multiple days auto-scheduling
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={interviewConfig.auto_assign_co_teachers}
+                  onChange={(e) => setInterviewConfig((prev) => ({ ...prev, auto_assign_co_teachers: e.target.checked }))}
+                />
+                Auto-assign co-teachers
+              </label>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Scheduling Start Date</label>
+              <input
+                type="date"
+                value={interviewScheduleWindow.start_date}
+                onChange={(e) => setInterviewScheduleWindow((prev) => ({ ...prev, start_date: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Scheduling End Date</label>
+              <input
+                type="date"
+                value={interviewScheduleWindow.end_date}
+                onChange={(e) => setInterviewScheduleWindow((prev) => ({ ...prev, end_date: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Daily Start Time</label>
+              <input
+                type="time"
+                value={interviewScheduleWindow.daily_start_time}
+                onChange={(e) => setInterviewScheduleWindow((prev) => ({ ...prev, daily_start_time: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Daily End Time</label>
+              <input
+                type="time"
+                value={interviewScheduleWindow.daily_end_time}
+                onChange={(e) => setInterviewScheduleWindow((prev) => ({ ...prev, daily_end_time: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Break Between Slots (minutes)</label>
+              <input
+                type="number"
+                min={0}
+                value={interviewScheduleWindow.break_minutes}
+                onChange={(e) => setInterviewScheduleWindow((prev) => ({ ...prev, break_minutes: Number(e.target.value) || 0 }))}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Meeting Link (optional)</label>
+              <input
+                type="url"
+                value={interviewScheduleWindow.meeting_link}
+                onChange={(e) => setInterviewScheduleWindow((prev) => ({ ...prev, meeting_link: e.target.value }))}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-sm"
+                placeholder="https://meet.google.com/..."
+              />
+            </div>
+          </div>
+
+          <div className="mt-5 flex items-center gap-3">
+            <button
+              onClick={autoScheduleInterviews}
+              disabled={autoscheduling || !selectedExamId}
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+            >
+              {autoscheduling ? 'Scheduling Interviews...' : 'Auto-Schedule Interviews'}
+            </button>
+            <span className="text-xs text-gray-500">Create interview slots for enrolled students using your settings above.</span>
+          </div>
+
+          <div className="mt-6">
+            <h5 className="text-sm font-semibold text-gray-900 mb-3">Scheduled Interviews</h5>
+            {interviewsLoading ? (
+              <div className="text-sm text-gray-500">Loading interview schedule...</div>
+            ) : interviews.length === 0 ? (
+              <div className="text-sm text-gray-500">No interviews scheduled yet.</div>
+            ) : (
+              <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+                {interviews.map((item) => (
+                  <div key={item.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-3">
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-sm font-medium text-gray-800">{item.student_name || 'Student'}</div>
+                        {(() => {
+                          const currentStatus = String(interviewEdits[item.id]?.status || item.status || 'scheduled').toLowerCase();
+                          const statusStyles: Record<string, string> = {
+                            scheduled: 'bg-blue-100 text-blue-700 border-blue-200',
+                            completed: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+                            cancelled: 'bg-red-100 text-red-700 border-red-200',
+                            no_show: 'bg-amber-100 text-amber-700 border-amber-200'
+                          };
+                          const label = currentStatus === 'no_show'
+                            ? 'No Show'
+                            : currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1);
+                          return (
+                            <span className={`px-2 py-1 rounded-full text-[11px] font-medium border ${statusStyles[currentStatus] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                              {label}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <div className="text-xs text-gray-500">{item.student_email || ''}</div>
+                      {(() => {
+                        const selectedInterviewerId = interviewEdits[item.id]?.assigned_interviewer_id || item?.assignment_meta?.assigned_interviewer_id;
+                        const selectedInterviewer = interviewerOptions.find((teacher) => teacher.id === selectedInterviewerId);
+                        if (!selectedInterviewer) return null;
+                        return (
+                          <span className="inline-block mt-1.5 px-2 py-1 rounded-full text-[11px] font-medium bg-indigo-100 text-indigo-700 border border-indigo-200">
+                            Assigned: {selectedInterviewer.full_name}
+                          </span>
+                        );
+                      })()}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Scheduled Date & Time</label>
+                        <input
+                          type="datetime-local"
+                          value={interviewEdits[item.id]?.scheduled_date || ''}
+                          onChange={(e) =>
+                            setInterviewEdits((prev) => ({
+                              ...prev,
+                              [item.id]: { ...(prev[item.id] || {}), scheduled_date: e.target.value }
+                            }))
+                          }
+                          className="w-full px-2.5 py-2 border border-gray-300 rounded text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Duration (minutes)</label>
+                        <input
+                          type="number"
+                          min={1}
+                          value={interviewEdits[item.id]?.duration_minutes ?? 15}
+                          onChange={(e) =>
+                            setInterviewEdits((prev) => ({
+                              ...prev,
+                              [item.id]: { ...(prev[item.id] || {}), duration_minutes: Number(e.target.value) || 15 }
+                            }))
+                          }
+                          className="w-full px-2.5 py-2 border border-gray-300 rounded text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Meeting Link</label>
+                        <input
+                          type="url"
+                          value={interviewEdits[item.id]?.meeting_link || ''}
+                          onChange={(e) =>
+                            setInterviewEdits((prev) => ({
+                              ...prev,
+                              [item.id]: { ...(prev[item.id] || {}), meeting_link: e.target.value }
+                            }))
+                          }
+                          className="w-full px-2.5 py-2 border border-gray-300 rounded text-xs"
+                          placeholder="https://meet.google.com/..."
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Status</label>
+                        <select
+                          value={interviewEdits[item.id]?.status || 'scheduled'}
+                          onChange={(e) =>
+                            setInterviewEdits((prev) => ({
+                              ...prev,
+                              [item.id]: { ...(prev[item.id] || {}), status: e.target.value }
+                            }))
+                          }
+                          className="w-full px-2.5 py-2 border border-gray-300 rounded text-xs"
+                        >
+                          <option value="scheduled">Scheduled</option>
+                          <option value="completed">Completed</option>
+                          <option value="cancelled">Cancelled</option>
+                          <option value="no_show">No Show</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">Assigned Interviewer</label>
+                      <select
+                        value={interviewEdits[item.id]?.assigned_interviewer_id || ''}
+                        onChange={(e) =>
+                          setInterviewEdits((prev) => ({
+                            ...prev,
+                            [item.id]: { ...(prev[item.id] || {}), assigned_interviewer_id: e.target.value }
+                          }))
+                        }
+                        className="w-full px-2.5 py-2 border border-gray-300 rounded text-xs"
+                      >
+                        <option value="">Unassigned</option>
+                        {interviewerOptions.map((teacher) => (
+                          <option key={teacher.id} value={teacher.id}>
+                            {teacher.full_name}{teacher.email ? ` (${teacher.email})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => updateInterviewScheduleItem(item.id)}
+                        disabled={updatingInterviewId === item.id}
+                        className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium disabled:opacity-50"
+                      >
+                        {updatingInterviewId === item.id ? 'Updating...' : 'Save Changes'}
+                      </button>
+                      <button
+                        onClick={() => {
+                          const nextEdit = { ...(interviewEdits[item.id] || {}), status: 'completed' };
+                          setInterviewEdits((prev) => ({
+                            ...prev,
+                            [item.id]: nextEdit
+                          }));
+                          updateInterviewScheduleItem(item.id, nextEdit);
+                        }}
+                        disabled={updatingInterviewId === item.id}
+                        className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium disabled:opacity-50"
+                      >
+                        Mark Completed
+                      </button>
+                      <button
+                        onClick={() => {
+                          const nextEdit = { ...(interviewEdits[item.id] || {}), status: 'cancelled' };
+                          setInterviewEdits((prev) => ({
+                            ...prev,
+                            [item.id]: nextEdit
+                          }));
+                          updateInterviewScheduleItem(item.id, nextEdit);
+                        }}
+                        disabled={updatingInterviewId === item.id}
+                        className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-medium disabled:opacity-50"
+                      >
+                        Cancel Interview
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => saveExam(false)}
+          disabled={saving}
+          className="px-4 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : selectedExamId ? 'Update Draft' : 'Save Draft'}
+        </button>
+        <button
+          onClick={() => saveExam(true)}
+          disabled={saving}
+          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+        >
+          Publish Now
+        </button>
       </div>
     </div>
   );

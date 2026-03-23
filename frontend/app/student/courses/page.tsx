@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
-import { BookOpen, Play, CheckCircle, Clock, Award, Loader2, TrendingUp } from 'lucide-react';
+import { BookOpen, Play, CheckCircle, Loader2, Users, Award } from 'lucide-react';
 import { IslamicCard } from '@/components/ui/IslamicCards';
 import { IslamicButton } from '@/components/ui/IslamicButtons';
 
@@ -17,6 +17,28 @@ interface Enrollment {
   completed: boolean;
   last_accessed?: string;
   status: string;
+  enrolled_count?: number;
+  enrollment_cap?: number;
+  enrollment_limit?: number;
+  total_students?: number;
+}
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isPlaceholderValue(value?: string): boolean {
+  if (!value) return true;
+  const normalized = value.trim();
+  if (!normalized) return true;
+  if (UUID_REGEX.test(normalized)) return true;
+  return /^(unknown(\s+teacher|\s+instructor)?|n\/a|null|undefined)$/i.test(normalized);
+}
+
+function safeTeacherName(teacherName?: string): string {
+  return isPlaceholderValue(teacherName) ? 'Instructor' : teacherName!.trim();
+}
+
+function safeCourseTitle(title?: string): string {
+  return isPlaceholderValue(title) ? 'Course' : title!.trim();
 }
 
 export default function MyCoursesPage() {
@@ -50,9 +72,13 @@ export default function MyCoursesPage() {
     }
   };
 
-  const filteredEnrollments = enrollments.filter(enrollment =>
-    filter === 'active' ? !enrollment.completed : enrollment.completed
-  );
+  const filteredEnrollments = enrollments.filter((enrollment) => {
+    const inSelectedTab = filter === 'active' ? !enrollment.completed : enrollment.completed;
+    const cap = enrollment.enrollment_cap || enrollment.enrollment_limit;
+    const enrolled = enrollment.total_students ?? enrollment.enrolled_count ?? 0;
+    const isFull = typeof cap === 'number' && cap > 0 && enrolled >= cap;
+    return inSelectedTab && !isFull;
+  });
 
   const activeCount = enrollments.filter(e => !e.completed).length;
   const completedCount = enrollments.filter(e => e.completed).length;
@@ -63,45 +89,6 @@ export default function MyCoursesPage() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-purple-900 mb-2">My Courses</h1>
         <p className="text-slate-600">Continue your learning journey</p>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <IslamicCard className="p-6 bg-gradient-to-br from-purple-50 to-indigo-50">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center">
-              <BookOpen className="w-6 h-6 text-purple-600" />
-            </div>
-            <div>
-              <p className="text-sm text-slate-600">Total Courses</p>
-              <p className="text-2xl font-bold text-purple-900">{enrollments.length}</p>
-            </div>
-          </div>
-        </IslamicCard>
-
-        <IslamicCard className="p-6 bg-gradient-to-br from-blue-50 to-cyan-50">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
-              <TrendingUp className="w-6 h-6 text-blue-600" />
-            </div>
-            <div>
-              <p className="text-sm text-slate-600">In Progress</p>
-              <p className="text-2xl font-bold text-blue-900">{activeCount}</p>
-            </div>
-          </div>
-        </IslamicCard>
-
-        <IslamicCard className="p-6 bg-gradient-to-br from-green-50 to-emerald-50">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
-              <Award className="w-6 h-6 text-green-600" />
-            </div>
-            <div>
-              <p className="text-sm text-slate-600">Completed</p>
-              <p className="text-2xl font-bold text-green-900">{completedCount}</p>
-            </div>
-          </div>
-        </IslamicCard>
       </div>
 
       {/* Filter Tabs */}
@@ -157,17 +144,22 @@ export default function MyCoursesPage() {
         </IslamicCard>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredEnrollments.map((enrollment) => (
+          {filteredEnrollments.map((enrollment) => {
+            const cap = enrollment.enrollment_cap || enrollment.enrollment_limit;
+            const enrolled = enrollment.total_students ?? enrollment.enrolled_count ?? 0;
+            const spotsLeft = typeof cap === 'number' && cap > 0 ? Math.max(cap - enrolled, 0) : null;
+
+            return (
             <IslamicCard 
               key={enrollment.id} 
-              className="group hover:shadow-xl transition-all overflow-hidden"
+              className="group hover:shadow-2xl transition-all duration-300 overflow-hidden border border-slate-200 bg-white"
             >
               {/* Thumbnail */}
-              <div className="relative h-48 bg-gradient-to-br from-purple-400 to-indigo-600 overflow-hidden">
+              <div className="relative h-52 bg-gradient-to-br from-purple-400 to-indigo-600 overflow-hidden">
                 {enrollment.course_image_url ? (
                   <img 
                     src={enrollment.course_image_url} 
-                    alt={enrollment.title}
+                    alt={safeCourseTitle(enrollment.title)}
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
                   />
                 ) : (
@@ -175,22 +167,12 @@ export default function MyCoursesPage() {
                     <BookOpen className="w-16 h-16 text-white opacity-50" />
                   </div>
                 )}
-                
-                {/* Progress Overlay */}
-                {!enrollment.completed && (
-                  <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 p-3">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs text-white font-medium">Progress</span>
-                      <span className="text-xs text-white font-bold">{enrollment.progress}%</span>
-                    </div>
-                    <div className="w-full bg-gray-700 rounded-full h-2">
-                      <div 
-                        className="bg-gradient-to-r from-purple-400 to-pink-500 h-2 rounded-full transition-all"
-                        style={{ width: `${enrollment.progress}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
+
+                <div className="absolute top-3 left-3 flex gap-2">
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-black/45 text-white backdrop-blur-sm">
+                    {enrollment.completed ? 'Completed' : 'Active'}
+                  </span>
+                </div>
 
                 {/* Completed Badge */}
                 {enrollment.completed && (
@@ -202,23 +184,39 @@ export default function MyCoursesPage() {
               </div>
 
               {/* Content */}
-              <div className="p-5">
-                {/* Category - removed since not in API response */}
+              <div className="p-6 space-y-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500">Course Progress</span>
+                  <span className="font-semibold text-purple-700">{enrollment.progress}%</span>
+                </div>
 
                 {/* Title */}
-                <h3 className="text-lg font-bold text-slate-800 mb-2 line-clamp-2 group-hover:text-purple-700 transition-colors">
-                  {enrollment.title}
+                <h3 className="text-2xl font-bold text-slate-800 leading-tight line-clamp-2 group-hover:text-purple-700 transition-colors">
+                  {safeCourseTitle(enrollment.title)}
                 </h3>
 
                 {/* Description */}
-                <p className="text-sm text-slate-600 mb-4 line-clamp-2">
+                <p className="text-base text-slate-600 line-clamp-3 leading-relaxed min-h-[72px]">
                   {enrollment.description}
                 </p>
 
-                {/* Teacher */}
-                <div className="flex items-center gap-2 mb-4 text-sm text-slate-600">
-                  <span>By {enrollment.teacher_name || 'Instructor'}</span>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700">
+                    <div className="text-slate-500">Teacher</div>
+                    <div className="font-semibold truncate">{safeTeacherName(enrollment.teacher_name)}</div>
+                  </div>
+                  <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700">
+                    <div className="text-slate-500">Status</div>
+                    <div className="font-semibold">{enrollment.completed ? 'Completed' : 'In Progress'}</div>
+                  </div>
                 </div>
+
+                {spotsLeft !== null && (
+                  <div className="flex items-center gap-2 text-sm rounded-xl bg-purple-50 border border-purple-200 px-3 py-2 text-purple-700">
+                    <Users className="w-4 h-4" />
+                    <span className="font-medium">{spotsLeft} spot{spotsLeft !== 1 ? 's' : ''} left</span>
+                  </div>
+                )}
 
                 {/* Action Button */}
                 {enrollment.completed ? (
@@ -252,7 +250,8 @@ export default function MyCoursesPage() {
                 )}
               </div>
             </IslamicCard>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

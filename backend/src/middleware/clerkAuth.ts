@@ -21,6 +21,26 @@ export const requireAuth = async (
   next: NextFunction
 ) => {
   try {
+    const e2eBypassEnabled =
+      config.nodeEnv === 'development' &&
+      process.env.E2E_AUTH_BYPASS === 'true';
+
+    const e2eRole = req.headers['x-e2e-role'] as string;
+    const e2eUserId = req.headers['x-e2e-user-id'] as string;
+    const e2eEmail = req.headers['x-e2e-email'] as string;
+
+    if (e2eBypassEnabled && e2eRole && e2eUserId) {
+      req.auth = {
+        userId: e2eUserId,
+        sessionId: 'e2e-bypass',
+        role: e2eRole,
+        email: e2eEmail || `${e2eUserId}@e2e.local`,
+      };
+
+      console.log('[Auth Middleware] Using E2E auth bypass:', req.auth.userId, 'Role:', req.auth.role);
+      return next();
+    }
+
     // Check for x-clerk-user-id header first (from Next.js API routes)
     const clerkUserId = req.headers['x-clerk-user-id'] as string;
     

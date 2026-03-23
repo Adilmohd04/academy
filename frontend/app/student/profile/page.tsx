@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useUser, useAuth } from '@clerk/nextjs';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Phone, Mail, Save, Loader2, Camera, CreditCard, Download, Calendar, CheckCircle, Clock, XCircle, BookOpen, Video, Receipt, ChevronDown, ChevronUp, ExternalLink, FileText, DollarSign, Hash } from 'lucide-react';
+import { User, Phone, Mail, Save, Loader2, Camera, CreditCard, Download, Calendar, CheckCircle, Clock, XCircle, BookOpen, Video, Receipt, ChevronDown, ChevronUp, ExternalLink, DollarSign, Hash } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { IslamicLoader } from '@/components/ui/IslamicLoader';
 
@@ -41,6 +41,7 @@ interface Payment {
 export default function StudentProfilePage() {
   const { user, isLoaded } = useUser();
   const { getToken } = useAuth();
+  const apiBaseUrl = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000').replace('localhost', '127.0.0.1');
   const [loading, setLoading] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loadingPayments, setLoadingPayments] = useState(false);
@@ -67,7 +68,7 @@ export default function StudentProfilePage() {
     setLoadingPayments(true);
     try {
       const token = await getToken();
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/student/payments`, {
+      const res = await fetch(`${apiBaseUrl}/api/student/payments`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'x-clerk-user-id': user?.id || ''
@@ -88,7 +89,7 @@ export default function StudentProfilePage() {
     setDownloadingId(paymentId);
     try {
       const token = await getToken();
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/payments/${paymentId}/receipt`, {
+      const res = await fetch(`${apiBaseUrl}/api/payments/${paymentId}/receipt`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'x-clerk-user-id': user?.id || ''
@@ -401,8 +402,9 @@ export default function StudentProfilePage() {
             <div className="space-y-3">
               {payments.map((payment) => {
                 const isExpanded = expandedPayment === payment.id;
-                const isPaid = payment.status === 'completed' || payment.status === 'paid';
-                const isPending = payment.status === 'pending';
+                const status = (payment.status || '').toLowerCase();
+                const isPaid = ['completed', 'paid', 'success', 'captured', 'succeeded'].includes(status);
+                const isPending = status === 'pending';
                 
                 return (
                   <div 
@@ -459,7 +461,7 @@ export default function StudentProfilePage() {
                           {isPaid ? <CheckCircle className="w-3 h-3" /> 
                            : isPending ? <Clock className="w-3 h-3" /> 
                            : <XCircle className="w-3 h-3" />}
-                          {isPaid ? 'Paid' : isPending ? 'Pending' : payment.status}
+                          {isPaid ? 'Success' : isPending ? 'Pending' : payment.status}
                         </span>
                         <p className="text-base font-bold text-slate-800 min-w-[60px] text-right">
                           {formatCurrency(payment.amount, payment.currency)}
@@ -529,7 +531,7 @@ export default function StudentProfilePage() {
                                     <span className={`font-medium ${
                                       isPaid ? 'text-green-600' : isPending ? 'text-yellow-600' : 'text-red-600'
                                     }`}>
-                                      {isPaid ? 'Completed' : isPending ? 'Pending' : payment.status.charAt(0).toUpperCase() + payment.status.slice(1)}
+                                      {isPaid ? 'Success' : isPending ? 'Pending' : payment.status.charAt(0).toUpperCase() + payment.status.slice(1)}
                                     </span>
                                   </div>
                                 </div>
@@ -594,9 +596,9 @@ export default function StudentProfilePage() {
                               </div>
                             </div>
 
-                            {/* Download Receipt Button */}
+                            {/* Download Actions */}
                             {isPaid && (
-                              <div className="mt-4 pt-4 border-t border-stone-100 flex justify-end">
+                              <div className="mt-4 pt-4 border-t border-stone-100 flex flex-wrap justify-end gap-2">
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();

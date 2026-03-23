@@ -108,13 +108,13 @@ export const getPendingApprovals = async (): Promise<CourseApprovalRequest[]> =>
  * Approve a course (Admin)
  */
 export const approveCourse = async (courseId: string, adminId: string): Promise<CourseApprovalRequest> => {
+  const timestamp = new Date().toISOString();
+
   const { data, error } = await supabase
     .from('courses')
     .update({
       approval_status: 'approved',
-      approved_at: new Date().toISOString(),
-      approved_by: adminId,
-      updated_at: new Date().toISOString()
+      updated_at: timestamp
     })
     .eq('id', courseId)
     .eq('approval_status', 'pending_approval')
@@ -125,7 +125,37 @@ export const approveCourse = async (courseId: string, adminId: string): Promise<
     throw new Error(`Failed to approve course: ${error.message}`);
   }
 
-  return data;
+  if (!data) {
+    throw new Error('Course approval returned no data');
+  }
+
+  let teacherName = 'Unknown Teacher';
+  let teacherEmail: string | null = null;
+
+  if (data.teacher_id) {
+    const { data: teacherProfileByClerk } = await supabase
+      .from('profiles')
+      .select('full_name, email')
+      .eq('clerk_user_id', data.teacher_id)
+      .maybeSingle();
+
+    const { data: teacherProfileById } = await supabase
+      .from('profiles')
+      .select('full_name, email')
+      .eq('id', data.teacher_id)
+      .maybeSingle();
+
+    const teacherProfile = teacherProfileByClerk || teacherProfileById;
+
+    teacherName = teacherProfile?.full_name || teacherName;
+    teacherEmail = teacherProfile?.email || null;
+  }
+
+  return {
+    ...data,
+    teacher_name: teacherName,
+    teacher_email: teacherEmail,
+  };
 };
 
 /**
@@ -136,13 +166,14 @@ export const rejectCourse = async (
   adminId: string, 
   reason: string
 ): Promise<CourseApprovalRequest> => {
+  const timestamp = new Date().toISOString();
+
   const { data, error } = await supabase
     .from('courses')
     .update({
       approval_status: 'rejected',
       rejection_reason: reason,
-      approved_by: adminId, // Using same field to track who rejected
-      updated_at: new Date().toISOString()
+      updated_at: timestamp
     })
     .eq('id', courseId)
     .eq('approval_status', 'pending_approval')

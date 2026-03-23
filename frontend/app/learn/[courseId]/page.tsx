@@ -89,6 +89,31 @@ interface Enrollment {
   status: string;
 }
 
+interface CourseFinalExam {
+  id: string;
+  title: string;
+  description?: string | null;
+  exam_type: 'quiz' | 'interview' | 'document' | 'project';
+  points?: number;
+  due_date?: string | null;
+  instructions?: string | null;
+  is_published?: boolean;
+  submission?: {
+    id: string;
+    status?: string;
+    submitted_at?: string;
+    grade?: number | null;
+    feedback?: string | null;
+  } | null;
+  interview?: {
+    id?: string;
+    scheduled_date?: string;
+    duration_minutes?: number;
+    meeting_link?: string | null;
+    status?: string;
+  } | null;
+}
+
 // Helper function to convert YouTube URL to embed format
 function getYouTubeEmbedUrl(url: string): string {
   if (!url) return '';
@@ -189,6 +214,8 @@ export default function LearnPage() {
 
   const [course, setCourse] = useState<Course | null>(null);
   const [modules, setModules] = useState<Module[]>([]);
+  const [finalExams, setFinalExams] = useState<CourseFinalExam[]>([]);
+  const [activeFinalExam, setActiveFinalExam] = useState<CourseFinalExam | null>(null);
   const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeLesson, setActiveLesson] = useState<Lesson | null>(null);
@@ -231,11 +258,24 @@ export default function LearnPage() {
   const [assignmentSubmission, setAssignmentSubmission] = useState<any>(null);
   const [assignmentFileError, setAssignmentFileError] = useState('');
 
+  // Final exam submission state
+  const [finalExamSubmissionType, setFinalExamSubmissionType] = useState<'text' | 'link' | 'file'>('text');
+  const [finalExamTextContent, setFinalExamTextContent] = useState('');
+  const [finalExamLinkUrl, setFinalExamLinkUrl] = useState('');
+  const [finalExamFileUrl, setFinalExamFileUrl] = useState('');
+  const [finalExamSubmitting, setFinalExamSubmitting] = useState(false);
+
   useEffect(() => {
     if (userId && courseId) {
       fetchCourseData();
     }
   }, [userId, courseId]);
+
+  useEffect(() => {
+    if (leftSidebarTab === 'content' && !activeLesson && !showSchedule && !showGradingPolicy) {
+      setShowAbout(true);
+    }
+  }, [leftSidebarTab, activeLesson, showSchedule, showGradingPolicy]);
 
   useEffect(() => {
     if (activeLesson?.content_type === 'video' && activeLesson.video_urls?.length) {
@@ -256,7 +296,7 @@ export default function LearnPage() {
     try {
       const token = await getToken();
       
-      const [courseRes, modulesRes, enrollmentRes] = await Promise.all([
+      const [courseRes, modulesRes, enrollmentRes, finalExamsRes] = await Promise.all([
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/student/courses/${courseId}/details`, {
           headers: { 
             'x-clerk-user-id': userId || '',
@@ -271,6 +311,12 @@ export default function LearnPage() {
         }),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/student/enrollments/course/${courseId}`, {
           headers: { 
+            'x-clerk-user-id': userId || '',
+            'Authorization': `Bearer ${token}`
+          }
+        }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/student/courses/${courseId}/final-exams`, {
+          headers: {
             'x-clerk-user-id': userId || '',
             'Authorization': `Bearer ${token}`
           }
@@ -300,6 +346,13 @@ export default function LearnPage() {
       } else {
         console.error('Enrollment fetch failed:', await enrollmentRes.text());
       }
+
+      if (finalExamsRes.ok) {
+        const finalExamData = await finalExamsRes.json();
+        setFinalExams(finalExamData.finalExams || []);
+      } else {
+        console.error('Final exams fetch failed:', await finalExamsRes.text());
+      }
     } catch (error) {
       console.error('Error fetching course data:', error);
     } finally {
@@ -319,6 +372,7 @@ export default function LearnPage() {
 
   const handleLessonClick = async (lesson: Lesson, module: Module) => {
     setActiveLesson(lesson);
+    setActiveFinalExam(null);
     setActiveModule(module);
     setShowAbout(false);
     setShowGradingPolicy(false);
@@ -381,6 +435,113 @@ export default function LearnPage() {
       setAssignmentFileError('');
       setAssignmentSubmission(null);
       fetchAssignmentSubmission(lesson.id);
+    }
+  };
+
+  const handleFinalExamClick = (exam: CourseFinalExam) => {
+    setActiveFinalExam(exam);
+    setActiveLesson(null);
+    setShowAbout(false);
+    setShowGradingPolicy(false);
+    setShowSchedule(false);
+    setQuizReview(null);
+    setFinalExamSubmissionType('text');
+    setFinalExamTextContent('');
+    setFinalExamLinkUrl('');
+    setFinalExamFileUrl('');
+  };
+
+  const handleFinalExamSubmit = async () => {
+    if (!activeFinalExam || finalExamSubmitting || activeFinalExam.submission) return;
+
+    const textValue = finalExamTextContent.trim();
+    const linkValue = finalExamLinkUrl.trim();
+    const fileValue = finalExamFileUrl.trim();
+
+    if (finalExamSubmissionType === 'text' && !textValue) {
+      alert('Please enter your final exam response before submitting.');
+      return;
+    }
+
+    if (finalExamSubmissionType === 'link' && !linkValue) {
+      alert('Please provide a valid link before submitting.');
+      return;
+    }
+
+    if (finalExamSubmissionType === 'file' && !fileValue) {
+      alert('Please provide a file URL before submitting.');
+      return;
+    }
+
+    try {
+      setFinalExamSubmitting(true);
+      const token = await getToken();
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/student/final-exams/${activeFinalExam.id}/submit`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-clerk-user-id': userId || '',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          submission_type: finalExamSubmissionType,
+          text_content: finalExamSubmissionType === 'text' ? textValue : null,
+          link_url: finalExamSubmissionType === 'link' ? linkValue : null,
+          file_url: finalExamSubmissionType === 'file' ? fileValue : null,
+          file_type: finalExamSubmissionType === 'file' ? 'url' : null
+        })
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to submit final exam.');
+      }
+
+      const newSubmission = data?.submission || null;
+
+      setFinalExams((prev) =>
+        prev.map((exam) =>
+          exam.id === activeFinalExam.id
+            ? {
+                ...exam,
+                submission: newSubmission
+                  ? {
+                      id: newSubmission.id,
+                      status: newSubmission.status,
+                      submitted_at: newSubmission.submitted_at,
+                      grade: newSubmission.grade,
+                      feedback: newSubmission.feedback
+                    }
+                  : exam.submission
+              }
+            : exam
+        )
+      );
+
+      setActiveFinalExam((prev) =>
+        prev
+          ? {
+              ...prev,
+              submission: newSubmission
+                ? {
+                    id: newSubmission.id,
+                    status: newSubmission.status,
+                    submitted_at: newSubmission.submitted_at,
+                    grade: newSubmission.grade,
+                    feedback: newSubmission.feedback
+                  }
+                : prev.submission
+            }
+          : prev
+      );
+
+      alert('Final exam submitted successfully.');
+    } catch (error: any) {
+      console.error('Error submitting final exam:', error);
+      alert(error?.message || 'Failed to submit final exam.');
+    } finally {
+      setFinalExamSubmitting(false);
     }
   };
 
@@ -987,7 +1148,7 @@ export default function LearnPage() {
     : normalizeList(typeof course.prerequisites === 'string' ? course.prerequisites : null);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col relative">
+    <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
         {/* Top Header - Logo left, Course title center, Back button right */}
         <header className="w-full bg-white border-b border-gray-200 shadow-sm z-40 flex items-center justify-between px-6 py-3">
           <div className="flex items-center gap-3">
@@ -1029,13 +1190,13 @@ export default function LearnPage() {
         <div className="flex flex-1 overflow-hidden">
 
         {/* FIRST LEFT SIDEBAR - Tab Navigation (75px, Modern Blue) */}
-        <aside className="w-19 bg-gradient-to-b from-slate-800 to-slate-900 text-white overflow-y-auto flex-shrink-0 flex flex-col items-center py-6 border-r border-slate-700">
+        <aside className="w-19 bg-gradient-to-b from-slate-800 to-slate-900 text-white overflow-hidden flex-shrink-0 flex flex-col items-center py-6 border-r border-slate-700 h-full">
           {/* Course Content Tab */}
           <button
             onClick={() => {
               setLeftSidebarTab('content');
               setShowSchedule(false);
-              setShowAbout(false);
+              setShowAbout(true);
               setShowGradingPolicy(false);
               setActiveLesson(null);
             }}
@@ -1114,32 +1275,17 @@ export default function LearnPage() {
         </aside>
 
         {/* SECOND LEFT SIDEBAR - Dynamic Content (290px, WHITE) */}
-        <aside className="w-72 bg-white text-gray-800 overflow-y-auto flex-shrink-0 border-r border-gray-200">
+        <aside className="w-72 bg-white text-gray-800 overflow-y-auto flex-shrink-0 border-r border-gray-200 [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
           {/* MODULES VIEW */}
           {leftSidebarTab === 'content' && (
             <div>
-              {/* Course Header - Clean Design */}
-              <div className="p-5 bg-gradient-to-r from-blue-600 to-indigo-600 border-b border-blue-500">
-                <div className="flex items-center space-x-3">
-                  <div className="w-12 h-12 bg-white rounded-lg flex items-center justify-center shadow-md">
-                    <BookOpen className="w-7 h-7 text-blue-600" />
-                  </div>
-                  <div className="flex-1">
-                    <h2 className="text-white font-bold text-base leading-tight line-clamp-2">
-                      {course?.title || 'Course Content'}
-                    </h2>
-                    <p className="text-blue-100 text-xs mt-1">
-                      {course?.teacher?.full_name || course?.teacher_name || ''}
-                    </p>
-                  </div>
-                </div>
-              </div>
 
               {/* Course Introduction */}
               <button
                 onClick={() => {
                   setShowAbout(true);
                   setShowGradingPolicy(false);
+                  setShowSchedule(false);
                   setActiveLesson(null);
                 }}
                 className={`w-full flex items-center space-x-3 px-5 py-3.5 border-b border-gray-100 transition-all ${
@@ -1364,6 +1510,42 @@ export default function LearnPage() {
                   </div>
                 ))
               )}
+
+              {/* Final Exam - Separate module outside weeks */}
+              {finalExams.length > 0 && (
+                <>
+                  <div className="px-5 py-3 bg-gray-50 border-y border-gray-200 mt-1">
+                    <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wider">Final Exam</h3>
+                  </div>
+                  <div className="px-5 py-3 space-y-2">
+                    {finalExams.map((exam) => {
+                      const isActive = activeFinalExam?.id === exam.id;
+                      return (
+                        <button
+                          key={exam.id}
+                          onClick={() => handleFinalExamClick(exam)}
+                          className={`w-full flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-all text-left ${
+                            isActive
+                              ? 'bg-blue-50 border-blue-300 text-blue-700 shadow-sm'
+                              : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'
+                          }`}
+                        >
+                          <div className="w-6 h-6 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <FileQuestion className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium truncate">{exam.title}</div>
+                            <div className="text-xs text-gray-400">
+                              {exam.exam_type?.toUpperCase()}
+                              {exam.due_date ? ` · Due ${new Date(exam.due_date).toLocaleDateString()}` : ''}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1487,7 +1669,6 @@ export default function LearnPage() {
                 {/* Course Header */}
                 <div className="mb-8 rounded-xl overflow-hidden border border-gray-200">
                   <div className="relative">
-                    <div className="absolute inset-0 bg-gradient-to-r from-purple-800/70 to-indigo-700/70"></div>
                     {headerImage ? (
                       <img
                         src={headerImage}
@@ -1495,11 +1676,11 @@ export default function LearnPage() {
                         className="w-full h-56 object-cover"
                       />
                     ) : (
-                      <div className="w-full h-56 bg-gradient-to-r from-purple-600 to-indigo-700"></div>
+                      <div className="w-full h-56 bg-gradient-to-r from-slate-200 to-slate-300"></div>
                     )}
-                    <div className="absolute inset-0 p-6 flex flex-col justify-end">
+                    <div className="absolute inset-0 p-6 flex flex-col justify-end bg-gradient-to-t from-black/60 to-transparent">
                       <h1 className="text-3xl font-bold text-white mb-2">{course?.title}</h1>
-                      <p className="text-purple-100 max-w-3xl">{course?.short_description || course?.description}</p>
+                      <p className="text-white/80 max-w-3xl">{course?.short_description || course?.description}</p>
                     </div>
                   </div>
                   <div className="p-6 bg-white">
@@ -2301,15 +2482,15 @@ export default function LearnPage() {
             {activeLesson && activeLesson.content_type === 'video' && (
               <div className="space-y-6">
                 {/* Lesson Header */}
-                <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                        <Video className="w-5 h-5 text-blue-600" />
+                      <div className="w-11 h-11 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-xl flex items-center justify-center">
+                        <Video className="w-5 h-5 text-indigo-600" />
                       </div>
                       <div>
-                        <h2 className="text-2xl font-bold text-slate-800">{activeLesson.title}</h2>
-                        <p className="text-sm text-slate-500">Video Lesson</p>
+                        <h2 className="text-2xl font-bold text-slate-900">{activeLesson.title}</h2>
+                        <p className="text-sm text-slate-500 font-medium">Video Lesson</p>
                       </div>
                     </div>
                     {activeLesson.completed ? (
@@ -2318,7 +2499,7 @@ export default function LearnPage() {
                         Completed
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-semibold">
+                      <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold">
                         <Clock className="w-4 h-4" />
                         Pending
                       </span>
@@ -2330,9 +2511,9 @@ export default function LearnPage() {
                     const langOptions = getVideoLanguageOptions();
                     if (langOptions.length <= 1) return null;
                     return (
-                      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4 mb-4">
+                      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 mb-4">
                         <div className="flex items-center gap-3">
-                          <span className="text-sm font-semibold text-blue-900">🌐 Select Video Language:</span>
+                          <span className="text-sm font-semibold text-indigo-900">🌐 Select Video Language:</span>
                           <select
                             value={langOptions.some(o => o.lessonId) ? activeLesson.id : selectedVideoLanguage}
                             onChange={(e) => {
@@ -2350,7 +2531,7 @@ export default function LearnPage() {
                                 setSelectedVideoLanguage(e.target.value);
                               }
                             }}
-                            className="flex-1 px-4 py-2.5 border-2 border-blue-300 rounded-lg text-sm font-medium bg-white hover:bg-blue-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all cursor-pointer"
+                            className="flex-1 px-4 py-2.5 border border-indigo-300 rounded-xl text-sm font-medium bg-white hover:bg-indigo-50 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all cursor-pointer"
                           >
                             {langOptions.map((opt, idx) => (
                               <option key={opt.lessonId || opt.language} value={opt.lessonId || opt.language}>
@@ -2359,7 +2540,7 @@ export default function LearnPage() {
                             ))}
                           </select>
                         </div>
-                        <p className="text-xs text-blue-600 mt-2">
+                        <p className="text-xs text-indigo-600 mt-2 font-medium">
                           📺 Video available in {langOptions.length} language{langOptions.length > 1 ? 's' : ''}
                         </p>
                       </div>
@@ -2413,15 +2594,15 @@ export default function LearnPage() {
               const assignmentStatus = getLessonStatus(activeLesson);
               const deadlinePassed = activeLesson.deadline && new Date(activeLesson.deadline) < new Date();
               return (
-              <div className="bg-white rounded-lg border border-gray-200 p-8">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8">
                 {/* Assignment Header with Deadline */}
-                <div className="flex items-center gap-3 mb-6 pb-6 border-b border-gray-200">
-                  <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                    <ClipboardList className="w-6 h-6 text-purple-600" />
+                <div className="flex items-center gap-3 mb-6 pb-6 border-b border-slate-200">
+                  <div className="w-12 h-12 bg-gradient-to-br from-purple-100 to-indigo-100 rounded-xl flex items-center justify-center">
+                    <ClipboardList className="w-6 h-6 text-indigo-600" />
                   </div>
                   <div className="flex-1">
-                    <h2 className="text-xl font-bold text-slate-800">{activeLesson.title}</h2>
-                    <p className="text-sm text-slate-500">Assignment</p>
+                    <h2 className="text-xl font-bold text-slate-900">{activeLesson.title}</h2>
+                    <p className="text-sm text-slate-500 font-medium">Assignment</p>
                   </div>
                   <div className="text-right">
                     {activeLesson.deadline && (
@@ -2514,7 +2695,7 @@ export default function LearnPage() {
 
                 {/* Upload Section - Only show if deadline not passed or no deadline */}
                 {!deadlinePassed ? (
-                  <div className="bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-dashed border-purple-300 rounded-lg p-8">
+                  <div className="bg-gradient-to-br from-purple-50 to-indigo-50 border border-purple-200 rounded-2xl p-6 md:p-8">
                     <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                       <Upload className="w-5 h-5 text-purple-600" />
                       Submit Your Work
@@ -2531,7 +2712,7 @@ export default function LearnPage() {
                           onChange={handleAssignmentFileChange}
                           className="block w-full text-sm text-slate-500
                             file:mr-4 file:py-2 file:px-4
-                            file:rounded-lg file:border-0
+                            file:rounded-xl file:border-0
                             file:text-sm file:font-semibold
                             file:bg-purple-100 file:text-purple-700
                             hover:file:bg-purple-200
@@ -2568,11 +2749,11 @@ export default function LearnPage() {
                             value={assignmentLink}
                             onChange={(e) => setAssignmentLink(e.target.value)}
                             placeholder="https://drive.google.com/..."
-                            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                            className="flex-1 px-4 py-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                           />
                           {assignmentLink && (
                             <a href={assignmentLink} target="_blank" rel="noopener noreferrer"
-                              className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2 text-sm">
+                              className="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-2 text-sm">
                               <LinkIcon className="w-4 h-4" />
                               Preview
                             </a>
@@ -2585,7 +2766,7 @@ export default function LearnPage() {
                       <button
                         onClick={handleAssignmentSubmit}
                         disabled={assignmentSubmitting || (!assignmentFile && !assignmentLink.trim())}
-                        className="w-full mt-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-3 rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all shadow-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        className="w-full mt-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-3 rounded-xl hover:from-purple-700 hover:to-indigo-700 transition-all shadow-md font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                       >
                         {assignmentSubmitting ? (
                           <>
@@ -2617,7 +2798,7 @@ export default function LearnPage() {
 
             {/* Quiz Content */}
             {activeLesson && activeLesson.content_type === 'quiz' && (
-              <div className="bg-white rounded-lg border border-gray-200 p-8">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8">
                 {quizLoading ? (
                   <div className="text-center py-12">
                     <Loader2 className="w-8 h-8 text-purple-600 animate-spin mx-auto mb-4" />
@@ -2626,13 +2807,13 @@ export default function LearnPage() {
                 ) : quizData ? (
                   <>
                     {/* Quiz Header with Total Marks & Last Submission Info */}
-                    <div className="flex items-center gap-3 mb-6 pb-6 border-b border-gray-200">
-                      <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                        <FileQuestion className="w-6 h-6 text-blue-600" />
+                    <div className="flex items-center gap-3 mb-6 pb-6 border-b border-slate-200">
+                      <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-xl flex items-center justify-center">
+                        <FileQuestion className="w-6 h-6 text-indigo-600" />
                       </div>
                       <div className="flex-1">
-                        <h2 className="text-xl font-bold text-slate-800">{quizData.quiz.title}</h2>
-                        <p className="text-sm text-slate-500">Quiz</p>
+                        <h2 className="text-xl font-bold text-slate-900">{quizData.quiz.title}</h2>
+                        <p className="text-sm text-slate-500 font-medium">Assessment</p>
                       </div>
                       <div className="text-right">
                         {quizData.quiz.questions && quizData.quiz.questions.length > 0 && (
@@ -2663,7 +2844,7 @@ export default function LearnPage() {
 
                     {/* Previous Submission Score Banner */}
                     {quizData.last_submission && (
-                      <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-200 rounded-xl p-5 mb-6">
+                      <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-200 rounded-2xl p-5 mb-6">
                         <div className="flex items-center justify-between">
                           <div>
                             <h3 className="text-sm font-semibold text-indigo-800 mb-1">Last Submission</h3>
@@ -2705,9 +2886,9 @@ export default function LearnPage() {
                     )}
 
                     {/* Instructions */}
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
-                      <h3 className="font-semibold text-blue-900 mb-3">Instructions</h3>
-                      <ul className="text-sm text-blue-800 space-y-2 list-disc list-inside">
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 mb-6">
+                      <h3 className="font-semibold text-slate-900 mb-3">Instructions</h3>
+                      <ul className="text-sm text-slate-700 space-y-2 list-disc list-inside">
                         <li>You may submit any number of times{quizData.quiz.deadline ? ' before the due date' : ''}. The final submission will be considered for grading.</li>
                         {quizData.quiz.deadline ? (
                           <li>Your score and correct answers will be revealed after the deadline passes.</li>
@@ -2738,7 +2919,7 @@ export default function LearnPage() {
                     {/* Quiz Questions */}
                     {quizData.quiz.questions && quizData.quiz.questions.length > 0 ? (
                       <div className="space-y-6">
-                        <h3 className="font-bold text-slate-800 text-lg mb-4">Questions</h3>
+                        <h3 className="font-bold text-slate-900 text-lg mb-4">Questions</h3>
                         
                         {quizData.quiz.questions.map((question: any, index: number) => {
                           const qType = question.type || 'mcq';
@@ -2747,7 +2928,7 @@ export default function LearnPage() {
                           const isFillBlank = qType === 'fill-blank' || qType === 'fill_in_the_blank' || qType === 'fill-in-blank';
 
                           return (
-                            <div key={index} className="bg-gray-50 border border-gray-200 rounded-lg p-6">
+                            <div key={index} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
                               <div className="flex items-start gap-3 mb-4">
                                 <span className="font-bold text-slate-700">{index + 1})</span>
                                 <div className="flex-1">
@@ -2769,7 +2950,7 @@ export default function LearnPage() {
                                       setQuizAnswers(newAnswers);
                                     }}
                                     disabled={quizData.deadline_passed || !quizData.can_submit}
-                                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                    className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
                                   />
                                 </div>
                               ) : (
@@ -2778,7 +2959,7 @@ export default function LearnPage() {
                                   {question.options && question.options.map((option: string, optIndex: number) => (
                                     <label 
                                       key={optIndex} 
-                                      className="flex items-center gap-3 p-3 border border-gray-200 rounded hover:bg-white cursor-pointer"
+                                      className="flex items-center gap-3 p-3 border border-slate-200 rounded-xl hover:bg-indigo-50 cursor-pointer transition-colors"
                                     >
                                       <input 
                                         type={isMultiSelect ? 'checkbox' : 'radio'}
@@ -2805,7 +2986,7 @@ export default function LearnPage() {
                                           }
                                           setQuizAnswers(newAnswers);
                                         }}
-                                        className="w-4 h-4 text-blue-600"
+                                        className="w-4 h-4 text-indigo-600"
                                         disabled={quizData.deadline_passed || !quizData.can_submit}
                                       />
                                       <span className="text-slate-700">{option}</span>
@@ -2829,7 +3010,7 @@ export default function LearnPage() {
                         <button 
                           onClick={handleQuizSubmit}
                           disabled={quizData.deadline_passed || !quizData.can_submit || quizSubmitting}
-                          className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-lg font-semibold text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white py-4 rounded-xl hover:from-indigo-700 hover:to-violet-700 transition-all shadow-md font-semibold text-lg disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {quizSubmitting ? 'Submitting...' : 'Submit Quiz'}
                         </button>
@@ -2846,9 +3027,9 @@ export default function LearnPage() {
 
             {/* Quiz Review Results - Shown after submission */}
             {activeLesson && activeLesson.content_type === 'quiz' && quizReview && (
-              <div className="bg-white rounded-lg border border-gray-200 p-8 mt-6">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8 mt-6">
                 {/* Score Banner with submission time */}
-                <div className={`rounded-xl p-6 text-white mb-6 ${
+                <div className={`rounded-2xl p-6 text-white mb-6 ${
                   quizReview.show_answers
                     ? (quizReview.percentage >= 70 
                       ? 'bg-gradient-to-r from-green-600 to-emerald-600' 
@@ -3052,8 +3233,149 @@ export default function LearnPage() {
               </div>
             )}
 
+            {/* Final Exam View - separate from week modules */}
+            {leftSidebarTab === 'content' && activeFinalExam && !activeLesson && !showAbout && !showGradingPolicy && !showSchedule && (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8">
+                <div className="flex items-start gap-3 mb-6 pb-6 border-b border-slate-200">
+                  <div className="w-12 h-12 bg-gradient-to-br from-orange-100 to-amber-100 rounded-xl flex items-center justify-center">
+                    <FileQuestion className="w-6 h-6 text-orange-600" />
+                  </div>
+                  <div className="flex-1">
+                    <h2 className="text-xl font-bold text-slate-900">{activeFinalExam.title}</h2>
+                    <p className="text-sm text-slate-500 font-medium">Final Exam • {activeFinalExam.exam_type?.toUpperCase()}</p>
+                  </div>
+                </div>
+
+                {activeFinalExam.description && (
+                  <p className="text-slate-700 mb-4">{activeFinalExam.description}</p>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+                    <p className="text-xs text-orange-600 font-semibold mb-1">Total Marks</p>
+                    <p className="text-lg font-bold text-orange-700">{activeFinalExam.points ?? '--'}</p>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <p className="text-xs text-blue-600 font-semibold mb-1">Due Date</p>
+                    <p className="text-lg font-bold text-blue-700">{activeFinalExam.due_date ? new Date(activeFinalExam.due_date).toLocaleString() : 'Not set'}</p>
+                  </div>
+                </div>
+
+                {activeFinalExam.instructions && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6">
+                    <h3 className="text-sm font-semibold text-slate-800 mb-2">Instructions</h3>
+                    <p className="text-sm text-slate-600 whitespace-pre-wrap">{activeFinalExam.instructions}</p>
+                  </div>
+                )}
+
+                {activeFinalExam.exam_type === 'interview' && activeFinalExam.interview && (
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
+                    <h3 className="text-sm font-semibold text-indigo-900 mb-2">Interview Schedule</h3>
+                    <p className="text-sm text-indigo-700">
+                      {activeFinalExam.interview.scheduled_date
+                        ? `Scheduled: ${new Date(activeFinalExam.interview.scheduled_date).toLocaleString()}`
+                        : 'Interview time will be announced by your teacher.'}
+                    </p>
+                    {activeFinalExam.interview.duration_minutes && (
+                      <p className="text-xs text-indigo-600 mt-1">Duration: {activeFinalExam.interview.duration_minutes} minutes</p>
+                    )}
+                    {activeFinalExam.interview.meeting_link && (
+                      <a
+                        href={activeFinalExam.interview.meeting_link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center mt-3 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
+                      >
+                        Join Interview Meeting
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {activeFinalExam.submission ? (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <p className="text-sm font-semibold text-green-700 mb-1">Submission Status: {activeFinalExam.submission.status || 'Submitted'}</p>
+                    {activeFinalExam.submission.submitted_at && (
+                      <p className="text-xs text-green-600">Submitted: {new Date(activeFinalExam.submission.submitted_at).toLocaleString()}</p>
+                    )}
+                    {activeFinalExam.submission.grade !== undefined && activeFinalExam.submission.grade !== null && (
+                      <p className="text-xs text-green-700 mt-1">Grade: {activeFinalExam.submission.grade}</p>
+                    )}
+                    {activeFinalExam.submission.feedback && (
+                      <p className="text-xs text-green-700 mt-1">Feedback: {activeFinalExam.submission.feedback}</p>
+                    )}
+                  </div>
+                ) : activeFinalExam.exam_type !== 'interview' ? (
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-4">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800 mb-2">Submit Final Exam</p>
+                      <div className="flex flex-wrap gap-2">
+                        {(['text', 'link', 'file'] as const).map((type) => (
+                          <button
+                            key={type}
+                            onClick={() => setFinalExamSubmissionType(type)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border ${
+                              finalExamSubmissionType === type
+                                ? 'bg-blue-600 border-blue-600 text-white'
+                                : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-100'
+                            }`}
+                          >
+                            {type === 'text' ? 'Text Response' : type === 'link' ? 'Submission Link' : 'File URL'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {finalExamSubmissionType === 'text' && (
+                      <textarea
+                        value={finalExamTextContent}
+                        onChange={(e) => setFinalExamTextContent(e.target.value)}
+                        rows={6}
+                        placeholder="Write your final exam response here..."
+                        className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm"
+                      />
+                    )}
+
+                    {finalExamSubmissionType === 'link' && (
+                      <input
+                        type="url"
+                        value={finalExamLinkUrl}
+                        onChange={(e) => setFinalExamLinkUrl(e.target.value)}
+                        placeholder="https://docs.google.com/..."
+                        className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm"
+                      />
+                    )}
+
+                    {finalExamSubmissionType === 'file' && (
+                      <input
+                        type="url"
+                        value={finalExamFileUrl}
+                        onChange={(e) => setFinalExamFileUrl(e.target.value)}
+                        placeholder="https://drive.google.com/file/..."
+                        className="w-full px-4 py-2.5 border border-slate-300 rounded-lg text-sm"
+                      />
+                    )}
+
+                    <div className="flex justify-end">
+                      <button
+                        onClick={handleFinalExamSubmit}
+                        disabled={finalExamSubmitting}
+                        className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                      >
+                        {finalExamSubmitting ? 'Submitting...' : 'Submit Final Exam'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <p className="text-sm text-amber-700 font-medium">Interview final exam is scheduled by your teacher. Please attend at your assigned time.</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Default: Empty State */}
-            {leftSidebarTab === 'content' && !showAbout && !showGradingPolicy && !activeLesson && !showSchedule && (
+            {leftSidebarTab === 'content' && !showAbout && !showGradingPolicy && !activeLesson && !showSchedule && !activeFinalExam && (
               <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
                 <BookOpen className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-slate-700 mb-2">Select a topic to begin</h3>

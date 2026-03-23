@@ -1,23 +1,33 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useAuth } from '@clerk/nextjs'
 import FinalExamInterview from '@/components/student/FinalExamInterview'
 import Card from '@/components/ui/Card'
 
 export default function StudentExamPage() {
+  const { getToken, userId } = useAuth()
   const [upcomingExams, setUpcomingExams] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchUpcomingExams()
-  }, [])
+    if (userId) {
+      fetchUpcomingExams()
+    }
+  }, [userId])
 
   const fetchUpcomingExams = async () => {
     try {
-      const res = await fetch('/api/student/exams/upcoming')
+      const token = await getToken()
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/student/exams/upcoming`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'x-clerk-user-id': userId || ''
+        }
+      })
       if (res.ok) {
         const data = await res.json()
-        setUpcomingExams(data.exams || [])
+        setUpcomingExams(data.exams || data.data || [])
       }
     } catch (error) {
       console.error('Error fetching exams:', error)

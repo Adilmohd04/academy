@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import { motion } from 'framer-motion';
 import { 
-  BookOpen, User, Users, DollarSign, Clock, CheckCircle, 
+  BookOpen, User, Users, CheckCircle,
   XCircle, AlertCircle, ArrowLeft, Play, Lock 
 } from 'lucide-react';
 import { IslamicPageLoader } from '@/components/ui/IslamicPageLoader';
@@ -41,7 +41,7 @@ interface Eligibility {
 export default function CourseDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { getToken } = useAuth();
+  const { getToken, userId } = useAuth();
   const courseId = params.courseId as string;
 
   const [course, setCourse] = useState<CourseDetail | null>(null);
@@ -93,7 +93,39 @@ export default function CourseDetailPage() {
       return;
     }
 
-    // Redirect to payment page
+    if (!course) return;
+
+    if (!course.price || course.price <= 0) {
+      try {
+        setEnrolling(true);
+        const token = await getToken();
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/student/courses/${courseId}/enroll`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            'x-clerk-user-id': userId || ''
+          }
+        });
+
+        const data = await response.json().catch(() => null);
+        if (!response.ok) {
+          toast.error(data?.message || data?.error || 'Failed to enroll in course');
+          return;
+        }
+
+        toast.success('Successfully enrolled!');
+        router.push('/student/courses');
+        return;
+      } catch (error) {
+        console.error('Error enrolling in free course:', error);
+        toast.error('Could not enroll right now. Please try again.');
+        return;
+      } finally {
+        setEnrolling(false);
+      }
+    }
+
     router.push(`/student/courses/${courseId}/payment`);
   };
 
@@ -118,6 +150,10 @@ export default function CourseDetailPage() {
   const isFull = eligibility && !eligibility.has_capacity;
   const hasPrerequisites = course.prerequisites && course.prerequisites.length > 0;
   const missingPrereqs = eligibility?.missing_prerequisites || [];
+  const maxStudents = eligibility?.max_students || course.max_students || 0;
+  const currentEnrollment = eligibility?.current_enrollment || course.enrolled_count || 0;
+  const seatsLeft = Math.max(maxStudents - currentEnrollment, 0);
+  const isFreeCourse = !course.price || course.price <= 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-islamic-primary-50 via-white to-islamic-gold-50 pb-12">
@@ -256,9 +292,11 @@ export default function CourseDetailPage() {
             <IslamicCard className="sticky top-6">
               <div className="text-center mb-6">
                 <div className="text-4xl font-bold text-islamic-emerald-600 mb-2">
-                  ${course.price}
+                  {isFreeCourse ? 'Free' : `₹${course.price}`}
                 </div>
-                <p className="text-sm text-islamic-midnight-600">One-time payment</p>
+                <p className="text-sm text-islamic-midnight-600">
+                  {isFreeCourse ? 'No payment required' : 'One-time payment'}
+                </p>
               </div>
 
               {/* Status Messages */}
@@ -308,7 +346,7 @@ export default function CourseDetailPage() {
                   disabled={!eligibility?.eligible || enrolling}
                   className="w-full"
                 >
-                  {enrolling ? 'Processing...' : 'Enroll Now'}
+                  {enrolling ? 'Processing...' : isFreeCourse ? 'Enroll for Free' : 'Pay & Enroll'}
                 </IslamicButton>
               )}
 
@@ -317,13 +355,17 @@ export default function CourseDetailPage() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-islamic-midnight-600">Enrolled Students</span>
                   <span className="font-bold text-islamic-midnight-800">
-                    {eligibility?.current_enrollment || course.enrolled_count}
+                    {currentEnrollment}
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-islamic-midnight-600">Seats Available</span>
+                  <span className="text-islamic-midnight-600">Capacity</span>
+                  <span className="font-bold text-islamic-midnight-800">{maxStudents}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-islamic-midnight-600">Spots Left</span>
                   <span className="font-bold text-islamic-midnight-800">
-                    {(eligibility?.max_students || course.max_students) - (eligibility?.current_enrollment || course.enrolled_count)}
+                    {seatsLeft} spot{seatsLeft !== 1 ? 's' : ''}
                   </span>
                 </div>
                 {course.weeks && (

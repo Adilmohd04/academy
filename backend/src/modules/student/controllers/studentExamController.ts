@@ -32,6 +32,32 @@ export const getAvailableExams = async (req: Request, res: Response) => {
 };
 
 /**
+ * Get upcoming exams for student (compat endpoint for UI)
+ */
+export const getUpcomingExams = async (req: Request, res: Response) => {
+  try {
+    const studentId = req.auth?.userId;
+
+    if (!studentId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const exams = await studentExamService.getAvailableExams(studentId);
+
+    res.json({
+      success: true,
+      exams
+    });
+  } catch (error: any) {
+    console.error('Error fetching upcoming exams:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to fetch upcoming exams'
+    });
+  }
+};
+
+/**
  * Get exam details for student
  */
 export const getExamDetails = async (req: Request, res: Response) => {

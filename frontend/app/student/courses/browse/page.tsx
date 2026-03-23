@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
-import { Search, BookOpen, Users, Star, Loader2, Filter, Calendar, Clock, Award } from 'lucide-react';
+import { Search, BookOpen, Users, Star, Loader2, Filter, Calendar, Award } from 'lucide-react';
 import { IslamicCard } from '@/components/ui/IslamicCards';
 import { IslamicButton } from '@/components/ui/IslamicButtons';
 
@@ -46,6 +46,24 @@ const CATEGORIES = [
 
 const LEVELS = ['All Levels', 'Beginner', 'Intermediate', 'Advanced'];
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isPlaceholderValue(value?: string): boolean {
+  if (!value) return true;
+  const normalized = value.trim();
+  if (!normalized) return true;
+  if (UUID_REGEX.test(normalized)) return true;
+  return /^(unknown(\s+teacher|\s+instructor)?|n\/a|null|undefined)$/i.test(normalized);
+}
+
+function safeTeacherName(teacherName?: string): string {
+  return isPlaceholderValue(teacherName) ? 'Teacher' : teacherName!.trim();
+}
+
+function safeCourseTitle(title?: string): string {
+  return isPlaceholderValue(title) ? 'Course' : title!.trim();
+}
+
 export default function BrowseCoursesPage() {
   const { userId } = useAuth();
   const router = useRouter();
@@ -87,8 +105,16 @@ export default function BrowseCoursesPage() {
 
   const applyFilters = () => {
     if (!Array.isArray(courses)) return;
-    // Filter out already enrolled courses
-    let filtered = courses.filter(course => !course.is_enrolled);
+    // Filter out already enrolled and full courses
+    let filtered = courses.filter((course) => {
+      if (course.is_enrolled) return false;
+
+      const cap = course.enrollment_cap || course.enrollment_limit;
+      const enrolled = course.total_students || course.enrolled_count || 0;
+      const isFull = typeof cap === 'number' && cap > 0 && enrolled >= cap;
+
+      return !isFull;
+    });
 
     // Search filter
     if (searchQuery) {
@@ -116,35 +142,6 @@ export default function BrowseCoursesPage() {
     }
 
     setFilteredCourses(filtered);
-  };
-
-  const handleEnroll = async (courseId: string, price: number) => {
-    if (price === 0) {
-      // Free enrollment
-      try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/enrollments/enroll`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-clerk-user-id': userId || ''
-          },
-          body: JSON.stringify({ courseId })
-        });
-
-        if (res.ok) {
-          alert('Successfully enrolled!');
-          router.push('/student/courses');
-        } else {
-          alert('Failed to enroll. Please try again.');
-        }
-      } catch (error) {
-        console.error('Error enrolling:', error);
-        alert('An error occurred. Please try again.');
-      }
-    } else {
-      // Paid course - go to course detail page
-      router.push(`/student/courses/${courseId}`);
-    }
   };
 
   return (
@@ -257,17 +254,17 @@ export default function BrowseCoursesPage() {
               <div
                 key={course.id}
                 className="group cursor-pointer"
-                onClick={() => router.push(`/student/courses/${course.id}/overview`)}
+                onClick={() => router.push(`/student/courses/browse/${course.id}`)}
               >
               <IslamicCard 
-                className="h-full hover:shadow-2xl transition-all duration-300 overflow-hidden border border-slate-200"
+                className="h-full hover:shadow-2xl transition-all duration-300 overflow-hidden border border-slate-200 bg-white"
               >
                 {/* Course Image */}
                 <div className="relative h-48 bg-gradient-to-br from-emerald-400 via-teal-500 to-cyan-600 overflow-hidden">
                   {(course.course_image_url || course.thumbnail_url) ? (
                     <img 
                       src={course.course_image_url || course.thumbnail_url} 
-                      alt={course.title}
+                      alt={safeCourseTitle(course.title)}
                       className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                     />
                   ) : (
@@ -290,7 +287,7 @@ export default function BrowseCoursesPage() {
                 </div>
 
                 {/* Content */}
-                <div className="p-5">
+                <div className="p-6 space-y-4">
                   {/* Level */}
                   <div className="flex items-center justify-between mb-3">
                     <span className="text-xs font-semibold text-teal-600 bg-teal-50 px-3 py-1 rounded-full">
@@ -311,28 +308,28 @@ export default function BrowseCoursesPage() {
                   </div>
 
                   {/* Title */}
-                  <h3 className="text-lg font-bold text-slate-800 mb-2 line-clamp-2 group-hover:text-teal-700 transition-colors">
-                    {course.title}
+                  <h3 className="text-xl font-bold text-slate-800 line-clamp-2 leading-tight group-hover:text-teal-700 transition-colors">
+                    {safeCourseTitle(course.title)}
                   </h3>
 
                   {/* Description */}
-                  <p className="text-sm text-slate-600 mb-4 line-clamp-3 leading-relaxed">
+                  <p className="text-base text-slate-600 line-clamp-3 leading-relaxed min-h-[72px]">
                     {course.description}
                   </p>
 
                   {/* Teacher */}
-                  <div className="flex items-center gap-2 mb-4 pb-4 border-b border-slate-100">
+                  <div className="flex items-center gap-2 pb-4 border-b border-slate-100">
                     <div className="w-9 h-9 rounded-full bg-gradient-to-br from-teal-400 to-emerald-500 flex items-center justify-center text-white font-bold text-sm shadow-sm">
-                      {course.teacher_name?.charAt(0).toUpperCase() || 'T'}
+                      {safeTeacherName(course.teacher_name).charAt(0).toUpperCase()}
                     </div>
                     <div>
                       <p className="text-xs text-slate-500">Taught by</p>
-                      <p className="text-sm font-semibold text-slate-700">{course.teacher_name || 'Teacher'}</p>
+                      <p className="text-sm font-semibold text-slate-700">{safeTeacherName(course.teacher_name)}</p>
                     </div>
                   </div>
 
                   {/* Stats Grid */}
-                  <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div className="grid grid-cols-2 gap-3">
                     <div className="flex items-center gap-2 text-slate-600">
                       <Users className="w-4 h-4 text-teal-600" />
                       <span className="text-xs">
@@ -354,32 +351,27 @@ export default function BrowseCoursesPage() {
 
                   {/* Spots Left Badge */}
                   {(course.enrollment_cap || course.enrollment_limit) && (
-                    <div className="mb-4">
+                    <div>
                       {(() => {
                         const cap = course.enrollment_cap || course.enrollment_limit;
                         const enrolled = course.total_students || course.enrolled_count || 0;
                         const spotsLeft = cap - enrolled;
-                        const isFull = spotsLeft <= 0;
                         const isAlmostFull = spotsLeft > 0 && spotsLeft <= 5;
                         
                         return (
                           <div className={`flex items-center gap-2 p-2 rounded-lg border ${
-                            isFull ? 'bg-red-50 border-red-200' : 
                             isAlmostFull ? 'bg-amber-50 border-amber-200' : 
                             'bg-emerald-50 border-emerald-200'
                           }`}>
                             <Award className={`w-4 h-4 ${
-                              isFull ? 'text-red-600' : 
                               isAlmostFull ? 'text-amber-600' : 
                               'text-emerald-600'
                             }`} />
                             <span className={`text-xs font-medium ${
-                              isFull ? 'text-red-800' : 
                               isAlmostFull ? 'text-amber-800' : 
                               'text-emerald-800'
                             }`}>
-                              {isFull ? '🔴 Course Full' : 
-                               isAlmostFull ? `⚠️ Only ${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} left!` : 
+                              {isAlmostFull ? `⚠️ Only ${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} left!` : 
                                `✅ ${spotsLeft} spot${spotsLeft !== 1 ? 's' : ''} available`}
                             </span>
                           </div>
@@ -405,7 +397,7 @@ export default function BrowseCoursesPage() {
                     className={`w-full ${course.price === 0 || !course.price 
                       ? 'bg-teal-600 hover:bg-teal-700' 
                       : 'bg-emerald-600 hover:bg-emerald-700'} text-white font-semibold`}
-                    onClick={() => router.push(`/student/courses/${course.id}/overview`)}
+                    onClick={() => router.push(`/student/courses/browse/${course.id}`)}
                   >
                     {course.price === 0 || !course.price ? 'View Course' : 'View Details & Enroll'}
                   </IslamicButton>

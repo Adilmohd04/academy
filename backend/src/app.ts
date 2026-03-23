@@ -55,6 +55,7 @@ import discussionPortalRoutes from './routes/discussionPortal';
 import quizRoutes from './routes/quizzes';
 import assignmentRoutes from './routes/assignments';
 import finalExamRoutes from './routes/finalExams';
+import teacherInterviewsRoutes from './routes/teacherInterviewsRoutes';
 import certificateRoutes from './routes/certificates';
 import examMarksRoutes from './modules/shared/routes/examMarks';
 import weekDraftRoutes from './modules/shared/routes/weekDraft';
@@ -76,6 +77,7 @@ import studentGradesRoutes from './routes/studentGrades';
 // Import notification job
 import { startClassNotificationJob } from './jobs/classNotifications';
 import { verifyEmailConfig } from './services/emailNotifications';
+import { startFinalExamInterviewReminderJob } from './jobs/finalExamInterviewReminders';
 
 class App {
   public app: Application;
@@ -199,6 +201,7 @@ class App {
     this.app.use('/api', quizRoutes);
     this.app.use('/api', assignmentRoutes);
     this.app.use('/api', finalExamRoutes);
+    this.app.use('/api', teacherInterviewsRoutes);
     this.app.use('/api', certificateRoutes);
     this.app.use('/api/exam-marks', examMarksRoutes);
     this.app.use('/api/drafts', weekDraftRoutes);
@@ -249,7 +252,7 @@ class App {
       if (emailReady) {
         console.log('✅ Email service is ready');
         console.log('🔔 Class notification job disabled - "classes" table not in schema');
-        // startClassNotificationJob(); // Disabled - classes table doesn't exist in current schema
+        startFinalExamInterviewReminderJob();
       } else {
         console.warn('⚠️  Email service not configured properly - notifications disabled');
         console.warn('   Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env to enable');

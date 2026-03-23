@@ -11,7 +11,7 @@
  */
 
 import { Router } from 'express';
-import { requireAuth } from '../middleware/clerkAuth';
+import { requireAuth, requireRole } from '../middleware/clerkAuth';
 import * as courseController from '../modules/teacher/controllers/courseController';
 
 const router = Router();
@@ -26,6 +26,6 @@ router.put('/courses/:id', requireAuth, courseController.updateCourse);
 router.delete('/courses/:id', requireAuth, courseController.deleteCourse);
 
 // Teacher-specific routes
-router.get('/teacher/courses', requireAuth, courseController.getTeacherCourses);
+router.get('/teacher/courses', requireAuth, requireRole(['teacher']), courseController.getTeacherCourses);
 
 export default router;

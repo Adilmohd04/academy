@@ -1,15 +1,9 @@
 'use client';
 
-import { useAuth, useUser } from '@clerk/nextjs';
+import { useAuth } from '@clerk/nextjs';
 import { useState, useEffect } from 'react';
-import { IslamicSidebar } from '@/components/ui/IslamicSidebar';
-import { IslamicPageHeader } from '@/components/ui/IslamicPageHeader';
-import { IslamicPatternBackground } from '@/components/ui/IslamicPatterns';
-import { IslamicCard } from '@/components/ui/IslamicCards';
-import { 
-  Activity, GraduationCap, Users, Video, BookOpen, 
-  CheckCircle, Calendar, TrendingUp, Clock, User
-} from 'lucide-react';
+import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
+import { Calendar, CheckCircle, Clock } from 'lucide-react';
 
 interface AttendanceRecord {
   id: string;
@@ -23,21 +17,9 @@ interface AttendanceRecord {
 
 export default function TeacherAttendance() {
   const { getToken } = useAuth();
-  const { user } = useUser();
   const [loading, setLoading] = useState(true);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'present' | 'absent' | 'pending'>('all');
-
-  const navItems = [
-    { label: 'Dashboard', href: '/teacher', icon: Activity },
-    { label: 'My Classes', href: '/teacher/classes', icon: GraduationCap },
-    { label: 'Students', href: '/teacher/students', icon: Users },
-    { label: 'Meetings', href: '/teacher/meetings', icon: Video },
-    { label: 'Assignments', href: '/teacher/assignments', icon: BookOpen },
-    { label: 'Attendance', href: '/teacher/attendance', icon: CheckCircle },
-    { label: 'Availability', href: '/teacher/availability', icon: Calendar },
-    { label: 'Analytics', href: '/teacher/analytics', icon: TrendingUp },
-  ];
 
   useEffect(() => {
     fetchAttendance();
@@ -91,123 +73,103 @@ export default function TeacherAttendance() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-      <IslamicPatternBackground>{null}</IslamicPatternBackground>
-      
-      <main className="min-h-screen">
-        <IslamicPageHeader
-          title="Attendance"
-          subtitle="Track and manage student attendance"
-          icon={CheckCircle}
-        />
+    <div className="min-h-full bg-slate-50/40">
+      <TeacherPageContainer className="space-y-6">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Attendance</h1>
+          <p className="mt-1 text-sm text-slate-600">Track and manage student attendance records.</p>
+        </section>
 
-        <div className="p-6 space-y-6">
-          {/* Stats Overview */}
-          <div className="grid md:grid-cols-4 gap-4">
-            <IslamicCard>
-              <div className="text-center">
-                <p className="text-sm text-gray-600 mb-1">Total Classes</p>
-                <p className="text-3xl font-bold text-gray-900">{stats.total}</p>
-              </div>
-            </IslamicCard>
-            <IslamicCard>
-              <div className="text-center">
-                <p className="text-sm text-gray-600 mb-1">Present</p>
-                <p className="text-3xl font-bold text-green-600">{stats.present}</p>
-              </div>
-            </IslamicCard>
-            <IslamicCard>
-              <div className="text-center">
-                <p className="text-sm text-gray-600 mb-1">Absent</p>
-                <p className="text-3xl font-bold text-red-600">{stats.absent}</p>
-              </div>
-            </IslamicCard>
-            <IslamicCard>
-              <div className="text-center">
-                <p className="text-sm text-gray-600 mb-1">Pending</p>
-                <p className="text-3xl font-bold text-yellow-600">{stats.pending}</p>
-              </div>
-            </IslamicCard>
-          </div>
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: 'Total Classes', value: stats.total, valueClass: 'text-slate-900' },
+            { label: 'Present', value: stats.present, valueClass: 'text-emerald-700' },
+            { label: 'Absent', value: stats.absent, valueClass: 'text-rose-700' },
+            { label: 'Pending', value: stats.pending, valueClass: 'text-amber-700' },
+          ].map((item) => (
+            <article key={item.label} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-600">{item.label}</p>
+              <p className={`mt-1 text-3xl font-bold ${item.valueClass}`}>{item.value}</p>
+            </article>
+          ))}
+        </section>
 
-          {/* Filter Buttons */}
-          <div className="flex space-x-2">
-            {['all', 'present', 'absent', 'pending'].map((filter) => (
+        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-wrap gap-2">
+            {(['all', 'present', 'absent', 'pending'] as const).map((filter) => (
               <button
                 key={filter}
-                onClick={() => setSelectedFilter(filter as any)}
-                className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all ${
+                onClick={() => setSelectedFilter(filter)}
+                className={`rounded-lg border px-4 py-2 text-sm font-medium transition ${
                   selectedFilter === filter
-                    ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md'
-                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                    ? 'border-emerald-600 bg-emerald-600 text-white'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                 }`}
               >
                 {filter.charAt(0).toUpperCase() + filter.slice(1)}
               </button>
             ))}
           </div>
+        </section>
 
-          {/* Attendance Records */}
-          {loading ? (
-            <div className="flex justify-center items-center h-64">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
-            </div>
-          ) : filteredAttendance.length === 0 ? (
-            <IslamicCard>
-              <div className="text-center py-12">
-                <CheckCircle className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-gray-700 mb-2">No Attendance Records</h3>
-                <p className="text-gray-600">Attendance records will appear here</p>
-              </div>
-            </IslamicCard>
-          ) : (
-            <div className="space-y-3">
-              {filteredAttendance.map((record) => (
-                <IslamicCard key={record.id}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-4">
-                        <div className="flex-shrink-0">
-                          <div className="h-12 w-12 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white font-bold">
-                            {record.studentName.charAt(0).toUpperCase()}
-                          </div>
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-gray-900">{record.studentName}</h3>
-                          <p className="text-sm text-gray-600">{record.studentEmail}</p>
-                        </div>
+        {loading ? (
+          <div className="flex h-56 items-center justify-center rounded-2xl border border-slate-200 bg-white">
+            <div className="h-10 w-10 animate-spin rounded-full border-2 border-emerald-600 border-t-transparent" />
+          </div>
+        ) : filteredAttendance.length === 0 ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-12 text-center shadow-sm">
+            <CheckCircle className="mx-auto mb-4 h-12 w-12 text-slate-300" />
+            <h3 className="text-lg font-semibold text-slate-900">No Attendance Records</h3>
+            <p className="mt-1 text-sm text-slate-600">Attendance records will appear here.</p>
+          </section>
+        ) : (
+          <section className="space-y-3">
+            {filteredAttendance.map((record) => (
+              <article
+                key={record.id}
+                className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md"
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-2 flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-sm font-semibold text-white">
+                        {record.studentName.charAt(0).toUpperCase()}
                       </div>
-                    </div>
-                    
-                    <div className="flex items-center space-x-6">
-                      <div className="text-right">
-                        <div className="flex items-center text-gray-700 mb-1">
-                          <Calendar className="h-4 w-4 mr-2" />
-                          <span className="text-sm">
-                            {new Date(record.date).toLocaleDateString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              year: 'numeric'
-                            })}
-                          </span>
-                        </div>
-                        <div className="flex items-center text-gray-600">
-                          <Clock className="h-4 w-4 mr-2" />
-                          <span className="text-sm">{record.time}</span>
-                        </div>
+                      <div className="min-w-0">
+                        <h3 className="truncate font-semibold text-slate-900">{record.studentName}</h3>
+                        <p className="truncate text-sm text-slate-500">{record.studentEmail}</p>
                       </div>
-                      
-                      <span className={`px-4 py-2 rounded-lg text-sm font-semibold ${getStatusColor(record.status)}`}>
-                        {record.status.charAt(0).toUpperCase() + record.status.slice(1)}
-                      </span>
                     </div>
                   </div>
-                </IslamicCard>
-              ))}
-            </div>
-          )}
-        </div>
-      </main>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                      <div className="flex items-center gap-1">
+                        <Calendar className="h-4 w-4 text-slate-500" />
+                        <span>
+                          {new Date(record.date).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                        <Clock className="h-3.5 w-3.5" />
+                        <span>{record.time}</span>
+                      </div>
+                    </div>
+
+                    <span className={`rounded-lg px-3 py-2 text-sm font-semibold ${getStatusColor(record.status)}`}>
+                      {record.status.charAt(0).toUpperCase() + record.status.slice(1)}
+                    </span>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </section>
+        )}
+      </TeacherPageContainer>
     </div>
   );
 }

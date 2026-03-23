@@ -50,6 +50,24 @@ interface Lesson {
   duration_minutes?: number;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isPlaceholderValue(value?: string): boolean {
+  if (!value) return true;
+  const normalized = value.trim();
+  if (!normalized) return true;
+  if (UUID_REGEX.test(normalized)) return true;
+  return /^(unknown(\s+teacher|\s+instructor)?|n\/a|null|undefined)$/i.test(normalized);
+}
+
+function safeTeacherName(teacherName?: string): string {
+  return isPlaceholderValue(teacherName) ? 'Teacher' : teacherName!.trim();
+}
+
+function safeCourseTitle(title?: string): string {
+  return isPlaceholderValue(title) ? 'Course' : title!.trim();
+}
+
 export default function CourseDetailPage() {
   const { userId } = useAuth();
   const router = useRouter();
@@ -187,7 +205,7 @@ export default function CourseDetailPage() {
                 </span>
               </div>
               
-              <h1 className="text-4xl font-bold mb-4">{course.title}</h1>
+              <h1 className="text-4xl font-bold mb-4">{safeCourseTitle(course.title)}</h1>
               <p className="text-lg text-purple-100 mb-6">{course.description}</p>
 
               <div className="flex items-center gap-6 text-sm mb-6">
@@ -208,10 +226,10 @@ export default function CourseDetailPage() {
               {/* Teacher */}
               <div className="flex items-center gap-3 p-4 bg-white/10 rounded-lg backdrop-blur-sm">
                 <div className="w-12 h-12 rounded-full bg-purple-300 flex items-center justify-center text-purple-800 font-bold text-lg">
-                  {(course.profiles?.full_name || course.teacher_name || 'T').charAt(0)}
+                  {safeTeacherName(course.profiles?.full_name || course.teacher_name).charAt(0)}
                 </div>
                 <div>
-                  <p className="font-semibold">Primary Teacher: {course.profiles?.full_name || course.teacher_name || 'Teacher'}</p>
+                  <p className="font-semibold">Primary Teacher: {safeTeacherName(course.profiles?.full_name || course.teacher_name)}</p>
                   {course.co_teachers && course.co_teachers.length > 0 && (
                     <div className="flex flex-wrap gap-2 mt-1">
                       {course.co_teachers.map((coTeacher, index) => (
@@ -232,7 +250,7 @@ export default function CourseDetailPage() {
             <div className="relative">
               <div className="aspect-video rounded-xl overflow-hidden shadow-2xl">
                 {(course.thumbnail_url || course.course_image_url) ? (
-                  <img src={course.thumbnail_url || course.course_image_url} alt={course.title} className="w-full h-full object-cover" />
+                  <img src={course.thumbnail_url || course.course_image_url} alt={safeCourseTitle(course.title)} className="w-full h-full object-cover" />
                 ) : (
                   <div className="w-full h-full bg-gradient-to-br from-purple-400 to-indigo-600 flex items-center justify-center">
                     <BookOpen className="w-24 h-24 text-white opacity-50" />
@@ -394,10 +412,10 @@ export default function CourseDetailPage() {
               <h3 className="font-bold text-slate-800 mb-3">About the Instructor</h3>
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-16 h-16 rounded-full bg-purple-100 flex items-center justify-center text-purple-700 font-bold text-xl">
-                  {course.profiles?.full_name?.charAt(0) || 'T'}
+                  {safeTeacherName(course.profiles?.full_name || course.teacher_name).charAt(0)}
                 </div>
                 <div>
-                  <p className="font-semibold text-slate-800">{course.profiles?.full_name || course.teacher_name || 'Instructor'}</p>
+                  <p className="font-semibold text-slate-800">{safeTeacherName(course.profiles?.full_name || course.teacher_name)}</p>
                   <p className="text-xs text-slate-500">{course.profiles?.email}</p>
                 </div>
               </div>

@@ -8,7 +8,7 @@ import {
   Video, FileText, Award, ChevronDown, ChevronRight,
   Radio, Lock, Unlock, PlayCircle, MessageSquare, Star,
   ClipboardList, GraduationCap, Trophy, AlertCircle,
-  Upload, Mic, Camera, HelpCircle, Timer, Target, Sparkles
+  Upload, Mic, Camera, HelpCircle, Timer, Target, Sparkles, Eye
 } from 'lucide-react';
 import { format, formatDistanceToNow, isAfter, isBefore, isPast, isFuture } from 'date-fns';
 
@@ -364,23 +364,39 @@ function WeekSection({
                   <button
                     key={lesson.id}
                     onClick={() => onStartLesson(lesson.id)}
-                    className="w-full p-3 rounded-lg border border-gray-200 bg-white hover:border-[#C5A059] hover:shadow-sm transition-all flex items-center gap-3"
+                    className="w-full group"
                   >
-                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                      lesson.completed ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-500'
-                    }`}>
-                      {lesson.type === 'video' ? <PlayCircle className="h-5 w-5" /> :
-                       lesson.type === 'audio' ? <Mic className="h-5 w-5" /> :
-                       <FileText className="h-5 w-5" />}
+                    <div className="p-4 rounded-xl bg-white border border-slate-200 hover:border-purple-300 hover:bg-purple-50 hover:shadow-md transition-all flex items-center gap-3">
+                      <div className={`w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        lesson.completed 
+                          ? 'bg-emerald-100 text-emerald-600' 
+                          : 'bg-purple-100 text-purple-600'
+                      }`}>
+                        {lesson.type === 'video' ? <PlayCircle className="h-5 w-5" /> :
+                         lesson.type === 'audio' ? <Mic className="h-5 w-5" /> :
+                         <FileText className="h-5 w-5" />}
+                      </div>
+                      <div className="flex-1 text-left">
+                        <h5 className="font-semibold text-slate-900 group-hover:text-purple-700 transition-colors">{lesson.title}</h5>
+                        <div className="flex items-center gap-2 mt-1">
+                          <p className="text-xs text-slate-500 font-medium">
+                            {lesson.type === 'video' ? '🎬 Video' :
+                             lesson.type === 'audio' ? '🎙️ Audio' :
+                             '📖 Reading'}
+                          </p>
+                          {lesson.duration_minutes && (
+                            <>
+                              <span className="text-slate-300">•</span>
+                              <p className="text-xs text-slate-500">{lesson.duration_minutes} min</p>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {lesson.completed && <CheckCircle className="h-5 w-5 text-emerald-500 flex-shrink-0" />}
+                        <Play className="h-5 w-5 text-slate-300 group-hover:text-purple-600 transition-colors" />
+                      </div>
                     </div>
-                    <div className="flex-1 text-left">
-                      <h5 className="font-medium text-[#1B365D]">{lesson.title}</h5>
-                      <p className="text-xs text-gray-400">
-                        {lesson.type.charAt(0).toUpperCase() + lesson.type.slice(1)}
-                        {lesson.duration_minutes && ` • ${lesson.duration_minutes} min`}
-                      </p>
-                    </div>
-                    {lesson.completed && <CheckCircle className="h-5 w-5 text-green-500" />}
                   </button>
                 ))}
               </div>
@@ -389,77 +405,173 @@ function WeekSection({
           
           {/* Quiz */}
           {week.quiz && (
-            <div className="p-4 rounded-xl bg-purple-50 border border-purple-200">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <ClipboardList className="h-4 w-4 text-purple-600" />
-                    <span className="text-sm font-medium text-purple-700">Weekly Quiz</span>
-                    <StatusBadge status={week.quiz.status} type="exam" />
+            <div className="rounded-xl bg-white border border-slate-200 hover:border-purple-300 hover:shadow-md transition-all overflow-hidden">
+              <div className="p-5 bg-gradient-to-r from-purple-50 to-violet-50 border-b border-slate-200">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-purple-600 text-white flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <ClipboardList className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h5 className="font-bold text-slate-900 text-base">{week.quiz.title}</h5>
+                      <p className="text-xs text-slate-500 mt-0.5">Weekly Assessment</p>
+                    </div>
                   </div>
-                  <h5 className="font-medium text-[#1B365D]">{week.quiz.title}</h5>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {week.quiz.questions_count} questions
-                    {week.quiz.time_limit_minutes && ` • ${week.quiz.time_limit_minutes} min limit`}
-                    {week.quiz.deadline && ` • Due ${format(new Date(week.quiz.deadline), 'MMM d')}`}
-                  </p>
-                  {week.quiz.best_score !== undefined && (
-                    <p className="text-sm text-green-600 mt-1 font-medium">
-                      Best Score: {week.quiz.best_score}%
-                    </p>
-                  )}
+                  <StatusBadge status={week.quiz.status} type="exam" />
                 </div>
-                
-                <button
-                  onClick={() => onStartQuiz(week.quiz!.id)}
-                  disabled={week.quiz.status === 'completed' && week.quiz.attempts_used >= week.quiz.attempts_allowed}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 ${
-                    week.quiz.status === 'not_started' ? 'bg-purple-600 text-white hover:bg-purple-700' :
-                    week.quiz.status === 'completed' ? 'bg-gray-100 text-gray-600' :
-                    'bg-amber-500 text-white hover:bg-amber-600'
-                  }`}
-                >
-                  {week.quiz.status === 'not_started' ? 'Start Quiz' :
-                   week.quiz.status === 'in_progress' ? 'Continue Quiz' :
-                   'View Results'}
-                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {/* Quiz Info */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="p-3 bg-slate-50 rounded-lg">
+                    <p className="text-xs text-slate-500 font-medium">Questions</p>
+                    <p className="text-lg font-bold text-slate-900 mt-1">{week.quiz.questions_count}</p>
+                  </div>
+                  {week.quiz.time_limit_minutes && (
+                    <div className="p-3 bg-slate-50 rounded-lg">
+                      <p className="text-xs text-slate-500 font-medium">Time Limit</p>
+                      <p className="text-lg font-bold text-slate-900 mt-1">{week.quiz.time_limit_minutes}min</p>
+                    </div>
+                  )}
+                  <div className="p-3 bg-slate-50 rounded-lg">
+                    <p className="text-xs text-slate-500 font-medium">Attempts</p>
+                    <p className="text-lg font-bold text-slate-900 mt-1">{week.quiz.attempts_used}/{week.quiz.attempts_allowed}</p>
+                  </div>
+                </div>
+
+                {/* Score & Deadline */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <div>
+                    {week.quiz.best_score !== undefined && (
+                      <p className="text-sm">
+                        <span className="text-slate-600">Best Score: </span>
+                        <span className="font-bold text-emerald-600">{week.quiz.best_score}%</span>
+                      </p>
+                    )}
+                    {week.quiz.deadline && (
+                      <p className="text-xs text-slate-500 mt-1.5">
+                        Due: {format(new Date(week.quiz.deadline), 'MMM d')}
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => onStartQuiz(week.quiz!.id)}
+                    disabled={week.quiz.status === 'completed' && week.quiz.attempts_used >= week.quiz.attempts_allowed}
+                    className={`px-5 py-2.5 rounded-lg font-semibold text-sm flex items-center gap-2 transition-all whitespace-nowrap ${
+                      week.quiz.status === 'not_started' 
+                        ? 'bg-purple-600 text-white hover:bg-purple-700 shadow-sm shadow-purple-200' 
+                        : week.quiz.status === 'completed' 
+                        ? 'bg-slate-100 text-slate-500 cursor-not-allowed' 
+                        : 'bg-amber-600 text-white hover:bg-amber-700 shadow-sm shadow-amber-200'
+                    }`}
+                  >
+                    {week.quiz.status === 'not_started' ? (
+                      <>
+                        <Play className="h-4 w-4" />
+                        Start Quiz
+                      </>
+                    ) : week.quiz.status === 'in_progress' ? (
+                      <>
+                        <Timer className="h-4 w-4" />
+                        Continue
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="h-4 w-4" />
+                        View Results
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           )}
           
           {/* Assignment */}
           {week.assignment && (
-            <div className="p-4 rounded-xl bg-blue-50 border border-blue-200">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    {week.assignment.type === 'video' ? <Camera className="h-4 w-4 text-blue-600" /> :
-                     week.assignment.type === 'audio' ? <Mic className="h-4 w-4 text-blue-600" /> :
-                     <Upload className="h-4 w-4 text-blue-600" />}
-                    <span className="text-sm font-medium text-blue-700">Assignment</span>
-                    <StatusBadge status={week.assignment.status} type="assignment" />
+            <div className="rounded-xl bg-white border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all overflow-hidden">
+              <div className="p-5 bg-gradient-to-r from-blue-50 to-cyan-50 border-b border-slate-200">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                      week.assignment.type === 'video' ? 'bg-blue-600' :
+                      week.assignment.type === 'audio' ? 'bg-indigo-600' :
+                      'bg-cyan-600'
+                    } text-white`}>
+                      {week.assignment.type === 'video' ? <Camera className="h-5 w-5" /> :
+                       week.assignment.type === 'audio' ? <Mic className="h-5 w-5" /> :
+                       <Upload className="h-5 w-5" />}
+                    </div>
+                    <div>
+                      <h5 className="font-bold text-slate-900 text-base">{week.assignment.title}</h5>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {week.assignment.type === 'video' ? '🎥 Video Submission' :
+                         week.assignment.type === 'audio' ? '🎙️ Audio Submission' :
+                         week.assignment.type === 'text' ? '📝 Text Submission' :
+                         '📎 File Upload'}
+                      </p>
+                    </div>
                   </div>
-                  <h5 className="font-medium text-[#1B365D]">{week.assignment.title}</h5>
-                  <p className="text-sm text-gray-500 mt-1">
-                    {week.assignment.type.replace('_', ' ')} submission
-                    • Due {format(new Date(week.assignment.deadline), 'MMM d, h:mm a')}
-                  </p>
-                  {week.assignment.marks_obtained !== undefined && (
-                    <p className="text-sm text-green-600 mt-1 font-medium">
-                      Score: {week.assignment.marks_obtained}/{week.assignment.max_marks}
-                    </p>
-                  )}
+                  <StatusBadge status={week.assignment.status} type="assignment" />
                 </div>
-                
-                <button
-                  onClick={() => onViewAssignment(week.assignment!.id)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 ${
-                    week.assignment.status === 'pending' ? 'bg-blue-600 text-white hover:bg-blue-700' :
-                    'bg-gray-100 text-gray-600'
-                  }`}
-                >
-                  {week.assignment.status === 'pending' ? 'Submit' : 'View'}
-                </button>
+              </div>
+
+              <div className="p-5 space-y-4">
+                {/* Assignment Details */}
+                <div>
+                  <p className="text-sm text-slate-700 leading-relaxed">{week.assignment.description}</p>
+                </div>
+
+                {/* Meta Info */}
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <div className="p-3 bg-slate-50 rounded-lg">
+                    <p className="text-xs text-slate-500 font-medium">Max Marks</p>
+                    <p className="text-lg font-bold text-slate-900 mt-1">{week.assignment.max_marks}</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded-lg">
+                    <p className="text-xs text-slate-500 font-medium">Deadline</p>
+                    <p className="text-sm font-bold text-slate-900 mt-1">{format(new Date(week.assignment.deadline), 'MMM d')}</p>
+                  </div>
+                </div>
+
+                {/* Score (if graded) */}
+                {week.assignment.marks_obtained !== undefined && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-emerald-700 font-medium">Your Score</span>
+                      <span className="text-2xl font-bold text-emerald-600">{week.assignment.marks_obtained}/{week.assignment.max_marks}</span>
+                    </div>
+                    {week.assignment.feedback && (
+                      <p className="text-sm text-emerald-600 mt-2 leading-relaxed">{week.assignment.feedback}</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Action Button */}
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => onViewAssignment(week.assignment!.id)}
+                    className={`px-5 py-2.5 rounded-lg font-semibold text-sm flex items-center gap-2 transition-all whitespace-nowrap ${
+                      week.assignment.status === 'pending' 
+                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-200' 
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {week.assignment.status === 'pending' ? (
+                      <>
+                        <Upload className="h-4 w-4" />
+                        Submit Assignment
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="h-4 w-4" />
+                        View Submission
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -916,32 +1028,6 @@ export default function CourseLearnPage() {
 
   return (
     <div className="min-h-screen bg-[#FDFBF7]">
-      {/* Course Header */}
-      <div className="bg-gradient-to-r from-[#1B365D] to-[#2a4a7d] text-white">
-        <div className="max-w-6xl mx-auto px-4 py-6">
-          <div className="flex items-center gap-4">
-            <div className="w-20 h-20 bg-white/10 rounded-xl flex items-center justify-center">
-              <BookOpen className="h-10 w-10" />
-            </div>
-            <div className="flex-1">
-              <h1 className="text-2xl font-bold">{course.title}</h1>
-              <p className="text-white/70 mt-1">{course.teacher_name}</p>
-              <div className="flex items-center gap-4 mt-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-32 h-2 bg-white/20 rounded-full">
-                    <div 
-                      className="h-full bg-[#C5A059] rounded-full"
-                      style={{ width: `${course.progress_percentage}%` }}
-                    />
-                  </div>
-                  <span className="text-sm">{course.progress_percentage}% complete</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Tab Navigation */}
       <TabNavigation 
         activeTab={activeTab} 
@@ -953,9 +1039,12 @@ export default function CourseLearnPage() {
       <div className="max-w-6xl mx-auto px-4 py-6">
         {activeTab === 'overview' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Main Content - Weeks */}
+            {/* Main Content - Scrollable */}
             <div className="lg:col-span-2 space-y-4">
-              <h2 className="text-lg font-semibold text-[#1B365D] mb-4">Course Schedule</h2>
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-slate-800 mb-2">Course Content</h2>
+                <p className="text-slate-400 text-sm">Select a topic to begin learning</p>
+              </div>
               
               {course.weeks.map((week) => (
                 <WeekSection
@@ -987,7 +1076,7 @@ export default function CourseLearnPage() {
             </div>
             
             {/* Sidebar */}
-            <div className="space-y-6">
+            <div className="space-y-6 lg:sticky lg:top-6 h-fit">
               <GradingOverview grading={course.grading} finalExam={course.final_exam} />
               
               {/* Quick Actions */}

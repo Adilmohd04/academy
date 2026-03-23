@@ -2,10 +2,10 @@
 
 import { useAuth, useUser } from '@clerk/nextjs';
 import { useState, useEffect } from 'react';
-import { IslamicSidebar } from '@/components/ui/IslamicSidebar';
 import { IslamicPageHeader } from '@/components/ui/IslamicPageHeader';
 import { IslamicPatternBackground } from '@/components/ui/IslamicPatterns';
 import { IslamicCard } from '@/components/ui/IslamicCards';
+import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 import { 
   Activity, GraduationCap, Users, Video, BookOpen, 
   CheckCircle, Calendar, TrendingUp, DollarSign, Award, Target
@@ -43,17 +43,6 @@ export default function TeacherAnalytics() {
     averageRating: 0,
     attendanceRate: 0,
   });
-
-  const navItems = [
-    { label: 'Dashboard', href: '/teacher', icon: Activity },
-    { label: 'My Classes', href: '/teacher/classes', icon: GraduationCap },
-    { label: 'Students', href: '/teacher/students', icon: Users },
-    { label: 'Meetings', href: '/teacher/meetings', icon: Video },
-    { label: 'Assignments', href: '/teacher/assignments', icon: BookOpen },
-    { label: 'Attendance', href: '/teacher/attendance', icon: CheckCircle },
-    { label: 'Availability', href: '/teacher/availability', icon: Calendar },
-    { label: 'Analytics', href: '/teacher/analytics', icon: TrendingUp },
-  ];
 
   useEffect(() => {
     fetchAnalytics();
@@ -113,17 +102,18 @@ export default function TeacherAnalytics() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
+    <div className="min-h-screen bg-slate-100/40">
       <IslamicPatternBackground>{null}</IslamicPatternBackground>
       
       <main className="min-h-screen">
-        <IslamicPageHeader
-          title="Analytics & Performance"
-          subtitle="Track your teaching performance and earnings"
-          icon={TrendingUp}
-        />
+        <TeacherPageContainer className="space-y-6">
+          <IslamicPageHeader
+            title="Analytics & Performance"
+            subtitle="Track your teaching performance and earnings"
+            icon={TrendingUp}
+            className="!static"
+          />
 
-        <div className="p-6 space-y-6">
           {loading ? (
             <div className="flex justify-center items-center h-64">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-600"></div>
@@ -270,7 +260,7 @@ export default function TeacherAnalytics() {
               )}
             </>
           )}
-        </div>
+        </TeacherPageContainer>
       </main>
     </div>
   );

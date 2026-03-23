@@ -39,51 +39,63 @@ export const getCourseEnrollments = async (
     throw new Error('Course not found or unauthorized');
   }
 
-  // Get total lessons count
-  const { data: lessonsCountData, error: lessonsCountError } = await supabase.rpc('exec_sql', {
-    sql_query: `SELECT COUNT(l.id) as total
-       FROM course_lessons l
-       INNER JOIN course_weeks w ON w.id = l.week_id
-       WHERE w.course_id = '${courseId}'`
-  });
+  // Get total lessons count safely
+  const { data: weekRows, error: weekRowsError } = await supabase
+    .from('course_weeks')
+    .select('id')
+    .eq('course_id', courseId);
 
-  if (lessonsCountError) throw lessonsCountError;
-  const totalLessons = parseInt(lessonsCountData?.[0]?.total) || 0;
+  if (weekRowsError) throw weekRowsError;
 
-  // Get enrolled students with their progress
-  const { data: studentsResult, error: studentsError } = await supabase.rpc('exec_sql', {
-    sql_query: `SELECT 
-      e.student_id,
-      p.full_name as student_name,
-      p.email,
-      e.enrolled_at,
-      e.progress_percentage,
-      e.last_accessed,
-      COUNT(DISTINCT lp.lesson_id) FILTER (WHERE lp.is_completed = true) as completed_lessons,
-      ROUND(AVG(qa.score)) as quiz_average,
-      ROUND(AVG(asub.score)) as assignment_average
-     FROM enrollments e
-     LEFT JOIN profiles p ON p.clerk_user_id = e.student_id
-     LEFT JOIN course_weeks w ON w.course_id = e.course_id
-     LEFT JOIN course_lessons l ON l.week_id = w.id
-     LEFT JOIN lesson_progress lp ON lp.lesson_id = l.id AND lp.student_id = e.student_id
-     LEFT JOIN quizzes q ON q.lesson_id = l.id
-     LEFT JOIN quiz_attempts qa ON qa.quiz_id = q.id AND qa.student_id = e.student_id AND qa.passed = true
-     LEFT JOIN assignments a ON a.lesson_id = l.id
-     LEFT JOIN assignment_submissions asub ON asub.assignment_id = a.id AND asub.student_id = e.student_id AND asub.status = 'graded'
-     WHERE e.course_id = '${courseId}'
-     GROUP BY e.student_id, p.full_name, p.email, e.enrolled_at, e.progress_percentage, e.last_accessed
-     ORDER BY e.enrolled_at DESC`
-  });
+  const weekIds = (weekRows || []).map((w: any) => w.id);
+  let totalLessons = 0;
+
+  if (weekIds.length > 0) {
+    const { count, error: countError } = await supabase
+      .from('course_lessons')
+      .select('*', { count: 'exact', head: true })
+      .in('week_id', weekIds);
+    if (countError) throw countError;
+    totalLessons = count || 0;
+  }
+
+  // Get enrolled students with their progress using safe Supabase queries
+  const { data: enrollmentsData, error: studentsError } = await supabase
+    .from('enrollments')
+    .select('student_id, enrolled_at, progress_percentage, last_accessed')
+    .eq('course_id', courseId)
+    .order('enrolled_at', { ascending: false });
 
   if (studentsError) throw studentsError;
 
-  const students = (studentsResult || []).map((row: any) => ({
+  const enrolledStudentIds = (enrollmentsData || []).map((e: any) => e.student_id);
+  let profileMap: Record<string, { full_name: string; email: string }> = {};
+
+  if (enrolledStudentIds.length > 0) {
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('clerk_user_id, full_name, email')
+      .in('clerk_user_id', enrolledStudentIds);
+
+    (profilesData || []).forEach((p: any) => {
+      profileMap[p.clerk_user_id] = { full_name: p.full_name, email: p.email };
+    });
+  }
+
+  const studentsResult = (enrollmentsData || []).map((e: any) => ({
+    student_id: e.student_id,
+    student_name: profileMap[e.student_id]?.full_name || 'Unknown',
+    email: profileMap[e.student_id]?.email || '',
+    enrolled_at: e.enrolled_at,
+    progress_percentage: e.progress_percentage || 0,
+    last_accessed: e.last_accessed,
+    completed_lessons: 0,
+    quiz_average: undefined,
+    assignment_average: undefined,
+  }));
+  const students = studentsResult.map((row: any) => ({
     ...row,
-    completed_lessons: parseInt(row.completed_lessons) || 0,
     total_lessons: totalLessons,
-    quiz_average: row.quiz_average ? parseFloat(row.quiz_average) : undefined,
-    assignment_average: row.assignment_average ? parseFloat(row.assignment_average) : undefined
   }));
 
   // Calculate course stats
@@ -122,66 +134,118 @@ export const getStudentCourseDetails = async (
     throw new Error('Unauthorized');
   }
 
-  // Get student's lesson progress
-  const { data: lessonsProgress, error: lessonsError } = await supabase.rpc('exec_sql', {
-    sql_query: `SELECT 
-      w.title as week_title,
-      w.order_index as week_order,
-      l.id as lesson_id,
-      l.title as lesson_title,
-      l.content_type,
-      l.order_index as lesson_order,
-      lp.is_completed,
-      lp.completed_at
-     FROM course_weeks w
-     INNER JOIN course_lessons l ON l.week_id = w.id
-     LEFT JOIN lesson_progress lp ON lp.lesson_id = l.id AND lp.student_id = '${studentId}'
-     WHERE w.course_id = '${courseId}'
-     ORDER BY w.order_index, l.order_index`
+  // Get lessons with progress for this student using safe Supabase queries
+  const { data: weeksData, error: weeksErr } = await supabase
+    .from('course_weeks')
+    .select('id, title, order_index')
+    .eq('course_id', courseId)
+    .order('order_index');
+
+  if (weeksErr) throw weeksErr;
+
+  const courseWeekIds = (weeksData || []).map((w: any) => w.id);
+  const weekTitleMap: Record<string, { title: string; order_index: number }> = {};
+  (weeksData || []).forEach((w: any) => {
+    weekTitleMap[w.id] = { title: w.title, order_index: w.order_index };
   });
 
-  if (lessonsError) throw lessonsError;
+  let lessonsProgress: any[] = [];
+  if (courseWeekIds.length > 0) {
+    const { data: lessonsData, error: lessonsErr } = await supabase
+      .from('course_lessons')
+      .select('id, title, content_type, order_index, week_id')
+      .in('week_id', courseWeekIds)
+      .order('order_index');
 
-  // Get quiz attempts
-  const { data: quizAttempts, error: quizError } = await supabase.rpc('exec_sql', {
-    sql_query: `SELECT 
-      l.title as lesson_title,
-      qa.score,
-      qa.passed,
-      qa.attempt_number,
-      qa.submitted_at
-     FROM quiz_attempts qa
-     INNER JOIN quizzes q ON q.id = qa.quiz_id
-     INNER JOIN course_lessons l ON l.id = q.lesson_id
-     INNER JOIN course_weeks w ON w.id = l.week_id
-     WHERE w.course_id = '${courseId}' AND qa.student_id = '${studentId}'
-     ORDER BY qa.submitted_at DESC`
-  });
+    if (lessonsErr) throw lessonsErr;
+
+    const lessonIds = (lessonsData || []).map((l: any) => l.id);
+    let progressMap: Record<string, { is_completed: boolean; completed_at: string | null }> = {};
+
+    if (lessonIds.length > 0) {
+      const { data: progressData } = await supabase
+        .from('lesson_progress')
+        .select('lesson_id, is_completed, completed_at')
+        .in('lesson_id', lessonIds)
+        .eq('student_id', studentId);
+
+      (progressData || []).forEach((p: any) => {
+        progressMap[p.lesson_id] = { is_completed: p.is_completed, completed_at: p.completed_at };
+      });
+    }
+
+    lessonsProgress = (lessonsData || []).map((l: any) => ({
+      week_title: weekTitleMap[l.week_id]?.title || '',
+      week_order: weekTitleMap[l.week_id]?.order_index || 0,
+      lesson_id: l.id,
+      lesson_title: l.title,
+      content_type: l.content_type,
+      lesson_order: l.order_index,
+      is_completed: progressMap[l.id]?.is_completed || false,
+      completed_at: progressMap[l.id]?.completed_at || null,
+    }));
+  }
+
+  // Get quiz attempts for this student in this course (safe query)
+  const { data: quizAttempts, error: quizError } = await supabase
+    .from('quiz_attempts')
+    .select('score, passed, attempt_number, submitted_at, quizzes!inner(lesson_id, course_lessons!inner(title, course_weeks!inner(course_id)))')
+    .eq('student_id', studentId)
+    .order('submitted_at', { ascending: false });
 
   if (quizError) throw quizError;
 
-  // Get assignment submissions
-  const { data: assignments, error: assignmentsError } = await supabase.rpc('exec_sql', {
-    sql_query: `SELECT 
-      l.title as lesson_title,
-      asub.score,
-      asub.status,
-      asub.submitted_at,
-      asub.graded_at,
-      asub.feedback
-     FROM assignment_submissions asub
-     INNER JOIN assignments a ON a.id = asub.assignment_id
-     INNER JOIN course_lessons l ON l.id = a.lesson_id
-     INNER JOIN course_weeks w ON w.id = l.week_id
-     WHERE w.course_id = '${courseId}' AND asub.student_id = '${studentId}'
-     ORDER BY asub.submitted_at DESC`
-  });
+  const filteredQuizAttempts = (quizAttempts || [])
+    .filter((qa: any) => {
+      const quiz = Array.isArray(qa.quizzes) ? qa.quizzes[0] : qa.quizzes;
+      const lesson = Array.isArray(quiz?.course_lessons) ? quiz?.course_lessons[0] : quiz?.course_lessons;
+      const week = Array.isArray(lesson?.course_weeks) ? lesson?.course_weeks[0] : lesson?.course_weeks;
+      return week?.course_id === courseId;
+    })
+    .map((qa: any) => {
+      const quiz = Array.isArray(qa.quizzes) ? qa.quizzes[0] : qa.quizzes;
+      const lesson = Array.isArray(quiz?.course_lessons) ? quiz?.course_lessons[0] : quiz?.course_lessons;
+      return {
+        lesson_title: lesson?.title || '',
+        score: qa.score,
+        passed: qa.passed,
+        attempt_number: qa.attempt_number,
+        submitted_at: qa.submitted_at,
+      };
+    });
+
+  // Get assignment submissions for this student in this course (safe query)
+  const { data: assignmentSubs, error: assignmentsError } = await supabase
+    .from('assignment_submissions')
+    .select('score, status, submitted_at, graded_at, feedback, assignments!inner(lesson_id, course_lessons!inner(title, course_weeks!inner(course_id)))')
+    .eq('student_id', studentId)
+    .order('submitted_at', { ascending: false });
 
   if (assignmentsError) throw assignmentsError;
 
+  const filteredAssignments = (assignmentSubs || [])
+    .filter((asub: any) => {
+      const assignment = Array.isArray(asub.assignments) ? asub.assignments[0] : asub.assignments;
+      const lesson = Array.isArray(assignment?.course_lessons) ? assignment?.course_lessons[0] : assignment?.course_lessons;
+      const week = Array.isArray(lesson?.course_weeks) ? lesson?.course_weeks[0] : lesson?.course_weeks;
+      return week?.course_id === courseId;
+    })
+    .map((asub: any) => {
+      const assignment = Array.isArray(asub.assignments) ? asub.assignments[0] : asub.assignments;
+      const lesson = Array.isArray(assignment?.course_lessons) ? assignment?.course_lessons[0] : assignment?.course_lessons;
+      return {
+        lesson_title: lesson?.title || '',
+        score: asub.score,
+        status: asub.status,
+        submitted_at: asub.submitted_at,
+        graded_at: asub.graded_at,
+        feedback: asub.feedback,
+      };
+    });
+
   return {
-    lessons: lessonsProgress || [],
-    quizzes: quizAttempts || [],
-    assignments: assignments || []
+    lessons: lessonsProgress,
+    quizzes: filteredQuizAttempts,
+    assignments: filteredAssignments,
   };
 };

@@ -18,6 +18,24 @@ interface Certificate {
   generated_at: string;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isPlaceholderValue(value?: string): boolean {
+  if (!value) return true;
+  const normalized = value.trim();
+  if (!normalized) return true;
+  if (UUID_REGEX.test(normalized)) return true;
+  return /^(unknown(\s+teacher|\s+instructor)?|n\/a|null|undefined)$/i.test(normalized);
+}
+
+function safeTeacherName(teacherName?: string): string {
+  return isPlaceholderValue(teacherName) ? 'Instructor' : teacherName!.trim();
+}
+
+function safeCourseTitle(title?: string): string {
+  return isPlaceholderValue(title) ? 'Course' : title!.trim();
+}
+
 export default function CertificatesPage() {
   const router = useRouter();
   const { getToken } = useAuth();
@@ -68,9 +86,9 @@ ${certificate.student_name}
 
 has successfully completed the course
 
-${certificate.course_title}
+${safeCourseTitle(certificate.course_title)}
 
-Instructor: ${certificate.teacher_name}
+Instructor: ${safeTeacherName(certificate.teacher_name)}
 Completion Date: ${formatDate(certificate.completion_date)}
 
 Certificate ID: ${certificate.id}
@@ -81,7 +99,7 @@ Generated: ${formatDate(certificate.generated_at)}
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `certificate-${certificate.course_title.replace(/\s+/g, '-')}.txt`;
+    a.download = `certificate-${safeCourseTitle(certificate.course_title).replace(/\s+/g, '-')}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -154,7 +172,7 @@ Generated: ${formatDate(certificate.generated_at)}
                 <div className="p-6">
                   <div className="text-center mb-6">
                     <h4 className="text-xl font-bold text-slate-900 mb-2">
-                      {certificate.course_title}
+                      {safeCourseTitle(certificate.course_title)}
                     </h4>
                     <p className="text-slate-600 text-sm">
                       Awarded to: <span className="font-semibold">{certificate.student_name}</span>
@@ -164,7 +182,7 @@ Generated: ${formatDate(certificate.generated_at)}
                   <div className="space-y-3 mb-6">
                     <div className="flex items-center gap-2 text-sm text-slate-600">
                       <BookOpen className="w-4 h-4 text-amber-600" />
-                      <span>Instructor: {certificate.teacher_name}</span>
+                      <span>Instructor: {safeTeacherName(certificate.teacher_name)}</span>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-slate-600">
                       <Calendar className="w-4 h-4 text-amber-600" />

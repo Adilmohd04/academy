@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Nunito, Amiri } from "next/font/google";
-import Script from "next/script";
 import "./globals.css";
 import { Providers } from "./providers";
 import { Toaster } from "react-hot-toast";
@@ -28,13 +27,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        {/* Razorpay Checkout Script */}
-        <Script 
-          src="https://checkout.razorpay.com/v1/checkout.js" 
-          strategy="lazyOnload"
-        />
-      </head>
+      <head />
       <body className={`${sans.variable} ${serif.variable} font-sans`}>
         <Providers>
           {children}

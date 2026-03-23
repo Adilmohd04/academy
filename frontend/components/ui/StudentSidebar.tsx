@@ -16,7 +16,8 @@ import {
   LogOut,
   Bell,
   Search,
-  Award
+  Award,
+  Bookmark
 } from 'lucide-react';
 import { useClerk, useUser } from '@clerk/nextjs';
 import { cn } from '@/lib/utils';
@@ -26,7 +27,7 @@ const navItems = [
   { label: 'My Schedule', href: '/student/meetings', icon: Calendar },
   { label: 'Browse Courses', href: '/student/courses/browse', icon: Search },
   { label: 'My Courses', href: '/student/courses', icon: BookOpen },
-  { label: 'Library', href: '/student/library', icon: BookOpen },
+  { label: 'Library', href: '/student/library', icon: Bookmark },
   { label: 'Certificates', href: '/student/certificates', icon: Award },
   { label: 'Announcements', href: '/student/announcements', icon: Bell },
   { label: 'Profile', href: '/student/profile', icon: User },
@@ -70,9 +71,24 @@ export const StudentSidebar = () => {
                 <BookOpen className="w-6 h-6" />
               </div>
               <div className="flex flex-col">
-                <h1 className="font-serif text-lg text-[#1e1b4b] tracking-wide font-bold leading-none">Little Muslim</h1>
+                <h1 className="font-serif text-lg text-[#1e1b4b] tracking-wide font-bold leading-none">Little Muslimah</h1>
                 <span className="text-[10px] text-[#64748B] uppercase tracking-[0.2em] mt-1">Academy</span>
               </div>
+            </motion.div>
+          )}
+          {collapsed && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="relative group"
+            >
+              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-[#10B981] font-bold shadow-sm border border-[#D1E7DD]">
+                <BookOpen className="w-6 h-6" />
+              </div>
+              <span className="absolute left-1/2 top-full -translate-x-1/2 mt-2 w-[64px] px-2 py-1.5 rounded-lg text-[10px] leading-tight text-center font-semibold bg-[#1e1b4b] text-white whitespace-normal shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                Little Muslimah Academy
+              </span>
             </motion.div>
           )}
         </AnimatePresence>
@@ -86,11 +102,11 @@ export const StudentSidebar = () => {
       </div>
 
       {/* Navigation */}
-      <div className="flex-1 px-3 py-6 flex flex-col gap-2 relative z-10 overflow-y-auto scrollbar-none" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+      <div className="px-3 pt-3 pb-2 flex-1 flex flex-col gap-2 relative z-10 min-h-0 overflow-visible">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           return (
-            <Link key={item.href} href={item.href} className="block group">
+            <Link key={item.href} href={item.href} className="block group relative">
               <div className={cn(
                 "flex items-center gap-4 transition-all duration-300 px-4 py-3.5 rounded-xl mx-1",
                 collapsed ? "justify-center" : "",
@@ -107,16 +123,18 @@ export const StudentSidebar = () => {
                   <span className="text-sm tracking-wide">{item.label}</span>
                 )}
               </div>
+              {collapsed && (
+                <span className="absolute left-full top-1/2 -translate-y-1/2 ml-3 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#1e1b4b] text-white whitespace-nowrap shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                  {item.label}
+                </span>
+              )}
             </Link>
           );
         })}
 
-        {/* Spacer to push Book Session to bottom */}
-        <div className="flex-1" />
-
         {/* Book Session */}
-        <div className="px-1 mb-2">
-          <Link href="/student/meetings/select-teacher" className="block group">
+        <div className="px-1 mt-1">
+          <Link href="/student/meetings/select-teacher" className="block group relative">
             <div className={cn(
               "flex items-center gap-4 transition-all duration-300 px-4 py-3.5 rounded-xl mx-1",
               collapsed 
@@ -131,17 +149,25 @@ export const StudentSidebar = () => {
                 <span className="text-sm font-bold tracking-wide">Book Session</span>
               )}
             </div>
+            {collapsed && (
+              <span className="absolute left-full top-1/2 -translate-y-1/2 ml-3 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#1e1b4b] text-white whitespace-nowrap shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                Book Session
+              </span>
+            )}
           </Link>
         </div>
       </div>
 
       {/* Footer - User Profile with Hover Menu */}
       <div 
-        className="p-4 border-t border-[#D1E7DD] bg-[#F0F7F4] relative z-20"
+        className="mt-auto px-4 pt-2 pb-3 bg-[#F0F7F4] relative z-20"
         onMouseEnter={() => setShowProfileMenu(true)}
         onMouseLeave={() => setShowProfileMenu(false)}
       >
-        {/* Dropdown Menu */}
+        {/* Simple Line Separator */}
+        <div className="h-px bg-gradient-to-r from-transparent via-[#10B981]/40 to-transparent mb-2"></div>
+
+        {/* Dropdown Menu - appears on hover */}
         <AnimatePresence>
           {showProfileMenu && !collapsed && (
             <motion.div
@@ -152,7 +178,7 @@ export const StudentSidebar = () => {
             >
               <button 
                 onClick={() => signOut()}
-                className="w-full flex items-center gap-3 px-4 py-3 text-[#64748B] hover:text-[#1e1b4b] hover:bg-[#F0F7F4] transition-colors text-sm font-medium"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-red-600 hover:bg-red-50 transition-colors text-sm font-semibold"
               >
                 <LogOut className="w-4 h-4" />
                 Sign Out
@@ -161,17 +187,24 @@ export const StudentSidebar = () => {
           )}
         </AnimatePresence>
 
+        {/* Profile Section */}
         <div className={cn(
-          "flex items-center gap-3 p-2 rounded-xl transition-all cursor-pointer hover:bg-white/50",
+          "flex items-center gap-3 p-2 rounded-xl transition-all hover:bg-white/40 cursor-pointer relative group",
           collapsed ? "justify-center" : ""
         )}>
           <div className="relative flex-shrink-0">
-            <img 
-              src={user?.imageUrl} 
-              alt={user?.fullName || "Profile"} 
-              className="w-10 h-10 rounded-full border-2 border-[#10B981] object-cover"
-            />
-            <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-[#F0F7F4] rounded-full"></div>
+            {user?.imageUrl ? (
+              <img 
+                src={user.imageUrl} 
+                alt={user?.fullName || "Profile"} 
+                className="w-9 h-9 rounded-full border-2 border-[#10B981] object-cover"
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-full border-2 border-[#10B981] bg-white text-[#1e1b4b] flex items-center justify-center font-bold text-sm">
+                {(user?.firstName?.[0] || user?.fullName?.[0] || 'S').toUpperCase()}
+              </div>
+            )}
+            <div className="absolute bottom-0 right-0 w-2 h-2 bg-emerald-500 border-2 border-[#F0F7F4] rounded-full"></div>
           </div>
           
           {!collapsed && (
@@ -179,10 +212,15 @@ export const StudentSidebar = () => {
               <p className="text-sm font-bold text-[#1e1b4b] truncate font-serif">
                 {user?.fullName || 'Student'}
               </p>
-              <p className="text-[10px] text-[#64748B] truncate">
+              <p className="text-[9px] text-[#64748B] truncate">
                 {user?.primaryEmailAddress?.emailAddress || ''}
               </p>
             </div>
+          )}
+          {collapsed && (
+            <span className="absolute left-full top-1/2 -translate-y-1/2 ml-3 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#1e1b4b] text-white whitespace-nowrap shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+              Profile
+            </span>
           )}
         </div>
       </div>

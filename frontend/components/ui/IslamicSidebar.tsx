@@ -49,21 +49,27 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
 
   const roleConfig = {
     admin: {
-      gradient: 'from-[#1e3a5f] via-[#2c5f7e] to-[#1e3a5f]',
-      accentColor: 'amber-400',
-      title: 'Little Muslim Academy',
+      gradient: 'from-slate-900 via-slate-800 to-slate-900',
+      activeItem: 'bg-amber-400/15 border border-amber-300/30 text-white',
+      hoverItem: 'hover:bg-white/10 hover:text-white',
+      badgeClass: 'bg-amber-300 text-slate-900',
+      title: 'Little Muslimah Academy',
       arabicTitle: 'أكاديمية المسلمة الصغيرة'
     },
     teacher: {
-      gradient: 'from-[#0f4c3a] via-[#16725a] to-[#0a3d2e]',
-      accentColor: 'emerald-300',
-      title: 'Little Muslim Academy',
+      gradient: 'from-emerald-900 via-teal-800 to-emerald-900',
+      activeItem: 'bg-white/20 border border-emerald-200/30 text-white',
+      hoverItem: 'hover:bg-white/10 hover:text-white',
+      badgeClass: 'bg-emerald-200 text-emerald-900',
+      title: 'Little Muslimah Academy',
       arabicTitle: 'بوابة المعلم'
     },
     student: {
-      gradient: 'from-[#5b21b6] via-[#7c3aed] to-[#5b21b6]',
-      accentColor: 'purple-300',
-      title: 'Little Muslim Academy',
+      gradient: 'from-slate-900 via-slate-800 to-slate-900',
+      activeItem: 'bg-violet-400/15 border border-violet-300/30 text-white',
+      hoverItem: 'hover:bg-white/10 hover:text-white',
+      badgeClass: 'bg-violet-300 text-slate-900',
+      title: 'Little Muslimah Academy',
       arabicTitle: 'أكاديمية المسلمة الصغيرة'
     }
   };
@@ -74,41 +80,23 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
     <>
       <div
         className={`${
-          collapsed ? 'w-20' : 'w-64'
-        } h-screen bg-gradient-to-b ${config.gradient} text-white sticky top-0 z-50 transition-all duration-300 shadow-2xl overflow-hidden flex flex-col flex-shrink-0`}
+          collapsed ? 'w-[88px]' : 'w-[280px]'
+        } h-screen bg-gradient-to-b ${config.gradient} text-white sticky top-0 z-50 transition-all duration-300 shadow-xl overflow-hidden flex flex-col flex-shrink-0 border-r border-white/10`}
       >
-      {/* Islamic Pattern Overlay */}
-      <div className="absolute inset-0 opacity-5 pointer-events-none">
-        <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-          <defs>
-            <pattern id="sidebar-pattern" x="0" y="0" width="60" height="60" patternUnits="userSpaceOnUse">
-              <circle cx="30" cy="30" r="1.5" fill="white" />
-              <path d="M30 15 L40 25 L50 30 L40 35 L30 45 L20 35 L10 30 L20 25 Z" fill="none" stroke="white" strokeWidth="0.8" opacity="0.6" />
-              <circle cx="30" cy="30" r="8" fill="none" stroke="white" strokeWidth="0.5" opacity="0.4" />
-            </pattern>
-          </defs>
-          <rect width="100%" height="100%" fill="url(#sidebar-pattern)" />
-        </svg>
-      </div>
-
       {/* Header */}
-      <div className="relative p-4 border-b border-white/10 bg-gradient-to-br from-white/5 to-transparent backdrop-blur-sm">
+      <div className="relative p-4 border-b border-white/10 bg-white/5 backdrop-blur-sm">
         <div className="flex items-center justify-between">
           {!collapsed && (
-            <div className="flex-1 text-center">
-              <div className="flex items-center justify-center gap-2 mb-1">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-white/20 to-white/5 flex items-center justify-center backdrop-blur-sm border border-white/20 shadow-lg">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center border border-white/20">
                   <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                   </svg>
                 </div>
-                <h2 className="text-lg font-bold tracking-wide text-white">Little Muslim</h2>
+                <h2 className="text-base font-semibold tracking-wide text-white">Little Muslimah</h2>
               </div>
-              <p className="text-xs text-white/60 font-light tracking-wider">ACADEMY</p>
-              <div className="mt-2 flex items-center justify-center">
-                <div className="h-px w-24 bg-gradient-to-r from-transparent via-white/40 to-transparent"></div>
-              </div>
-              <p className="text-xs text-white/70 font-arabic mt-2">{config.arabicTitle}</p>
+              <p className="text-[11px] text-white/60 tracking-[0.18em]">ACADEMY</p>
             </div>
           )}
           <button
@@ -153,8 +141,8 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
                   className={`
                     group flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200
                     ${isActive 
-                      ? `bg-white/20 text-white shadow-lg border-l-4 border-${config.accentColor}` 
-                      : 'text-white/80 hover:bg-white/10 hover:text-white'
+                      ? `${config.activeItem} shadow-sm`
+                      : `text-white/80 ${config.hoverItem}`
                     }
                     ${collapsed ? 'justify-center' : ''}
                   `}
@@ -166,7 +154,7 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
                     <>
                       <span className="flex-1 font-medium">{item.label}</span>
                       {item.badge && (
-                        <span className={`px-2 py-0.5 text-xs font-bold rounded-full bg-${config.accentColor} text-islamic-midnight-900`}>
+                        <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${config.badgeClass}`}>
                           {item.badge}
                         </span>
                       )}

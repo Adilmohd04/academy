@@ -46,6 +46,7 @@ export default function PaymentSuccessClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [downloadingPDF, setDownloadingPDF] = useState(false);
+  const [downloadingSlip, setDownloadingSlip] = useState(false);
 
   useEffect(() => {
     if (paymentId) {
@@ -107,6 +108,47 @@ export default function PaymentSuccessClient() {
     }
   };
 
+  const handleDownloadSlip = async () => {
+    if (!paymentId) return;
+
+    setDownloadingSlip(true);
+    try {
+      const token = await getToken();
+      const response = await api.student.getPaymentSlip(paymentId, token);
+      const slip = response.data?.slip;
+
+      if (!slip) {
+        throw new Error('Slip data not available');
+      }
+
+      const lines = [
+        'Little Muslimah Academy - Payment Slip',
+        '--------------------------------------',
+        `Payment ID: ${slip.paymentId || paymentId}`,
+        `Transaction ID: ${slip.transactionId || paymentDetails?.razorpay_payment_id || 'N/A'}`,
+        `Amount: ₹${slip.amount ?? paymentDetails?.amount ?? 'N/A'}`,
+        `Status: ${slip.status || paymentDetails?.status || 'N/A'}`,
+        `Date: ${slip.paidAt || paymentDetails?.created_at || 'N/A'}`,
+        `Student: ${slip.studentName || paymentDetails?.meeting_request?.student_name || 'N/A'}`,
+      ];
+
+      const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `payment-slip-${paymentId}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Error downloading slip:', err);
+      alert('Failed to download slip. Please try again.');
+    } finally {
+      setDownloadingSlip(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#FDFBF7]">
@@ -156,10 +198,12 @@ export default function PaymentSuccessClient() {
 
         {/* Success Animation */}
         <div className="text-center mb-8">
-          <div className="mx-auto flex items-center justify-center h-24 w-24 rounded-full bg-amber-100 mb-4 animate-bounce border border-amber-200">
-            <svg className="h-12 w-12 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
+          <div className="mx-auto mb-4 h-24 w-24 rounded-full bg-emerald-50 border-2 border-emerald-200 flex items-center justify-center shadow-sm">
+            <div className="h-16 w-16 rounded-full bg-emerald-600 flex items-center justify-center">
+              <svg className="h-9 w-9 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
           </div>
           <h1 className="text-3xl font-bold text-emerald-950 mb-2 font-serif">Payment Successful! 🎉</h1>
           <p className="text-emerald-800/70">Your meeting has been booked successfully</p>
@@ -280,6 +324,20 @@ export default function PaymentSuccessClient() {
                 <span className="mr-2">📄</span> Download Receipt
               </>
             )}
+          </button>
+
+          <button
+            onClick={handleDownloadSlip}
+            disabled={downloadingSlip}
+            className={`
+              flex-1 py-3 px-6 rounded-lg font-semibold border-2 transition-all
+              ${downloadingSlip
+                ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-white text-emerald-950 border-emerald-200 hover:border-emerald-300 hover:bg-emerald-50'
+              }
+            `}
+          >
+            {downloadingSlip ? 'Preparing Slip...' : 'Download Slip'}
           </button>
 
           <button

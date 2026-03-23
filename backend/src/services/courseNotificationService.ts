@@ -34,6 +34,7 @@ const transporter = isEmailConfigured
 
 const FROM_ADDRESS = `"Little Muslim Academy" <${smtpUser || 'noreply@littlemuslima.com'}>`;
 const FRONTEND_URL = process.env.NEXT_PUBLIC_FRONTEND_URL || 'http://localhost:3000';
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,6 +97,15 @@ async function safeSend(to: string, subject: string, html: string): Promise<void
   }
 }
 
+function sanitizeCourseTitle(title?: string, fallback = 'Course'): string {
+  if (!title) return fallback;
+  const normalized = title.trim();
+  if (!normalized) return fallback;
+  if (UUID_REGEX.test(normalized)) return fallback;
+  if (/^(unknown|n\/a|null|undefined)$/i.test(normalized)) return fallback;
+  return normalized;
+}
+
 // ---------------------------------------------------------------------------
 // Base email wrapper
 // ---------------------------------------------------------------------------
@@ -133,13 +143,20 @@ export async function notifyNewCourseAvailable(course: {
   const students = await getAllStudentEmails();
   if (students.length === 0) return;
 
-  const subject = `📚 New Course Available: ${course.title}`;
+  const courseTitle = sanitizeCourseTitle(course.title, 'New Course');
+
+  const subject = `📚 New Course Available: ${courseTitle}`;
+  const hasKnownInstructor = !!(
+    course.teacher_name &&
+    !/unknown/i.test(course.teacher_name)
+  );
+
   const html = wrapEmail('New Course Available!', '📚', `
     <p>As-salamu alaykum,</p>
     <p>A new course has been published and is now available for enrollment:</p>
     <div style="background:#f3f4f6;padding:20px;border-left:4px solid #667eea;margin:20px 0;border-radius:8px;">
-      <h2 style="margin:0 0 8px;color:#667eea;">${course.title}</h2>
-      ${course.teacher_name ? `<p style="margin:4px 0;color:#6b7280;">Instructor: <strong>${course.teacher_name}</strong></p>` : ''}
+      <h2 style="margin:0 0 8px;color:#667eea;">${courseTitle}</h2>
+      ${hasKnownInstructor ? `<p style="margin:4px 0;color:#6b7280;">Instructor: <strong>${course.teacher_name}</strong></p>` : ''}
       ${course.description ? `<p style="margin:8px 0;color:#555;">${course.description.substring(0, 200)}${course.description.length > 200 ? '...' : ''}</p>` : ''}
     </div>
     <div style="text-align:center;margin:30px 0;">
@@ -166,12 +183,13 @@ export async function notifyEnrollmentConfirmation(
   courseTitle: string,
   courseId: string
 ): Promise<void> {
-  const subject = `🎓 Enrollment Confirmed – ${courseTitle}`;
+  const safeTitle = sanitizeCourseTitle(courseTitle);
+  const subject = `🎓 Enrollment Confirmed – ${safeTitle}`;
   const html = wrapEmail('Enrollment Confirmed!', '🎓', `
     <p>As-salamu alaykum <strong>${studentName}</strong>,</p>
     <p>Congratulations! You have successfully enrolled in:</p>
     <div style="background:#f3f4f6;padding:20px;border-left:4px solid #10b981;margin:20px 0;border-radius:8px;">
-      <h2 style="margin:0;color:#10b981;">${courseTitle}</h2>
+      <h2 style="margin:0;color:#10b981;">${safeTitle}</h2>
     </div>
     <p>You can now access all course materials, lessons, and resources. Head to your dashboard to begin!</p>
     <div style="text-align:center;margin:30px 0;">
@@ -316,4 +334,133 @@ export async function notifyLiveClassScheduled(
     await Promise.allSettled(batch.map((s) => safeSend(s.email, subject, html)));
   }
   console.log(`📧 Live class notification sent to ${students.length} enrolled students`);
+}
+
+// ---------------------------------------------------------------------------
+// 6. FINAL EXAM INTERVIEW REMINDERS (single student)
+// ---------------------------------------------------------------------------
+export async function notifyFinalExamInterviewReminder(
+  studentEmail: string,
+  studentName: string,
+  payload: {
+    courseTitle: string;
+    examTitle: string;
+    scheduledAt: string;
+    meetingLink?: string | null;
+    reminderType: '24h' | '1h' | '15m' | '5m';
+  }
+): Promise<void> {
+  const formattedDate = new Date(payload.scheduledAt).toLocaleString('en-IN', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata'
+  });
+
+  const typeLabel = payload.reminderType === '24h'
+    ? 'in 24 hours'
+    : payload.reminderType === '1h'
+    ? 'in 1 hour'
+    : payload.reminderType === '15m'
+    ? 'in 15 minutes'
+    : 'in 5 minutes';
+
+  const subjectPrefix = payload.reminderType === '15m' || payload.reminderType === '5m'
+    ? '🚨 Final Exam Interview Starting Soon'
+    : '⏰ Final Exam Interview Reminder';
+
+  const subject = `${subjectPrefix}: ${payload.examTitle}`;
+  const html = wrapEmail('Final Exam Interview Reminder', '🎤', `
+    <p>As-salamu alaykum <strong>${studentName || 'Student'}</strong>,</p>
+    <p>This is a reminder that your final exam interview for <strong>${payload.courseTitle}</strong> is scheduled <strong>${typeLabel}</strong>.</p>
+    <div style="background:#ecfdf5;padding:20px;border-left:4px solid #10b981;margin:20px 0;border-radius:8px;">
+      <h3 style="margin:0 0 12px;color:#065f46;">${payload.examTitle}</h3>
+      <p style="margin:4px 0;color:#047857;">📅 <strong>${formattedDate} IST</strong></p>
+      ${payload.meetingLink ? `
+      <div style="margin-top:16px;">
+        <a href="${payload.meetingLink}" style="display:inline-block;background:#10b981;color:white;padding:10px 24px;text-decoration:none;border-radius:6px;font-weight:bold;">
+          🔗 Join Interview
+        </a>
+      </div>` : ''}
+    </div>
+    <p style="font-size:13px;color:#6b7280;">Please join on time and ensure your audio/video setup is ready beforehand.</p>
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${FRONTEND_URL}/student/exams" style="display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:14px 36px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">
+        Open Exam Center
+      </a>
+    </div>
+  `);
+
+  await safeSend(studentEmail, subject, html);
+}
+
+export async function notifyTeacherInterviewAssignment(
+  teacherEmail: string,
+  teacherName: string,
+  payload: {
+    courseTitle: string;
+    examTitle: string;
+    assignedCount: number;
+    startDate?: string;
+    endDate?: string;
+  }
+): Promise<void> {
+  const subject = `📅 Interview Allocation: ${payload.examTitle}`;
+  const html = wrapEmail('Interview Allocation', '🧑‍🏫', `
+    <p>As-salamu alaykum <strong>${teacherName || 'Teacher'}</strong>,</p>
+    <p>You have been assigned <strong>${payload.assignedCount}</strong> final exam interview(s).</p>
+    <div style="background:#eff6ff;padding:20px;border-left:4px solid #3b82f6;margin:20px 0;border-radius:8px;">
+      <h3 style="margin:0 0 12px;color:#1d4ed8;">${payload.examTitle}</h3>
+      <p style="margin:4px 0;color:#1e40af;">📘 Course: <strong>${payload.courseTitle}</strong></p>
+      ${payload.startDate ? `<p style="margin:4px 0;color:#1e40af;">🗓️ Start: <strong>${payload.startDate}</strong></p>` : ''}
+      ${payload.endDate ? `<p style="margin:4px 0;color:#1e40af;">🗓️ End: <strong>${payload.endDate}</strong></p>` : ''}
+    </div>
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${FRONTEND_URL}/teacher/interviews" style="display:inline-block;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:white;padding:14px 36px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">
+        Open My Interviews
+      </a>
+    </div>
+  `);
+
+  await safeSend(teacherEmail, subject, html);
+}
+
+export async function notifyTeacherInterviewStartingSoon(
+  teacherEmail: string,
+  teacherName: string,
+  payload: {
+    studentName: string;
+    courseTitle: string;
+    examTitle: string;
+    scheduledAt: string;
+    meetingLink?: string | null;
+  }
+): Promise<void> {
+  const formattedDate = new Date(payload.scheduledAt).toLocaleString('en-IN', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata'
+  });
+
+  const subject = `🔔 Student Waiting Soon: ${payload.studentName}`;
+  const html = wrapEmail('Student Interview Alert', '🎤', `
+    <p>As-salamu alaykum <strong>${teacherName || 'Teacher'}</strong>,</p>
+    <p>Your interview with <strong>${payload.studentName}</strong> starts in about <strong>5 minutes</strong>.</p>
+    <div style="background:#fef2f2;padding:20px;border-left:4px solid #ef4444;margin:20px 0;border-radius:8px;">
+      <h3 style="margin:0 0 12px;color:#991b1b;">${payload.examTitle}</h3>
+      <p style="margin:4px 0;color:#7f1d1d;">📘 Course: <strong>${payload.courseTitle}</strong></p>
+      <p style="margin:4px 0;color:#7f1d1d;">👤 Student: <strong>${payload.studentName}</strong></p>
+      <p style="margin:4px 0;color:#7f1d1d;">📅 Time: <strong>${formattedDate} IST</strong></p>
+      ${payload.meetingLink ? `
+      <div style="margin-top:16px;">
+        <a href="${payload.meetingLink}" style="display:inline-block;background:#ef4444;color:white;padding:10px 24px;text-decoration:none;border-radius:6px;font-weight:bold;">
+          Join Interview
+        </a>
+      </div>` : ''}
+    </div>
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${FRONTEND_URL}/teacher/interviews" style="display:inline-block;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:white;padding:14px 36px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">
+        Open My Interviews
+      </a>
+    </div>
+  `);
+
+  await safeSend(teacherEmail, subject, html);
 }

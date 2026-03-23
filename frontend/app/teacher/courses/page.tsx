@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Plus, BookOpen, Users, TrendingUp, Edit, Eye, Trash2, Loader2, Clock, CheckCircle, XCircle, CheckSquare } from 'lucide-react';
 import { IslamicCard } from '@/components/ui/IslamicCards';
 import { IslamicButton } from '@/components/ui/IslamicButtons';
+import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 
 interface Course {
   id: string;
@@ -112,7 +113,7 @@ export default function TeacherCoursesPage() {
   };
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto">
+    <TeacherPageContainer>
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-emerald-900 mb-2">My Courses</h1>
@@ -290,6 +291,6 @@ export default function TeacherCoursesPage() {
           ))}
         </div>
       )}
-    </div>
+    </TeacherPageContainer>
   );
 }

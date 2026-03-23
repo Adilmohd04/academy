@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { IslamicPageHeader } from '@/components/ui/IslamicPageHeader';
 import { AnnouncementCard } from '@/components/ui/AnnouncementCard';
+import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 import { Bell, Loader2 } from 'lucide-react';
 
 interface Announcement {
@@ -41,11 +42,11 @@ export default function TeacherAnnouncementsPage() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <TeacherPageContainer className="space-y-6">
       <IslamicPageHeader
         title="Announcements"
         subtitle="Updates and news from the administration"
-        className="!static !-mx-6 !-mt-6 mb-6"
+        className="!static"
         breadcrumbs={[
           { label: 'Dashboard', href: '/teacher' },
           { label: 'Announcements' }
@@ -79,6 +80,6 @@ export default function TeacherAnnouncementsPage() {
           ))}
         </div>
       )}
-    </div>
+    </TeacherPageContainer>
   );
 }

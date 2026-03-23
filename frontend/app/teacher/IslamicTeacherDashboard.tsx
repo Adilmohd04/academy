@@ -11,13 +11,13 @@ import Link from 'next/link';
 import { 
   GraduationCap, Users, Video, BookOpen, 
   Calendar, Clock, CheckCircle, TrendingUp,
-  Award, Activity, Bell, Settings
+  Award
 } from 'lucide-react';
-import { IslamicSidebar } from '@/components/ui/IslamicSidebar';
 import { IslamicCard, IslamicStatCard, IslamicActionCard, IslamicInfoCard } from '@/components/ui/IslamicCards';
 import { IslamicPatternBackground } from '@/components/ui/IslamicPatterns';
 import { IslamicPageHeader } from '@/components/ui/IslamicPageHeader';
 import { IslamicButton } from '@/components/ui/IslamicButtons';
+import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 import { BRAND_CONFIG, getGreeting } from '@/lib/brand-config';
 
 interface TeacherStats {
@@ -56,17 +56,6 @@ export default function IslamicTeacherDashboard({ courses = [], meetings = [] }:
     pendingAssignments: 0,
   });
   const [upcomingSessions, setUpcomingSessions] = useState<UpcomingSession[]>([]);
-
-  const navItems = [
-    { label: 'Dashboard', href: '/teacher', icon: Activity },
-    { label: 'My Classes', href: '/teacher/classes', icon: GraduationCap },
-    { label: 'Students', href: '/teacher/students', icon: Users },
-    { label: 'Meetings', href: '/teacher/meetings', icon: Video },
-    { label: 'Assignments', href: '/teacher/assignments', icon: BookOpen },
-    { label: 'Attendance', href: '/teacher/attendance', icon: CheckCircle },
-    { label: 'Availability', href: '/teacher/availability', icon: Calendar },
-    { label: 'Analytics', href: '/teacher/analytics', icon: TrendingUp },
-  ];
 
   useEffect(() => {
     fetchTeacherData();
@@ -143,7 +132,7 @@ export default function IslamicTeacherDashboard({ courses = [], meetings = [] }:
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-islamic-sand-50 via-white to-islamic-emerald-50">
+      <div className="min-h-screen flex items-center justify-center bg-slate-100/40">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-4 border-islamic-emerald-200 border-t-islamic-emerald-600 mx-auto mb-4"></div>
           <p className="text-islamic-primary-700 font-semibold">Loading {BRAND_CONFIG.shortName}...</p>
@@ -156,32 +145,16 @@ export default function IslamicTeacherDashboard({ courses = [], meetings = [] }:
   const greeting = getGreeting('teacher', user?.firstName || undefined);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-islamic-sand-50 via-white to-islamic-emerald-50">
+    <div className="min-h-screen bg-slate-100/40">
       <IslamicPatternBackground pattern="arabesque" opacity={0.03}>
-        {/* Page Header */}
-        <IslamicPageHeader
-          title={`${greeting.english} 👋`}
-          subtitle={`Welcome to ${BRAND_CONFIG.shortName} Teacher Portal`}
-          arabicTitle={greeting.arabic}
-          icon={GraduationCap}
-          actions={[
-            {
-              label: 'Start Class',
-              icon: Video,
-              variant: 'primary',
-              href: '/teacher/meetings'
-            },
-            {
-              label: 'Upload Lesson',
-              icon: BookOpen,
-              variant: 'gold',
-              href: '/teacher/lessons/upload'
-            }
-          ]}
-        />
-
-        {/* Dashboard Content */}
-        <div className="p-8 space-y-8">
+        <TeacherPageContainer className="space-y-8">
+          <IslamicPageHeader
+            title={`${greeting.english} 👋`}
+            subtitle={`Welcome to ${BRAND_CONFIG.shortName} Teacher Portal`}
+            arabicTitle={greeting.arabic}
+            icon={GraduationCap}
+            className="!static"
+          />
           {/* Stats Overview */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <IslamicStatCard
@@ -395,8 +368,8 @@ export default function IslamicTeacherDashboard({ courses = [], meetings = [] }:
                 <p className="text-sm opacity-90">{BRAND_CONFIG.phrases.iqraTranslation}</p>
               </div>
             </div>
-          </div>
-        </IslamicPatternBackground>
+        </TeacherPageContainer>
+      </IslamicPatternBackground>
     </div>
   );
 }

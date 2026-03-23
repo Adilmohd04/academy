@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { IslamicPageHeader } from '@/components/ui/IslamicPageHeader';
 import { IslamicPatternBackground } from '@/components/ui/IslamicPatterns';
+import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 import toast from 'react-hot-toast';
 
 interface Resource {
@@ -278,14 +279,15 @@ export default function TeacherClasses() {
   });
 
   return (
-    <div className="min-h-screen bg-amber-50/30">
+    <div className="min-h-screen bg-slate-100/40">
       <IslamicPatternBackground>
-        <IslamicPageHeader 
-          title="My Classes" 
-          subtitle="Manage your schedule, resources, and student attendance"
-        />
+        <TeacherPageContainer className="relative z-10">
+          <IslamicPageHeader 
+            title="My Classes" 
+            subtitle="Manage your schedule, resources, and student attendance"
+            className="!static"
+          />
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
           {/* Tabs */}
           <div className="flex space-x-4 mb-8 border-b border-amber-200">
           <button
@@ -533,7 +535,7 @@ export default function TeacherClasses() {
             </motion.div>
           )}
         </AnimatePresence>
-        </div>
+        </TeacherPageContainer>
       </IslamicPatternBackground>
     </div>
   );
