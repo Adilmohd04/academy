@@ -50,6 +50,10 @@ interface Lesson {
   duration_minutes?: number;
 }
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  'https://academy-backend-git-dev-fixes-adilmohd04s-projects.vercel.app';
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isPlaceholderValue(value?: string): boolean {
@@ -89,7 +93,7 @@ export default function CourseDetailPage() {
 
   const fetchCourseDetails = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
+      const res = await fetch(`${API_BASE_URL}/api/courses/${courseId}`, {
         headers: {
           'x-clerk-user-id': userId || ''
         }
@@ -99,7 +103,7 @@ export default function CourseDetailPage() {
         setCourse(data);
         
         // Fetch syllabus
-        const syllabusRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}/syllabus`, {
+        const syllabusRes = await fetch(`${API_BASE_URL}/api/courses/${courseId}/syllabus`, {
           headers: {
             'x-clerk-user-id': userId || ''
           }
@@ -118,14 +122,15 @@ export default function CourseDetailPage() {
 
   const checkEnrollment = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/enrollments/my-courses`, {
+      const res = await fetch(`${API_BASE_URL}/api/enrollments/my-courses`, {
         headers: {
           'x-clerk-user-id': userId || ''
         }
       });
       if (res.ok) {
-        const enrollments = await res.json();
-        setIsEnrolled(enrollments.some((e: any) => e.courses.id === courseId));
+        const payload = await res.json();
+        const courses = Array.isArray(payload?.courses) ? payload.courses : [];
+        setIsEnrolled(courses.some((course: any) => course.id === courseId));
       }
     } catch (error) {
       console.error('Error checking enrollment:', error);
@@ -140,7 +145,7 @@ export default function CourseDetailPage() {
 
     setEnrolling(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/enrollments/enroll`, {
+      const res = await fetch(`${API_BASE_URL}/api/enrollments/enroll`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
