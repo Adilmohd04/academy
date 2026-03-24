@@ -99,23 +99,53 @@ class App {
     // Remove identifying header
     this.app.disable('x-powered-by');
 
-    // Security middleware
-    this.app.use(helmet());
-
     // CORS configuration - Handle multiple origins including dev ports
-    const allowedOrigins = config.corsOrigin.split(',').map(origin => origin.trim());
+    const allowedOrigins = config.corsOrigin.split(',').map(origin => origin.trim()).filter(Boolean);
     // Add common dev ports
     allowedOrigins.push('http://localhost:3001', 'http://localhost:3002');
 
+    const isAllowedOrigin = (origin?: string) => {
+      if (!origin) return true;
+      if (allowedOrigins.includes(origin)) return true;
+
+      try {
+        const parsed = new URL(origin);
+        return parsed.hostname.endsWith('.vercel.app');
+      } catch {
+        return false;
+      }
+    };
+
+    // Ensure CORS headers are always present before auth/route handlers
+    this.app.use((req, res, next) => {
+      const origin = req.headers.origin as string | undefined;
+
+      if (isAllowedOrigin(origin) && origin) {
+        res.header('Access-Control-Allow-Origin', origin);
+      }
+
+      res.header('Vary', 'Origin');
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-clerk-user-id, Cache-Control, If-None-Match');
+
+      if (req.method === 'OPTIONS') {
+        return res.sendStatus(204);
+      }
+
+      next();
+    });
+
+    // Security middleware
+    this.app.use(helmet());
+
     const corsOptions = {
       origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-        if (!origin) return callback(null, true);
-
-        if (allowedOrigins.includes(origin)) {
+        if (isAllowedOrigin(origin)) {
           callback(null, true);
         } else {
           console.log('❌ CORS blocked origin:', origin);
-          callback(null, true);
+          callback(new Error('Not allowed by CORS'));
         }
       },
       credentials: true,
