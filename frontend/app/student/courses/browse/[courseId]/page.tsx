@@ -38,6 +38,13 @@ interface Eligibility {
   max_students: number;
 }
 
+const STABLE_BACKEND_URL = 'https://academy-backend-git-dev-fixes-adilmohd04s-projects.vercel.app';
+const ENV_BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const API_BASE_URL =
+  !ENV_BACKEND_URL || ENV_BACKEND_URL.includes('academy-q5jv.vercel.app')
+    ? STABLE_BACKEND_URL
+    : ENV_BACKEND_URL;
+
 export default function CourseDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -99,7 +106,7 @@ export default function CourseDetailPage() {
       try {
         setEnrolling(true);
         const token = await getToken();
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/student/courses/${courseId}/enroll`, {
+        const response = await fetch(`${API_BASE_URL}/api/student/courses/${courseId}/enroll`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

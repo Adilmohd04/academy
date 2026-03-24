@@ -8,7 +8,13 @@
 
 import axios, { AxiosInstance, AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000').replace('localhost', '127.0.0.1');
+const STABLE_BACKEND_URL = 'https://academy-backend-git-dev-fixes-adilmohd04s-projects.vercel.app';
+const ENV_BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const RESOLVED_API_URL =
+  !ENV_BACKEND_URL || ENV_BACKEND_URL.includes('academy-q5jv.vercel.app')
+    ? STABLE_BACKEND_URL
+    : ENV_BACKEND_URL;
+const API_URL = RESOLVED_API_URL.replace('localhost', '127.0.0.1');
 
 interface ApiError {
   message?: string;
