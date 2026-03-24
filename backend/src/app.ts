@@ -106,25 +106,26 @@ class App {
     const allowedOrigins = config.corsOrigin.split(',').map(origin => origin.trim());
     // Add common dev ports
     allowedOrigins.push('http://localhost:3001', 'http://localhost:3002');
+
+    const corsOptions = {
+      origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          console.log('❌ CORS blocked origin:', origin);
+          callback(null, true);
+        }
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'x-clerk-user-id', 'Cache-Control', 'If-None-Match'],
+      optionsSuccessStatus: 204,
+    };
     
-    this.app.use(
-      cors({
-        origin: (origin, callback) => {
-          // Allow requests with no origin (like mobile apps or curl)
-          if (!origin) return callback(null, true);
-          
-          if (allowedOrigins.includes(origin)) {
-            callback(null, true);
-          } else {
-            console.log('❌ CORS blocked origin:', origin);
-            callback(null, true); // Allow anyway in development
-          }
-        },
-        credentials: true,
-        methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'x-clerk-user-id', 'Cache-Control', 'If-None-Match'],
-      })
-    );
+    this.app.use(cors(corsOptions));
+    this.app.options('*', cors(corsOptions));
 
     // Body parsing (bounded payloads to reduce memory pressure under heavy traffic)
     this.app.use(express.json({ limit: '1mb' }));

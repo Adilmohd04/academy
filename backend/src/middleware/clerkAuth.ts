@@ -21,6 +21,10 @@ export const requireAuth = async (
   next: NextFunction
 ) => {
   try {
+    if (req.method === 'OPTIONS') {
+      return next();
+    }
+
     const e2eBypassEnabled =
       config.nodeEnv === 'development' &&
       process.env.E2E_AUTH_BYPASS === 'true';
@@ -147,6 +151,10 @@ export const optionalAuth = async (
   res: Response,
   next: NextFunction
 ) => {
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
