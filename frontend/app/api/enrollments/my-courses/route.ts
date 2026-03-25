@@ -11,6 +11,11 @@ const resolveBackendUrl = () => {
   return envUrl.replace(/\/$/, '');
 };
 
+const resolveFallbackBackendUrl = () => {
+  const envUrl = process.env.BACKEND_API_FALLBACK_URL || process.env.NEXT_PUBLIC_API_FALLBACK_URL || '';
+  return envUrl ? envUrl.replace(/\/$/, '') : '';
+};
+
 const getProtectionBypassSecret = () => {
   return (
     process.env.BACKEND_VERCEL_BYPASS_SECRET ||
@@ -21,17 +26,42 @@ const getProtectionBypassSecret = () => {
   );
 };
 
+const isLikelyVercelProtectionBlock = (status: number, contentType: string, body: string) => {
+  if (status !== 401 && status !== 403) return false;
+  if (!contentType.toLowerCase().includes('text/html')) return false;
+  return /vercel|deployment protection|authentication required|access denied/i.test(body);
+};
+
+const fetchFromBackend = async (
+  backendUrl: string,
+  path: string,
+  proxyHeaders: Record<string, string>,
+  bypassSecret: string
+) => {
+  const targetUrl = new URL(`${backendUrl}${path}`);
+  if (bypassSecret) {
+    targetUrl.searchParams.set('x-vercel-protection-bypass', bypassSecret);
+  }
+
+  const response = await fetch(targetUrl.toString(), {
+    method: 'GET',
+    headers: proxyHeaders,
+    cache: 'no-store',
+  });
+
+  const text = await response.text();
+  const contentType = response.headers.get('content-type') || 'application/json';
+
+  return { response, text, contentType };
+};
+
 export async function GET(request: NextRequest) {
   try {
     const { userId, getToken } = await auth();
     const backendUrl = resolveBackendUrl();
+    const fallbackBackendUrl = resolveFallbackBackendUrl();
     const bypassSecret = getProtectionBypassSecret();
     const token = await getToken();
-
-    const targetUrl = new URL(`${backendUrl}/api/enrollments/my-courses`);
-    if (bypassSecret) {
-      targetUrl.searchParams.set('x-vercel-protection-bypass', bypassSecret);
-    }
 
     const resolvedUserId = userId || request.headers.get('x-clerk-user-id') || '';
     const resolvedAuthorization = request.headers.get('authorization') || (token ? `Bearer ${token}` : '');
@@ -50,18 +80,35 @@ export async function GET(request: NextRequest) {
         : {}),
     };
 
-    const response = await fetch(targetUrl.toString(), {
-      method: 'GET',
-      headers: proxyHeaders,
-      cache: 'no-store',
-    });
+    let { response, text, contentType } = await fetchFromBackend(
+      backendUrl,
+      '/api/enrollments/my-courses',
+      proxyHeaders,
+      bypassSecret
+    );
 
-    const text = await response.text();
+    const shouldRetryWithFallback =
+      !!fallbackBackendUrl &&
+      fallbackBackendUrl !== backendUrl &&
+      isLikelyVercelProtectionBlock(response.status, contentType, text);
+
+    if (shouldRetryWithFallback) {
+      console.warn('[Proxy] Primary backend blocked by Vercel protection, retrying fallback backend.');
+      const fallbackResult = await fetchFromBackend(
+        fallbackBackendUrl,
+        '/api/enrollments/my-courses',
+        proxyHeaders,
+        bypassSecret
+      );
+      response = fallbackResult.response;
+      text = fallbackResult.text;
+      contentType = fallbackResult.contentType;
+    }
 
     return new NextResponse(text, {
       status: response.status,
       headers: {
-        'Content-Type': response.headers.get('content-type') || 'application/json',
+        'Content-Type': contentType,
       },
     });
   } catch (error) {
