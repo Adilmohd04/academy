@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
 
     let { response, text, contentType } = await fetchFromBackend(
       backendUrl,
-      '/api/student/courses/browse',
+      '/api/student/courses/published',
       proxyHeaders,
       bypassSecret
     );
@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
       console.warn('[Proxy] Primary backend blocked by Vercel protection, retrying fallback backend.');
       const fallbackResult = await fetchFromBackend(
         fallbackBackendUrl,
-        '/api/student/courses/browse',
+        '/api/student/courses/published',
         proxyHeaders,
         bypassSecret
       );
