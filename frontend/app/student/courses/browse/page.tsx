@@ -32,13 +32,6 @@ interface Course {
   status?: string;
 }
 
-const STABLE_BACKEND_URL = 'https://academy-backend-git-dev-fixes-adilmohd04s-projects.vercel.app';
-const ENV_BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || '';
-const API_BASE_URL =
-  !ENV_BACKEND_URL || ENV_BACKEND_URL.includes('academy-q5jv.vercel.app')
-    ? STABLE_BACKEND_URL
-    : ENV_BACKEND_URL;
-
 const CATEGORIES = [
   'All Courses',
   'Quran',
@@ -93,7 +86,7 @@ export default function BrowseCoursesPage() {
   const fetchCourses = async () => {
     try {
       // Fetch only approved courses with approval_status filter
-      const res = await fetch(`${API_BASE_URL}/api/student/courses/browse`, {
+      const res = await fetch('/api/student/courses/browse', {
         headers: { 'x-clerk-user-id': userId || '' }
       });
       if (res.ok) {

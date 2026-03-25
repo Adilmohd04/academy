@@ -23,13 +23,6 @@ interface Enrollment {
   total_students?: number;
 }
 
-const STABLE_BACKEND_URL = 'https://academy-backend-git-dev-fixes-adilmohd04s-projects.vercel.app';
-const ENV_BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || '';
-const API_BASE_URL =
-  !ENV_BACKEND_URL || ENV_BACKEND_URL.includes('academy-q5jv.vercel.app')
-    ? STABLE_BACKEND_URL
-    : ENV_BACKEND_URL;
-
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isPlaceholderValue(value?: string): boolean {
@@ -63,7 +56,7 @@ export default function MyCoursesPage() {
 
   const fetchEnrollments = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/enrollments/my-courses`, {
+      const res = await fetch('/api/enrollments/my-courses', {
         headers: {
           'x-clerk-user-id': userId || ''
         }
