@@ -6,19 +6,20 @@
  */
 
 import { supabase } from '../../../config/database';
-import { User, UserRole } from '../../../types';
+import { UserRole } from '../../../types';
 import { clerkClient } from '@clerk/clerk-sdk-node';
+import {
+  GetAllUsersFilters,
+  GetAllUsersResult,
+  ProfileRecord,
+  UpsertUserInput,
+} from '../../../types/users';
 
 export class UserService {
   /**
    * Create or update user in database
    */
-  static async upsertUser(clerkId: string, userData: {
-    email: string;
-    firstName?: string;
-    lastName?: string;
-    role?: UserRole;
-  }): Promise<any> {
+  static async upsertUser(clerkId: string, userData: UpsertUserInput): Promise<ProfileRecord> {
     const { email, firstName, lastName, role = UserRole.STUDENT } = userData;
     const fullName = [firstName, lastName].filter(Boolean).join(' ') || null;
 
@@ -36,13 +37,13 @@ export class UserService {
       .single();
 
     if (error) throw error;
-    return data;
+    return data as ProfileRecord;
   }
 
   /**
    * Get user by Clerk ID
    */
-  static async getUserByClerkId(clerkId: string): Promise<any | null> {
+  static async getUserByClerkId(clerkId: string): Promise<ProfileRecord | null> {
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -54,13 +55,13 @@ export class UserService {
       throw error;
     }
 
-    return data;
+    return data as ProfileRecord;
   }
 
   /**
    * Get user by ID
    */
-  static async getUserById(id: string): Promise<any | null> {
+  static async getUserById(id: string): Promise<ProfileRecord | null> {
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -72,13 +73,13 @@ export class UserService {
       throw error;
     }
 
-    return data;
+    return data as ProfileRecord;
   }
 
   /**
    * Get user by email
    */
-  static async getUserByEmail(email: string): Promise<any | null> {
+  static async getUserByEmail(email: string): Promise<ProfileRecord | null> {
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -90,17 +91,13 @@ export class UserService {
       throw error;
     }
 
-    return data;
+    return data as ProfileRecord;
   }
 
   /**
    * Get all users with optional filtering
    */
-  static async getAllUsers(filters?: {
-    role?: UserRole;
-    limit?: number;
-    offset?: number;
-  }): Promise<{ users: any[]; total: number }> {
+  static async getAllUsers(filters?: GetAllUsersFilters): Promise<GetAllUsersResult> {
     const { role, limit = 50, offset = 0 } = filters || {};
 
     let query = supabase
@@ -118,7 +115,7 @@ export class UserService {
     if (error) throw error;
 
     return {
-      users: data || [],
+      users: (data || []) as ProfileRecord[],
       total: count || 0,
     };
   }
@@ -126,7 +123,7 @@ export class UserService {
   /**
    * Update user role
    */
-  static async updateUserRole(userId: string, role: UserRole): Promise<any> {
+  static async updateUserRole(userId: string, role: UserRole): Promise<ProfileRecord> {
     // Update role in Supabase database
     const { data, error } = await supabase
       .from('profiles')
@@ -152,7 +149,7 @@ export class UserService {
       }
     }
 
-    return data;
+    return data as ProfileRecord;
   }
 
   /**

@@ -1,14 +1,11 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
 import { Webhook } from 'svix';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 // Initialize Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-);
+const supabase = getSupabaseAdminClient();
 
 /**
  * Determine user role based on email address
@@ -16,26 +13,20 @@ const supabase = createClient(
 function determineUserRole(email: string): 'admin' | 'teacher' | 'student' {
   const lowerEmail = email.toLowerCase();
   
-  // Admin emails (add your admin emails here)
-  const adminEmails = [
-    'sadilmohammed2002@gmail.com',
-    'admin@academy.com',
-    'admin.test@gmail.com',
-    // Add more admin emails here
-  ];
+  // Admin emails from environment variable (comma-separated)
+  const adminEmailsStr = process.env.ADMIN_EMAILS || '';
+  const adminEmails = adminEmailsStr
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean);
   
   // Check if email is admin
   if (adminEmails.includes(lowerEmail)) {
     return 'admin';
   }
   
-  // Check if email domain is for teachers
-  // You can customize this logic based on your needs
-  if (lowerEmail.includes('teacher') || lowerEmail.includes('instructor')) {
-    return 'teacher';
-  }
-  
-  // Default role is student
+  // Default role is student — teacher role must be assigned explicitly
+  // via the admin dashboard (not by email pattern matching)
   return 'student';
 }
 

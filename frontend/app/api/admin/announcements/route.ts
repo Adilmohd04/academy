@@ -1,12 +1,15 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
 import { auth } from '@clerk/nextjs/server';
+import { NextRequest, NextResponse } from 'next/server';
+
 export const dynamic = 'force-dynamic';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabase = getSupabaseAdminClient();
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+type AdminProfile = {
+  id?: string;
+  role: string | null;
+};
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,11 +19,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Verify admin role
-    const { data: profile } = await supabase
+    const { data: profileData } = await supabase
       .from('profiles')
       .select('role, id')
       .eq('clerk_user_id', userId)
       .single();
+
+    const profile = profileData as AdminProfile | null;
 
     if (!profile || profile.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -33,20 +38,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Title and content are required' }, { status: 400 });
     }
 
-    const { data, error } = await supabase
-      .from('announcements')
+    const { data, error } = await ((supabase.from('announcements') as any)
       .insert([
-        { 
-          title, 
-          content, 
+        {
+          title,
+          content,
           link,
           link_text,
           created_by: profile.id,
-          is_active: true 
-        }
+          is_active: true,
+        },
       ])
       .select()
-      .single();
+      .single());
 
     if (error) {
       console.error('Error creating announcement:', error);
@@ -68,11 +72,13 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Verify admin role
-    const { data: profile } = await supabase
+    const { data: profileData } = await supabase
       .from('profiles')
       .select('role')
       .eq('clerk_user_id', userId)
       .single();
+
+    const profile = profileData as AdminProfile | null;
 
     if (!profile || profile.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });

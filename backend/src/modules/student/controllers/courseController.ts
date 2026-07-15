@@ -8,7 +8,7 @@ import * as enrollmentService from '../services/enrollmentService';
 import { supabase } from '../../../config/database';
 
 /**
- * Get all published/approved courses for browsing
+ * Get only published courses for student browsing
  */
 export const getPublishedCourses = async (req: Request, res: Response) => {
   try {
@@ -27,6 +27,8 @@ export const getPublishedCourses = async (req: Request, res: Response) => {
         teacher_name,
         course_image_url,
         level,
+        status,
+        is_published,
         created_at,
         learning_outcomes,
         skills_gained,
@@ -36,6 +38,7 @@ export const getPublishedCourses = async (req: Request, res: Response) => {
         teacher_title
       `)
       .eq('approval_status', 'approved')
+      .or('status.eq.published,is_published.eq.true')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -55,9 +58,25 @@ export const getPublishedCourses = async (req: Request, res: Response) => {
       enrolledCourseIds = (enrollments || []).map(e => e.course_id);
     }
 
+    const dedupeMap = new Map<string, any>();
+    for (const course of courses || []) {
+      const dedupeKey = `${String(course.teacher_id || '').toLowerCase()}::${String(course.title || '').trim().toLowerCase()}`;
+      const existing = dedupeMap.get(dedupeKey);
+      if (!existing) {
+        dedupeMap.set(dedupeKey, course);
+        continue;
+      }
+
+      const currentPublishedAt = new Date(course.created_at || 0).getTime();
+      const existingPublishedAt = new Date(existing.created_at || 0).getTime();
+      if (currentPublishedAt >= existingPublishedAt) {
+        dedupeMap.set(dedupeKey, course);
+      }
+    }
+
     // Get enrollment counts and lesson counts, mark if student is enrolled
     const coursesWithCounts = await Promise.all(
-      (courses || []).map(async (course) => {
+      Array.from(dedupeMap.values()).map(async (course) => {
         // Get enrollment count
         const { count: enrollmentCount, error: enrollError } = await supabase
           .from('enrollments')
@@ -79,6 +98,7 @@ export const getPublishedCourses = async (req: Request, res: Response) => {
 
         return {
           ...course,
+          status: (course.status || (course.is_published ? 'published' : 'draft')),
           enrolled_count: enrollmentCount || 0,
           total_students: enrollmentCount || 0,
           total_lessons: lessonCount || 0,
@@ -261,6 +281,9 @@ export const checkCourseEligibility = async (req: Request, res: Response) => {
     res.json({ success: true, eligibility });
   } catch (error: any) {
     console.error('Error checking eligibility:', error);
+    if (error?.message === 'Course not found') {
+      return res.status(404).json({ success: false, message: 'Course not found' });
+    }
     res.status(500).json({ success: false, message: error.message || 'Server error' });
   }
 };

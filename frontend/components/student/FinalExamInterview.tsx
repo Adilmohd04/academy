@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '@clerk/nextjs';
+import { api } from '@/lib/api';
 import { 
   Calendar, Clock, Video, Users, CheckCircle, X,
   AlertCircle, ExternalLink, RefreshCw, Info
@@ -24,38 +26,184 @@ export default function FinalExamInterview({
   studentId,
   studentCategory 
 }: FinalExamInterviewProps) {
+  const { getToken, userId } = useAuth();
   const [availableSlots, setAvailableSlots] = useState<ExamTimeSlot[]>([]);
   const [myInterview, setMyInterview] = useState<StudentExamInterview | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [rescheduleMode, setRescheduleMode] = useState(false);
   const [loading, setLoading] = useState(true);
   const [booking, setBooking] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  type ExamWithInterviewData = FinalExam & {
+    interview?: unknown;
+    availableTimeSlots?: ExamTimeSlot[];
+  };
+
+  const resolveErrorMessage = (error: unknown, fallback: string): string => {
+    if (!error || typeof error !== 'object') return fallback;
+
+    const apiError = error as {
+      response?: {
+        data?: {
+          error?: string;
+          message?: string;
+        };
+      };
+      message?: string;
+    };
+
+    return apiError.response?.data?.error || apiError.response?.data?.message || apiError.message || fallback;
+  };
 
   useEffect(() => {
     fetchInterviewData();
   }, [exam.id, studentId]);
 
-  const fetchInterviewData = async () => {
-    // TODO: Fetch from API
-    setLoading(false);
+  const mapInterview = (raw: any): StudentExamInterview => {
+    const scheduledDateValue = raw?.scheduledDate || raw?.scheduled_date || new Date().toISOString();
+    const scheduledDate = new Date(scheduledDateValue);
+
+    return {
+      id: String(raw?.id || ''),
+      examId: String(raw?.examId || raw?.exam_id || exam.id),
+      studentId: String(raw?.studentId || raw?.student_id || studentId || userId || ''),
+      slotId: String(raw?.slotId || raw?.slot_id || ''),
+      categoryId: raw?.categoryId || raw?.category_id,
+      scheduledDate: Number.isNaN(scheduledDate.getTime()) ? new Date().toISOString() : scheduledDate.toISOString(),
+      scheduledTime: raw?.scheduledTime || raw?.scheduled_time || 'TBD',
+      duration_minutes: Number(raw?.duration_minutes || raw?.durationMinutes || 15),
+      meetingUrl: raw?.meetingUrl || raw?.meeting_link || '',
+      meetingPassword: raw?.meetingPassword || raw?.meeting_password,
+      platform: raw?.platform || 'google_meet',
+      status: raw?.status || 'scheduled',
+      confirmationSentAt: raw?.confirmationSentAt || raw?.confirmation_sent_at,
+      confirmedAt: raw?.confirmedAt || raw?.confirmed_at,
+      rescheduledFrom: raw?.rescheduledFrom || raw?.rescheduled_from,
+      rescheduledReason: raw?.rescheduledReason || raw?.rescheduled_reason,
+      rescheduledBy: raw?.rescheduledBy || raw?.rescheduled_by,
+      attended: Boolean(raw?.attended),
+      marksObtained: raw?.marksObtained ?? raw?.marks_obtained,
+      feedback: raw?.feedback,
+      interviewNotes: raw?.interviewNotes || raw?.interview_notes,
+      gradedBy: raw?.gradedBy || raw?.graded_by,
+      gradedAt: raw?.gradedAt || raw?.graded_at,
+      createdAt: raw?.createdAt || raw?.created_at || new Date().toISOString(),
+      updatedAt: raw?.updatedAt || raw?.updated_at || new Date().toISOString(),
+    };
   };
 
-  const handleBookSlot = async (slotId: string) => {
-    setBooking(true);
+  const fetchInterviewData = async () => {
+    setLoading(true);
+    setActionError(null);
     try {
-      // TODO: API call to book slot
-      console.log('Booking slot:', slotId);
-      // POST /api/exams/:examId/interviews/book
+      const examData = exam as ExamWithInterviewData;
+      const interviewFromExam = examData.interview;
+      if (interviewFromExam) {
+        setMyInterview(mapInterview(interviewFromExam));
+      } else if (userId) {
+        const token = await getToken();
+        try {
+          const detailsResponse = await api.student.getExamInterviewDetails(exam.id, token, userId);
+          setMyInterview(mapInterview(detailsResponse.data));
+        } catch {
+          setMyInterview(null);
+        }
+      }
+
+      const slots = Array.isArray(examData.availableTimeSlots)
+        ? examData.availableTimeSlots
+        : [];
+      setAvailableSlots(slots);
+    } catch (error) {
+      console.error('Error fetching interview data:', error);
+      setActionError('Could not load interview details right now.');
+      setMyInterview(null);
+      setAvailableSlots([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBookSlot = async (slot: ExamTimeSlot) => {
+    if (!userId) {
+      setActionError('Please sign in to book an interview slot.');
+      return;
+    }
+
+    setBooking(true);
+    setActionError(null);
+    try {
+      const token = await getToken();
+      const scheduledDate = new Date(`${slot.date}T${slot.startTime}:00`);
+      const startMinutes = slot.startTime.split(':').map(Number);
+      const endMinutes = slot.endTime.split(':').map(Number);
+      const durationMinutes = Math.max(
+        1,
+        (endMinutes[0] * 60 + endMinutes[1]) - (startMinutes[0] * 60 + startMinutes[1])
+      );
+
+      await api.student.bookFinalExamInterview(
+        exam.id,
+        {
+          slot_id: slot.id,
+          category_id: slot.categoryId || null,
+          scheduled_date: scheduledDate.toISOString(),
+          duration_minutes: durationMinutes,
+          meeting_link: slot.meetingUrl || null
+        },
+        token,
+        userId
+      );
+
+      setSelectedSlot(null);
+      setRescheduleMode(false);
+      await fetchInterviewData();
+    } catch (error: unknown) {
+      console.error('Error booking slot:', error);
+      setActionError(resolveErrorMessage(error, 'Failed to book interview slot'));
     } finally {
       setBooking(false);
     }
   };
 
-  const handleReschedule = async (newSlotId: string) => {
+  const handleReschedule = async (slot: ExamTimeSlot) => {
+    if (!myInterview || !userId) {
+      setActionError('Please sign in to reschedule your interview.');
+      return;
+    }
+
     setBooking(true);
+    setActionError(null);
     try {
-      // TODO: API call to reschedule
-      console.log('Rescheduling to:', newSlotId);
-      // PUT /api/exams/:examId/interviews/:interviewId/reschedule
+      const token = await getToken();
+      const scheduledDate = new Date(`${slot.date}T${slot.startTime}:00`);
+      const startMinutes = slot.startTime.split(':').map(Number);
+      const endMinutes = slot.endTime.split(':').map(Number);
+      const durationMinutes = Math.max(
+        1,
+        (endMinutes[0] * 60 + endMinutes[1]) - (startMinutes[0] * 60 + startMinutes[1])
+      );
+
+      await api.student.rescheduleFinalExamInterview(
+        exam.id,
+        myInterview.id,
+        {
+            slot_id: slot.id,
+            scheduled_date: scheduledDate.toISOString(),
+            duration_minutes: durationMinutes,
+            meeting_link: slot.meetingUrl || myInterview.meetingUrl || null
+        },
+        token,
+        userId
+      );
+
+      setSelectedSlot(null);
+      setRescheduleMode(false);
+      await fetchInterviewData();
+    } catch (error: unknown) {
+      console.error('Error rescheduling slot:', error);
+      setActionError(resolveErrorMessage(error, 'Failed to reschedule interview'));
     } finally {
       setBooking(false);
     }
@@ -65,11 +213,19 @@ export default function FinalExamInterview({
     if (!myInterview) return;
     
     try {
-      // TODO: API call to confirm
-      console.log('Confirming interview:', myInterview.id);
-      // POST /api/exams/:examId/interviews/:interviewId/confirm
-    } catch (error) {
+      if (!userId) {
+        setActionError('Please sign in to confirm your interview.');
+        return;
+      }
+
+      setActionError(null);
+      const token = await getToken();
+      await api.student.confirmFinalExamInterview(exam.id, myInterview.id, token, userId);
+
+      await fetchInterviewData();
+    } catch (error: unknown) {
       console.error('Error confirming:', error);
+      setActionError(resolveErrorMessage(error, 'Failed to confirm interview'));
     }
   };
 
@@ -156,6 +312,12 @@ export default function FinalExamInterview({
         </div>
       )}
 
+      {actionError && (
+        <div className="bg-red-50 rounded-xl p-4 border border-red-200 text-sm text-red-700">
+          {actionError}
+        </div>
+      )}
+
       {/* My Interview Booking */}
       {myInterview ? (
         <div className={`bg-white rounded-xl shadow-sm border-2 p-6 ${
@@ -213,7 +375,7 @@ export default function FinalExamInterview({
                 href={myInterview.meetingUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-bold text-center hover:from-purple-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2"
+                className="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-bold text-center hover:from-purple-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2"
               >
                 <ExternalLink className="h-5 w-5" />
                 Join Interview
@@ -231,7 +393,10 @@ export default function FinalExamInterview({
                (!exam.interviewSettings.rescheduleDeadline || 
                 isBefore(new Date(), new Date(exam.interviewSettings.rescheduleDeadline))) && (
                 <button
-                  onClick={() => setSelectedSlot(null)}
+                  onClick={() => {
+                    setSelectedSlot(null);
+                    setRescheduleMode(true);
+                  }}
                   className="w-full py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
                 >
                   <RefreshCw className="h-4 w-4" />
@@ -264,6 +429,41 @@ export default function FinalExamInterview({
             </div>
           )}
         </div>
+      ) : myInterview && rescheduleMode && !isExpired ? (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-gray-800">Choose a New Interview Slot</h3>
+            <button
+              onClick={() => {
+                setRescheduleMode(false);
+                setSelectedSlot(null);
+              }}
+              className="text-sm px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {availableSlots.length === 0 ? (
+              <div className="text-center py-8">
+                <Clock className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                <p className="text-gray-600">No alternative slots available right now</p>
+              </div>
+            ) : (
+              availableSlots.map((slot) => (
+                <SlotCard
+                  key={slot.id}
+                  slot={slot}
+                  isSelected={selectedSlot === slot.id}
+                  onSelect={() => setSelectedSlot(slot.id)}
+                  onBook={() => handleReschedule(slot)}
+                  booking={booking}
+                />
+              ))
+            )}
+          </div>
+        </div>
       ) : isReleased && !isExpired ? (
         <>
           {/* Available Slots */}
@@ -294,7 +494,7 @@ export default function FinalExamInterview({
                     slot={slot}
                     isSelected={selectedSlot === slot.id}
                     onSelect={() => setSelectedSlot(slot.id)}
-                    onBook={handleBookSlot}
+                    onBook={() => handleBookSlot(slot)}
                     booking={booking}
                   />
                 ))
@@ -386,7 +586,7 @@ function SlotCard({
   slot: ExamTimeSlot;
   isSelected: boolean;
   onSelect: () => void;
-  onBook: (slotId: string) => void;
+  onBook: () => void;
   booking: boolean;
 }) {
   const isFull = slot.status === 'full' || slot.bookedStudents >= slot.maxStudents;
@@ -443,7 +643,7 @@ function SlotCard({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onBook(slot.id);
+                  onBook();
                 }}
                 disabled={booking}
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg font-medium hover:bg-purple-700 transition-colors disabled:opacity-50"

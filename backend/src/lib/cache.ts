@@ -106,6 +106,10 @@ class CacheManager {
         this.set(key, data, ttlSeconds);
         return data;
       })
+      .catch((error) => {
+        this.inflight.delete(key);
+        throw error;
+      })
       .finally(() => {
         this.inflight.delete(key);
       });
@@ -126,7 +130,8 @@ class CacheManager {
    */
   deletePattern(pattern: string): number {
     let deleted = 0;
-    const regex = new RegExp(pattern);
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped);
 
     for (const key of this.cache.keys()) {
       if (regex.test(key)) {

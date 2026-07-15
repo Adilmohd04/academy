@@ -12,6 +12,9 @@ interface Course {
   category: string;
   level: string;
   price: number;
+  approval_status?: 'draft' | 'pending_approval' | 'approved' | 'rejected';
+  teacher_name?: string;
+  teacher_email?: string;
   status: 'pending' | 'approved' | 'rejected';
   created_at: string;
   profiles?: {
@@ -79,11 +82,24 @@ export default function ApprovalsPage() {
   const fetchCourses = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses`);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses`, {
+        headers: {
+          'x-clerk-user-id': userId || ''
+        }
+      });
       if (res.ok) {
         const response = await res.json();
         const coursesData = Array.isArray(response) ? response : (response.data || []);
-        setCourses(coursesData);
+        const normalizedCourses = coursesData
+          .filter((course: any) => ['pending_approval', 'approved', 'rejected'].includes(course.approval_status))
+          .map((course: any) => ({
+            ...course,
+            status:
+              course.approval_status === 'pending_approval'
+                ? 'pending'
+                : course.approval_status,
+          }));
+        setCourses(normalizedCourses);
       }
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -212,13 +228,12 @@ export default function ApprovalsPage() {
     if (!confirm('Approve this course?')) return;
     
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
-        method: 'PUT',
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses/${courseId}/approve`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-clerk-user-id': userId || ''
-        },
-        body: JSON.stringify({ status: 'approved' })
+        }
       });
 
       if (res.ok) {
@@ -235,13 +250,13 @@ export default function ApprovalsPage() {
     if (!reason) return;
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
-        method: 'PUT',
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses/${courseId}/reject`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-clerk-user-id': userId || ''
         },
-        body: JSON.stringify({ status: 'rejected', rejection_reason: reason })
+        body: JSON.stringify({ reason })
       });
 
       if (res.ok) {
@@ -500,7 +515,7 @@ export default function ApprovalsPage() {
                     </div>
                     <p className="text-slate-600 mb-3">{course.description}</p>
                     <div className="flex items-center gap-6 text-sm text-slate-500">
-                      <div><span className="font-medium">Teacher:</span> {course.profiles?.full_name}</div>
+                      <div><span className="font-medium">Teacher:</span> {course.teacher_name || course.profiles?.full_name || 'Unknown'}</div>
                       <div><span className="font-medium">Category:</span> {course.category}</div>
                       <div><span className="font-medium">Level:</span> {course.level}</div>
                       <div><span className="font-medium">Price:</span> {course.price === 0 ? 'Free' : `₹${course.price}`}</div>
@@ -526,7 +541,7 @@ export default function ApprovalsPage() {
                       </>
                     )}
                     <button
-                      onClick={() => window.open(`/admin/courses/${course.id}`, '_blank')}
+                      onClick={() => window.open(`/teacher/courses/${course.id}/builder?from=admin&tab=content`, '_blank')}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium whitespace-nowrap"
                     >
                       <Eye className="w-4 h-4" />
@@ -713,7 +728,7 @@ export default function ApprovalsPage() {
                       {/* Meeting Link Input (only for CLOSED boxes) */}
                       {box.status === 'CLOSED' && (
                         <div className="mt-4 p-4 bg-white rounded-lg border border-slate-200">
-                          <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+                          <label className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
                             <LinkIcon className="w-4 h-4" />
                             Meeting Link for All Students (Google Meet / Zoom)
                           </label>

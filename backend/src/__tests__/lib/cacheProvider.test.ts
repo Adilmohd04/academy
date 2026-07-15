@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { MemoryCacheProvider, createCacheProvider } from '../../lib/cacheProvider';
+import { MemoryCacheProvider, createCacheProvider } from '../../lib/cacheProvider.js';
 
 describe('MemoryCacheProvider', () => {
   let cache: MemoryCacheProvider;
@@ -114,7 +114,7 @@ describe('MemoryCacheProvider', () => {
       const results = await Promise.all(promises);
 
       // All should get the same value
-      expect(results.every(r => r === 'result')).toBe(true);
+      expect(results.every((r: string) => r === 'result')).toBe(true);
       // But the callback should only have been called ONCE
       expect(callCount).toBe(1);
     });

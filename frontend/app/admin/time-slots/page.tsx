@@ -6,6 +6,7 @@ import Link from 'next/link';
 import {
   ArrowLeft, Calendar, Clock, Users, Loader2, Moon, Star
 } from 'lucide-react';
+import { api } from '@/lib/api';
 
 interface TimeSlotInfo {
   start_time: string;
@@ -78,11 +79,8 @@ export default function TimeSlotsPage() {
   const fetchSlots = async () => {
     try {
       const token = await getToken();
-      const response = await fetch('/api/admin/teacher-slots', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json();
-      setSlots(Array.isArray(data) ? data : []);
+      const response = await api.admin.getTeacherSlots(token);
+      setSlots(Array.isArray(response.data) ? response.data : []);
       setLoading(false);
     } catch (error) {
       console.error('Error fetching slots:', error);

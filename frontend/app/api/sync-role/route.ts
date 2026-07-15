@@ -1,14 +1,10 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
 import { auth, currentUser, clerkClient } from '@clerk/nextjs/server'
-import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-)
+const supabase = getSupabaseAdminClient()
 
 /**
  * Sync user role from Supabase to Clerk
@@ -49,10 +45,17 @@ export async function POST(req: Request) {
 
     console.log(`✅ Synced role for user ${userId}: ${profile.role}`)
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       role: profile.role,
     })
+    
+    response.cookies.set('_academy_role', profile.role, {
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7 // 1 week
+    });
+
+    return response;
   } catch (error: any) {
     console.error('Error syncing role:', error)
     return NextResponse.json(

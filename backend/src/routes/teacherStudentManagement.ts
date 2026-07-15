@@ -30,7 +30,26 @@ router.get('/teacher/courses/:courseId/students', requireAuth, async (req: any, 
       .eq('clerk_user_id', userId)
       .single();
 
-    if (!teacherProfile || course.teacher_id !== teacherProfile.id) {
+    if (!teacherProfile) {
+      return res.status(404).json({ error: 'Teacher profile not found' });
+    }
+
+    const isOwner = course.teacher_id === teacherProfile.id || course.teacher_id === userId;
+
+    let isCoTeacher = false;
+    if (!isOwner) {
+      const { data: coTeacherRow } = await supabase
+        .from('course_teachers')
+        .select('id')
+        .eq('course_id', courseId)
+        .in('teacher_id', [teacherProfile.id, userId])
+        .limit(1)
+        .single();
+
+      isCoTeacher = !!coTeacherRow;
+    }
+
+    if (!isOwner && !isCoTeacher) {
       return res.status(403).json({ error: 'Not authorized to view these students' });
     }
 
@@ -224,7 +243,26 @@ router.put('/teacher/courses/:courseId/students/:studentId/certificate', require
       .eq('clerk_user_id', userId)
       .single();
 
-    if (!teacherProfile || course.teacher_id !== teacherProfile.id) {
+    if (!teacherProfile) {
+      return res.status(404).json({ error: 'Teacher profile not found' });
+    }
+
+    const isOwner = course.teacher_id === teacherProfile.id || course.teacher_id === userId;
+
+    let isCoTeacher = false;
+    if (!isOwner) {
+      const { data: coTeacherRow } = await supabase
+        .from('course_teachers')
+        .select('id')
+        .eq('course_id', courseId)
+        .in('teacher_id', [teacherProfile.id, userId])
+        .limit(1)
+        .single();
+
+      isCoTeacher = !!coTeacherRow;
+    }
+
+    if (!isOwner && !isCoTeacher) {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
@@ -254,7 +292,7 @@ router.put('/teacher/courses/:courseId/students/:studentId/certificate', require
             student_name: studentProfile?.full_name || 'Student',
             teacher_name: teacherProfile.full_name,
             completion_date: new Date().toISOString(),
-            generated_at: new Date().toISOString(),
+            issued_at: new Date().toISOString(),
           });
 
         if (insertError) {

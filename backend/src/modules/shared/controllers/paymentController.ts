@@ -901,16 +901,21 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
     const webhookSignature = req.headers['x-razorpay-signature'] as string;
     const webhookBody = req.body;
 
-    // Verify webhook signature (in production)
-    // const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-    // const expectedSignature = crypto
-    //   .createHmac('sha256', secret)
-    //   .update(JSON.stringify(webhookBody))
-    //   .digest('hex');
-    //
-    // if (expectedSignature !== webhookSignature) {
-    //   return res.status(400).json({ error: 'Invalid webhook signature' });
-    // }
+    // Verify webhook signature
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret) {
+      console.error('RAZORPAY_WEBHOOK_SECRET not configured');
+      return res.status(500).json({ error: 'Webhook secret not configured' });
+    }
+
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(JSON.stringify(webhookBody))
+      .digest('hex');
+
+    if (expectedSignature !== webhookSignature) {
+      return res.status(400).json({ error: 'Invalid webhook signature' });
+    }
 
     const { event, payload } = webhookBody;
 

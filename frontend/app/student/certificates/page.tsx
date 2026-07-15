@@ -74,9 +74,63 @@ export default function CertificatesPage() {
     });
   };
 
+  const verificationUrlFor = (certificate: Certificate): string => {
+    const base =
+      process.env.NEXT_PUBLIC_VERIFICATION_PORTAL_URL ||
+      (typeof window !== 'undefined' ? `${window.location.origin}/verify` : '/verify');
+    const code = (certificate as any).verification_code || certificate.id;
+    return `${base}/${code}`;
+  };
+
+  const handleView = (certificate: Certificate) => {
+    const pdfUrl = (certificate as any).pdf_url;
+    if (pdfUrl) {
+      window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      // No stored PDF yet — open the public verification page as a fallback view.
+      window.open(verificationUrlFor(certificate), '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const handleShare = async (certificate: Certificate) => {
+    const url = verificationUrlFor(certificate);
+    const shareData = {
+      title: `Certificate — ${safeCourseTitle(certificate.course_title)}`,
+      text: `Verify my certificate for ${safeCourseTitle(certificate.course_title)}`,
+      url,
+    };
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share(shareData);
+        return;
+      }
+    } catch {
+      // user cancelled or share unsupported — fall through to clipboard
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      alert('Verification link copied to clipboard.');
+    } catch {
+      // Last resort: prompt the URL so the user can copy manually.
+      window.prompt('Copy this verification link:', url);
+    }
+  };
+
   const handleDownload = (certificate: Certificate) => {
-    // For now, generate a simple text-based certificate
-    // In production, this would generate a PDF
+    const pdfUrl = (certificate as any).pdf_url;
+    if (pdfUrl) {
+      const a = document.createElement('a');
+      a.href = pdfUrl;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.download = `certificate-${safeCourseTitle(certificate.course_title).replace(/\s+/g, '-')}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
+
+    // Fallback: text certificate when no PDF has been rendered yet.
     const content = `
 CERTIFICATE OF COMPLETION
 
@@ -91,8 +145,8 @@ ${safeCourseTitle(certificate.course_title)}
 Instructor: ${safeTeacherName(certificate.teacher_name)}
 Completion Date: ${formatDate(certificate.completion_date)}
 
-Certificate ID: ${certificate.id}
-Generated: ${formatDate(certificate.generated_at)}
+Certificate ID: ${(certificate as any).certificate_number || certificate.id}
+Verify at: ${verificationUrlFor(certificate)}
     `;
 
     const blob = new Blob([content], { type: 'text/plain' });
@@ -188,21 +242,46 @@ Generated: ${formatDate(certificate.generated_at)}
                       <Calendar className="w-4 h-4 text-amber-600" />
                       <span>Completed: {formatDate(certificate.completion_date)}</span>
                     </div>
+                    <div className="flex items-center gap-2 text-sm">
+                      {(certificate as any).status === 'revoked' ? (
+                        <span className="inline-flex items-center gap-1 text-rose-600 font-medium">
+                          ● Revoked
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-emerald-600 font-medium">
+                          ● Verified
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="pt-4 border-t border-slate-200">
+                  <div className="pt-4 border-t border-slate-200 grid grid-cols-3 gap-2">
+                    <button
+                      onClick={() => handleView(certificate)}
+                      className="px-2 py-2.5 bg-white border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors text-sm font-medium flex items-center justify-center gap-1"
+                    >
+                      <BookOpen className="w-4 h-4" />
+                      View
+                    </button>
                     <button
                       onClick={() => handleDownload(certificate)}
-                      className="w-full px-4 py-2.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors font-medium shadow-sm flex items-center justify-center gap-2"
+                      className="px-2 py-2.5 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors text-sm font-medium flex items-center justify-center gap-1"
                     >
                       <Download className="w-4 h-4" />
-                      Download Certificate
+                      PDF
+                    </button>
+                    <button
+                      onClick={() => handleShare(certificate)}
+                      className="px-2 py-2.5 bg-white border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors text-sm font-medium flex items-center justify-center gap-1"
+                    >
+                      <Award className="w-4 h-4" />
+                      Share
                     </button>
                   </div>
 
                   <div className="mt-3 text-center">
                     <p className="text-xs text-slate-400">
-                      Certificate ID: {certificate.id.substring(0, 8)}...
+                      Certificate ID: {((certificate as any).certificate_number || certificate.id).toString().substring(0, 12)}
                     </p>
                   </div>
                 </div>

@@ -54,7 +54,7 @@ export default function StudentExamPage() {
       {upcomingExams.length > 0 ? (
         <div className="space-y-6">
           {upcomingExams.map((exam) => (
-            <FinalExamInterview key={exam.id} exam={exam} studentId="student-id" />
+            <FinalExamInterview key={exam.id} exam={exam} studentId={userId || ''} />
           ))}
         </div>
       ) : (

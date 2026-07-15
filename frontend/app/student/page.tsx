@@ -1,4 +1,4 @@
-import { currentUser, auth } from '@clerk/nextjs/server'
+import { auth } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
 import StudentDashboardClient from './StudentDashboardClient'
 
@@ -10,7 +10,7 @@ async function getData(token: string | null) {
 
   try {
     const [coursesRes, meetingsRes, profileRes] = await Promise.all([
-      fetch(`${baseUrl}/api/courses`, { headers, next: { revalidate: 60 } }),
+      fetch(`${baseUrl}/api/student/courses/published`, { headers, next: { revalidate: 60 } }),
       fetch(`${baseUrl}/api/meetings/student/upcoming`, { headers, cache: 'no-store' }),
       fetch(`${baseUrl}/api/users/profile`, { headers, next: { tags: ['profile'] } })
     ])
@@ -20,7 +20,7 @@ async function getData(token: string | null) {
     const profile = await profileRes.json()
 
     return {
-      courses: courses.data || [],
+      courses: courses.courses || courses.data || [],
       meetings: meetings.data?.slice(0, 3) || [],
       profile: profile || null
     }
@@ -31,27 +31,26 @@ async function getData(token: string | null) {
 }
 
 export default async function StudentDashboard() {
-  const user = await currentUser()
+  const { userId, getToken } = await auth()
 
-  if (!user) {
+  if (!userId) {
     redirect('/sign-in')
   }
 
-  const role = (user.publicMetadata?.role as string) || 'student'
+  const token = await getToken()
+  const role = 'student'
   if (role !== 'student' && role !== 'admin') {
     redirect('/teacher')
   }
 
-  const { getToken } = auth()
-  const token = await getToken()
   const data = await getData(token)
 
   const userData = {
-    id: user.id,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    email: user.emailAddresses[0]?.emailAddress,
-    imageUrl: user.imageUrl,
+    id: userId,
+    firstName: null,
+    lastName: null,
+    email: null,
+    imageUrl: null,
     role: role,
   }
 

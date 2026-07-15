@@ -1,28 +1,27 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
 
 export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
-    const { user_id } = body;
+    const userId = body.user_id || body.clerk_user_id || body.userId;
 
-    if (!user_id) {
+    if (!userId) {
       return NextResponse.json(
         { error: 'Missing required field: user_id' },
         { status: 400 }
       );
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabaseAdminClient();
 
     // Delete user from profiles table (cascade should handle related records)
     const { error } = await supabase
       .from('profiles')
       .delete()
-      .eq('clerk_user_id', user_id);
+      .eq('clerk_user_id', userId);
 
     if (error) {
       console.error('Error deleting user:', error);

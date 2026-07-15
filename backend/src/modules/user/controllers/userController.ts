@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { supabase } from '../../../config/database';
+import { getErrorMessage } from '../../../utils/errors';
+import { UserPreferenceService } from '../services/userPreferenceService';
 
 /**
  * Get user language preference
@@ -13,22 +14,14 @@ export const getLanguagePreference = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('preferred_language')
-      .eq('clerk_user_id', userId)
-      .single();
-
-    if (error) {
-      throw error;
-    }
+    const preferredLanguage = await UserPreferenceService.getLanguagePreference(userId);
 
     res.json({
-      preferred_language: profile?.preferred_language || 'en'
+      preferred_language: preferredLanguage,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching language preference:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch language preference' });
+    res.status(500).json({ error: getErrorMessage(error, 'Failed to fetch language preference') });
   }
 };
 
@@ -45,33 +38,24 @@ export const updateLanguagePreference = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Validate language
-    const validLanguages = ['en', 'ta', 'ar'];
-    if (!validLanguages.includes(language)) {
+    try {
+      UserPreferenceService.assertValidLanguage(language);
+    } catch {
       return res.status(400).json({ 
         error: 'Invalid language',
-        message: 'Language must be one of: en (English), ta (Tamil), ar (Arabic)'
+        message: 'Language must be one of: en (English), ta (Tamil), ar (Arabic)',
       });
     }
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .update({ preferred_language: language })
-      .eq('clerk_user_id', userId)
-      .select()
-      .single();
-
-    if (error) {
-      throw error;
-    }
+    const preferredLanguage = await UserPreferenceService.updateLanguagePreference(userId, language);
 
     res.json({
       success: true,
       message: 'Language preference updated',
-      preferred_language: data.preferred_language
+      preferred_language: preferredLanguage,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error updating language preference:', error);
-    res.status(500).json({ error: error.message || 'Failed to update language preference' });
+    res.status(500).json({ error: getErrorMessage(error, 'Failed to update language preference') });
   }
 };

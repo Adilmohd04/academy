@@ -133,11 +133,11 @@ export default function AdminAnnouncementsPage() {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="admin-page-wrap space-y-6">
       <IslamicPageHeader
         title="Announcements"
         subtitle="Manage updates and news for students"
-        className="!static !-mx-6 !-mt-6 mb-6"
+        className="!static mb-6"
         breadcrumbs={[
           { label: 'Dashboard', href: '/admin' },
           { label: 'Announcements' }

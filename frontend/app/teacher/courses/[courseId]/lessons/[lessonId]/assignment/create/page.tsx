@@ -47,7 +47,7 @@ export default function CreateAssignmentPage() {
 
       if (response.ok) {
         alert("Assignment created successfully!");
-        router.push(`/teacher/courses/${courseId}/edit`);
+        router.push(`/teacher/courses/${courseId}/builder?tab=content`);
       } else {
         throw new Error("Failed to create assignment");
       }

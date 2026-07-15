@@ -107,6 +107,10 @@ export default function ExamWaitingRoom({ params }: { params: { examId: string }
   // Check camera access
   const checkCamera = async () => {
     try {
+      // Stop existing stream before creating a new one to prevent memory leaks
+      if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       setDeviceStatus(prev => ({ ...prev, camera: true }));
       setLocalStream(stream);

@@ -8,7 +8,7 @@
  * - Viewing results
  */
 
-import pool from '../../../config/database';
+import { supabase } from '../../../config/database';
 
 interface StartExamData {
   exam_id: string;
@@ -18,8 +18,8 @@ interface StartExamData {
 interface SaveAnswerData {
   submission_id: string;
   question_id: string;
-  answer_text?: string;
-  selected_options?: string[];
+  student_answer?: string;
+  selected_option_id?: string;
   uploaded_file_url?: string;
 }
 
@@ -27,38 +27,76 @@ interface SaveAnswerData {
  * Get available exams for student
  */
 export const getAvailableExams = async (studentId: string) => {
-  const client = await pool.connect();
-  
   try {
-    const result = await client.query(
-      `SELECT 
-        ce.id,
-        ce.course_id,
-        c.title as course_title,
-        ce.title,
-        ce.description,
-        ce.duration_minutes,
-        ce.passing_score,
-        ce.total_marks,
-        ce.is_published,
-        ce.max_attempts,
-        COUNT(DISTINCT eq.id) as question_count,
-        COUNT(DISTINCT es.id) FILTER (WHERE es.student_id = $1) as attempts_used
-      FROM course_exams ce
-      INNER JOIN courses c ON ce.course_id = c.id
-      INNER JOIN enrollments e ON c.id = e.course_id AND e.student_id = $1
-      LEFT JOIN exam_questions eq ON ce.id = eq.exam_id
-      LEFT JOIN exam_submissions es ON ce.id = es.exam_id
-      WHERE ce.is_published = true
-      GROUP BY ce.id, c.title
-      HAVING COUNT(DISTINCT es.id) FILTER (WHERE es.student_id = $1 AND es.status = 'submitted') < ce.max_attempts
-      ORDER BY c.title, ce.title`,
-      [studentId]
+    // Get all courses student is enrolled in
+    const { data: enrollments, error: enrollError } = await supabase
+      .from('enrollments')
+      .select('course_id')
+      .eq('student_id', studentId);
+
+    if (enrollError) throw enrollError;
+
+    if (!enrollments || enrollments.length === 0) {
+      return [];
+    }
+
+    const courseIds = enrollments.map(e => e.course_id);
+
+    // Get final exams for those courses
+    const { data: exams, error: examsError } = await supabase
+      .from('final_exams')
+      .select(`
+        id,
+        course_id,
+        title,
+        description,
+        total_marks,
+        time_limit_minutes,
+        instructions,
+        available_from,
+        available_until,
+        max_attempts,
+        is_published
+      `)
+      .in('course_id', courseIds)
+      .eq('is_published', true);
+
+    if (examsError) throw examsError;
+
+    // Get submission status for each exam
+    const examsWithStatus = await Promise.all(
+      (exams || []).map(async (exam) => {
+        const { data: submissions, error: subError } = await supabase
+          .from('final_exam_submissions')
+          .select('id, submission_status, attempt_number, total_score')
+          .eq('exam_id', exam.id)
+          .eq('student_id', studentId)
+          .order('attempt_number', { ascending: false })
+          .limit(1);
+
+        if (subError) throw subError;
+
+        const lastSubmission = submissions?.[0];
+        const attemptsCount = await supabase
+          .from('final_exam_submissions')
+          .select('id')
+          .eq('exam_id', exam.id)
+          .eq('student_id', studentId);
+
+        return {
+          ...exam,
+          attempts_used: attemptsCount.data?.length || 0,
+          last_attempt_status: lastSubmission?.submission_status,
+          last_score: lastSubmission?.total_score,
+          can_attempt: (attemptsCount.data?.length || 0) < exam.max_attempts
+        };
+      })
     );
-    
-    return result.rows;
-  } finally {
-    client.release();
+
+    return examsWithStatus;
+  } catch (error) {
+    console.error('Error fetching available exams:', error);
+    throw error;
   }
 };
 
@@ -66,60 +104,74 @@ export const getAvailableExams = async (studentId: string) => {
  * Get exam details for student (without answers)
  */
 export const getExamForStudent = async (examId: string, studentId: string) => {
-  const client = await pool.connect();
-  
   try {
-    // Check if student is enrolled
-    const enrollmentCheck = await client.query(
-      `SELECT 1 FROM enrollments e
-       INNER JOIN course_exams ce ON e.course_id = ce.course_id
-       WHERE ce.id = $1 AND e.student_id = $2 AND e.status = 'enrolled'`,
-      [examId, studentId]
-    );
-    
-    if (enrollmentCheck.rows.length === 0) {
+    // Check enrollment
+    const { data: exam, error: examError } = await supabase
+      .from('final_exams')
+      .select(`
+        id,
+        course_id,
+        title,
+        description,
+        total_marks,
+        time_limit_minutes,
+        exam_mode,
+        instructions,
+        available_from,
+        available_until,
+        max_attempts
+      `)
+      .eq('id', examId)
+      .eq('is_published', true)
+      .single();
+
+    if (examError) throw examError;
+    if (!exam) throw new Error('Exam not found or not published');
+
+    // Verify enrollment
+    const { data: enrollment, error: enrollError } = await supabase
+      .from('enrollments')
+      .select('id')
+      .eq('student_id', studentId)
+      .eq('course_id', exam.course_id)
+      .single();
+
+    if (enrollError || !enrollment) {
       throw new Error('You are not enrolled in this course');
     }
-    
-    // Get exam details
-    const examResult = await client.query(
-      `SELECT ce.*, c.title as course_title
-       FROM course_exams ce
-       INNER JOIN courses c ON ce.course_id = c.id
-       WHERE ce.id = $1 AND ce.is_published = true`,
-      [examId]
-    );
-    
-    if (examResult.rows.length === 0) {
-      throw new Error('Exam not found or not published');
-    }
-    
-    const exam = examResult.rows[0];
-    
-    // Get questions (without answers)
-    const questionsResult = await client.query(
-      `SELECT id, question_text, question_type, options, marks, order_index, file_type, max_file_size_mb, max_duration_minutes
-       FROM exam_questions
-       WHERE exam_id = $1
-       ORDER BY order_index`,
-      [examId]
-    );
-    
-    // Check previous attempts
-    const attemptsResult = await client.query(
-      `SELECT COUNT(*) as attempts_used
-       FROM exam_submissions
-       WHERE exam_id = $1 AND student_id = $2 AND status = 'submitted'`,
-      [examId, studentId]
-    );
-    
+
+    // Get questions (without correct answers)
+    const { data: questions, error: questionsError } = await supabase
+      .from('final_exam_questions')
+      .select(`
+        id,
+        question_text,
+        question_type,
+        marks,
+        order_index,
+        file_type,
+        max_file_size_mb,
+        final_exam_options (
+          id,
+          option_text,
+          order_index
+        )
+      `)
+      .eq('exam_id', examId)
+      .order('order_index', { ascending: true });
+
+    if (questionsError) throw questionsError;
+
     return {
       ...exam,
-      questions: questionsResult.rows,
-      attempts_used: parseInt(attemptsResult.rows[0].attempts_used)
+      questions: (questions || []).map(q => ({
+        ...q,
+        options: q.final_exam_options || []
+      }))
     };
-  } finally {
-    client.release();
+  } catch (error) {
+    console.error('Error fetching exam:', error);
+    throw error;
   }
 };
 
@@ -127,104 +179,131 @@ export const getExamForStudent = async (examId: string, studentId: string) => {
  * Start exam attempt
  */
 export const startExamAttempt = async (data: StartExamData) => {
-  const client = await pool.connect();
-  
   try {
-    // Check if student can start exam
-    const exam = await getExamForStudent(data.exam_id, data.student_id);
-    
-    if (exam.attempts_used >= exam.max_attempts) {
-      throw new Error(`Maximum attempts (${exam.max_attempts}) reached`);
+    // Verify exam exists and student can attempt
+    const { data: exam, error: examError } = await supabase
+      .from('final_exams')
+      .select('id, max_attempts')
+      .eq('id', data.exam_id)
+      .eq('is_published', true)
+      .single();
+
+    if (examError || !exam) {
+      throw new Error('Exam not found');
     }
-    
-    // Check for ongoing attempt
-    const ongoingResult = await client.query(
-      `SELECT id FROM exam_submissions
-       WHERE exam_id = $1 AND student_id = $2 AND status = 'in_progress'`,
-      [data.exam_id, data.student_id]
-    );
-    
-    if (ongoingResult.rows.length > 0) {
+
+    // Check if student has ongoing attempt
+    const { data: ongoingSubmission } = await supabase
+      .from('final_exam_submissions')
+      .select('id')
+      .eq('exam_id', data.exam_id)
+      .eq('student_id', data.student_id)
+      .eq('submission_status', 'in_progress')
+      .single();
+
+    if (ongoingSubmission) {
       return {
-        submission_id: ongoingResult.rows[0].id,
+        submission_id: ongoingSubmission.id,
         message: 'Resuming existing attempt'
       };
     }
-    
+
+    // Count completed attempts
+    const { data: completedAttempts, error: countError } = await supabase
+      .from('final_exam_submissions')
+      .select('id', { count: 'exact' })
+      .eq('exam_id', data.exam_id)
+      .eq('student_id', data.student_id)
+      .in('submission_status', ['submitted', 'graded']);
+
+    if (exam.max_attempts > 0 && (completedAttempts?.length || 0) >= exam.max_attempts) {
+      throw new Error(`Maximum attempts (${exam.max_attempts}) reached`);
+    }
+
     // Create new submission
-    const result = await client.query(
-      `INSERT INTO exam_submissions (exam_id, student_id, started_at, status)
-       VALUES ($1, $2, NOW(), 'in_progress')
-       RETURNING id, started_at`,
-      [data.exam_id, data.student_id]
-    );
-    
+    const { data: submission, error: submitError } = await supabase
+      .from('final_exam_submissions')
+      .insert({
+        exam_id: data.exam_id,
+        student_id: data.student_id,
+        submission_status: 'in_progress',
+        attempt_number: (completedAttempts?.length || 0) + 1
+      })
+      .select()
+      .single();
+
+    if (submitError) throw submitError;
+
     return {
-      submission_id: result.rows[0].id,
-      started_at: result.rows[0].started_at,
-      message: 'Exam started successfully'
+      submission_id: submission.id,
+      message: 'Exam attempt started'
     };
-  } finally {
-    client.release();
+  } catch (error) {
+    console.error('Error starting exam attempt:', error);
+    throw error;
   }
 };
 
 /**
- * Auto-save answer (every 30 seconds)
+ * Auto-save answer
  */
 export const saveAnswer = async (data: SaveAnswerData) => {
-  const client = await pool.connect();
-  
   try {
-    // Verify submission is in progress
-    const submissionResult = await client.query(
-      `SELECT status, started_at, es.exam_id, ce.duration_minutes
-       FROM exam_submissions es
-       INNER JOIN course_exams ce ON es.exam_id = ce.id
-       WHERE es.id = $1`,
-      [data.submission_id]
-    );
-    
-    if (submissionResult.rows.length === 0) {
-      throw new Error('Submission not found');
+    // Check if answer already exists
+    const { data: existingAnswer } = await supabase
+      .from('final_exam_answers')
+      .select('id')
+      .eq('submission_id', data.submission_id)
+      .eq('question_id', data.question_id)
+      .single();
+
+    const answerData: any = {
+      submission_id: data.submission_id,
+      question_id: data.question_id
+    };
+
+    if (data.student_answer !== undefined) {
+      answerData.student_answer = data.student_answer;
     }
-    
-    const submission = submissionResult.rows[0];
-    
-    if (submission.status !== 'in_progress') {
-      throw new Error('Cannot save answer - exam is not in progress');
+    if (data.selected_option_id !== undefined) {
+      answerData.selected_option_id = data.selected_option_id;
     }
-    
-    // Check if time is up
-    const elapsed = (Date.now() - new Date(submission.started_at).getTime()) / 1000 / 60;
-    if (elapsed > submission.duration_minutes) {
-      // Auto-submit
-      await submitExam(data.submission_id);
-      throw new Error('Time limit exceeded - exam auto-submitted');
+    if (data.uploaded_file_url !== undefined) {
+      answerData.uploaded_file_url = data.uploaded_file_url;
     }
-    
-    // Save or update answer
-    await client.query(
-      `INSERT INTO exam_answers 
-        (submission_id, question_id, answer_text, selected_options, uploaded_file_url)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (submission_id, question_id) 
-       DO UPDATE SET 
-         answer_text = EXCLUDED.answer_text,
-         selected_options = EXCLUDED.selected_options,
-         uploaded_file_url = EXCLUDED.uploaded_file_url`,
-      [
-        data.submission_id,
-        data.question_id,
-        data.answer_text,
-        data.selected_options ? JSON.stringify(data.selected_options) : null,
-        data.uploaded_file_url
-      ]
-    );
-    
-    return { success: true, message: 'Answer saved' };
-  } finally {
-    client.release();
+
+    let result;
+    if (existingAnswer) {
+      const { data: updatedAnswer, error: updateError } = await supabase
+        .from('final_exam_answers')
+        .update(answerData)
+        .eq('id', existingAnswer.id)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+      result = updatedAnswer;
+    } else {
+      const { data: newAnswer, error: insertError } = await supabase
+        .from('final_exam_answers')
+        .insert(answerData)
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+      result = newAnswer;
+    }
+
+    // Update auto-saved timestamp
+    await supabase
+      .from('final_exam_submissions')
+      .update({ auto_saved_at: new Date().toISOString() })
+      .eq('id', data.submission_id);
+
+    return result;
+  } catch (error) {
+    console.error('Error saving answer:', error);
+    throw error;
   }
 };
 
@@ -232,204 +311,183 @@ export const saveAnswer = async (data: SaveAnswerData) => {
  * Submit exam
  */
 export const submitExam = async (submissionId: string) => {
-  const client = await pool.connect();
-  
   try {
-    await client.query('BEGIN');
-    
-    // Get submission details
-    const submissionResult = await client.query(
-      `SELECT es.*, ce.id as exam_id
-       FROM exam_submissions es
-       INNER JOIN course_exams ce ON es.exam_id = ce.id
-       WHERE es.id = $1`,
-      [submissionId]
-    );
-    
-    if (submissionResult.rows.length === 0) {
+    // Get submission with questions for auto-grading
+    const { data: submission, error: subError } = await supabase
+      .from('final_exam_submissions')
+      .select(`
+        id,
+        exam_id,
+        student_id,
+        submission_status
+      `)
+      .eq('id', submissionId)
+      .single();
+
+    if (subError || !submission) {
       throw new Error('Submission not found');
     }
-    
-    const submission = submissionResult.rows[0];
-    
-    if (submission.status === 'submitted') {
-      throw new Error('Exam already submitted');
+
+    if (submission.submission_status !== 'in_progress') {
+      throw new Error('This submission is already submitted');
     }
-    
-    // Auto-grade MCQ/True-False questions
-    const questionsResult = await client.query(
-      `SELECT eq.id, eq.question_type, eq.correct_answer, eq.marks,
-         ea.selected_options, ea.answer_text
-       FROM exam_questions eq
-       LEFT JOIN exam_answers ea ON eq.id = ea.question_id AND ea.submission_id = $1
-       WHERE eq.exam_id = $2`,
-      [submissionId, submission.exam_id]
-    );
-    
-    let autoGradedScore = 0;
-    
-    for (const question of questionsResult.rows) {
-      if (question.question_type === 'mcq' || question.question_type === 'multiple_choice') {
-        const correctAnswer = Array.isArray(question.correct_answer) 
-          ? question.correct_answer 
-          : JSON.parse(question.correct_answer || '[]');
-        const studentAnswer = question.selected_options 
-          ? (Array.isArray(question.selected_options) ? question.selected_options : JSON.parse(question.selected_options))
-          : [];
-        
-        const isCorrect = JSON.stringify(correctAnswer.sort()) === JSON.stringify(studentAnswer.sort());
-        
-        if (isCorrect) {
-          autoGradedScore += question.marks;
-          await client.query(
-            `UPDATE exam_answers SET marks_obtained = $1, is_correct = true 
-             WHERE submission_id = $2 AND question_id = $3`,
-            [question.marks, submissionId, question.id]
-          );
-        } else {
-          await client.query(
-            `UPDATE exam_answers SET marks_obtained = 0, is_correct = false 
-             WHERE submission_id = $2 AND question_id = $3`,
-            [submissionId, question.id]
-          );
-        }
-      } else if (question.question_type === 'true_false') {
-        const isCorrect = question.answer_text?.toLowerCase() === question.correct_answer?.toLowerCase();
-        
-        if (isCorrect) {
-          autoGradedScore += question.marks;
-          await client.query(
-            `UPDATE exam_answers SET marks_obtained = $1, is_correct = true 
-             WHERE submission_id = $2 AND question_id = $3`,
-            [question.marks, submissionId, question.id]
-          );
-        } else {
-          await client.query(
-            `UPDATE exam_answers SET marks_obtained = 0, is_correct = false 
-             WHERE submission_id = $2 AND question_id = $3`,
-            [submissionId, question.id]
-          );
+
+    // Get all exam questions
+    const { data: questions, error: questionsError } = await supabase
+      .from('final_exam_questions')
+      .select('id, question_type, marks')
+      .eq('exam_id', submission.exam_id);
+
+    if (questionsError) throw questionsError;
+
+    // Auto-grade multiple choice questions
+    let totalScore = 0;
+    const answersData = await supabase
+      .from('final_exam_answers')
+      .select('id, question_id, selected_option_id')
+      .eq('submission_id', submissionId);
+
+    if (answersData.data) {
+      for (const answer of answersData.data) {
+        const question = questions?.find(q => q.id === answer.question_id);
+
+        if (question?.question_type === 'multiple_choice' && answer.selected_option_id) {
+          // Check if selected option is correct
+          const { data: selectedOption } = await supabase
+            .from('final_exam_options')
+            .select('is_correct')
+            .eq('id', answer.selected_option_id)
+            .single();
+
+          if (selectedOption?.is_correct) {
+            totalScore += question.marks || 1;
+
+            // Update answer as correct
+            await supabase
+              .from('final_exam_answers')
+              .update({
+                is_correct: true,
+                points_earned: question.marks || 1
+              })
+              .eq('id', answer.id);
+          }
         }
       }
     }
-    
+
+    // Get passing marks and exam total marks
+    const { data: exam } = await supabase
+      .from('final_exams')
+      .select('passing_marks, total_marks')
+      .eq('id', submission.exam_id)
+      .single();
+
+    const passed = exam && totalScore >= (exam.passing_marks || 0);
+
     // Update submission
-    await client.query(
-      `UPDATE exam_submissions 
-       SET status = 'submitted',
-           submitted_at = NOW(),
-           auto_graded_score = $1
-       WHERE id = $2`,
-      [autoGradedScore, submissionId]
-    );
-    
-    await client.query('COMMIT');
-    
+    const { data: result, error: updateError } = await supabase
+      .from('final_exam_submissions')
+      .update({
+        submission_status: 'submitted',
+        total_score: totalScore,
+        passed: passed,
+        submitted_at: new Date().toISOString()
+      })
+      .eq('id', submissionId)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
     return {
-      success: true,
-      auto_graded_score: autoGradedScore,
-      message: 'Exam submitted successfully. Teacher will grade subjective questions.'
+      submission_id: result.id,
+      total_score: totalScore,
+      passing_marks: exam?.passing_marks || 0,
+      passed: passed
     };
   } catch (error) {
-    await client.query('ROLLBACK');
+    console.error('Error submitting exam:', error);
     throw error;
-  } finally {
-    client.release();
   }
 };
 
 /**
- * Get submission with answers and results
+ * Get submission results for student
  */
 export const getSubmissionResults = async (submissionId: string, studentId: string) => {
-  const client = await pool.connect();
-  
   try {
-    // Get submission
-    const submissionResult = await client.query(
-      `SELECT es.*, ce.title as exam_title, ce.total_marks, ce.passing_score, ce.allow_review,
-         c.title as course_title
-       FROM exam_submissions es
-       INNER JOIN course_exams ce ON es.exam_id = ce.id
-       INNER JOIN courses c ON ce.course_id = c.id
-       WHERE es.id = $1 AND es.student_id = $2`,
-      [submissionId, studentId]
-    );
-    
-    if (submissionResult.rows.length === 0) {
+    // Verify ownership
+    const { data: submission, error: subError } = await supabase
+      .from('final_exam_submissions')
+      .select(`
+        id,
+        exam_id,
+        student_id,
+        submission_status,
+        total_score,
+        passed,
+        submitted_at
+      `)
+      .eq('id', submissionId)
+      .eq('student_id', studentId)
+      .single();
+
+    if (subError || !submission) {
       throw new Error('Submission not found');
     }
-    
-    const submission = submissionResult.rows[0];
-    
-    if (submission.status !== 'submitted' && submission.status !== 'graded') {
-      throw new Error('Cannot view results - exam not submitted yet');
+
+    // Get exam details
+    const { data: exam } = await supabase
+      .from('final_exams')
+      .select('title, total_marks, passing_marks, show_results_to_student')
+      .eq('id', submission.exam_id)
+      .single();
+
+    if (!exam?.show_results_to_student && submission.submission_status !== 'graded') {
+      throw new Error('Results are not available yet');
     }
-    
-    // Get questions with student answers
-    const answersResult = await client.query(
-      `SELECT 
-        eq.id as question_id,
-        eq.question_text,
-        eq.question_type,
-        eq.options,
-        eq.marks as max_marks,
-        eq.correct_answer,
-        ea.answer_text,
-        ea.selected_options,
-        ea.uploaded_file_url,
-        ea.marks_obtained,
-        ea.is_correct,
-        ea.teacher_comment
-       FROM exam_questions eq
-       LEFT JOIN exam_answers ea ON eq.id = ea.question_id AND ea.submission_id = $1
-       WHERE eq.exam_id = $2
-       ORDER BY eq.order_index`,
-      [submissionId, submission.exam_id]
-    );
-    
+
+    // Get answers
+    const { data: answers, error: answersError } = await supabase
+      .from('final_exam_answers')
+      .select(`
+        id,
+        question_id,
+        student_answer,
+        selected_option_id,
+        points_earned,
+        is_correct,
+        final_exam_questions (
+          question_text,
+          question_type,
+          marks,
+          explanation
+        )
+      `)
+      .eq('submission_id', submissionId);
+
+    if (answersError) throw answersError;
+
     return {
-      ...submission,
-      answers: answersResult.rows,
-      passed: submission.total_score >= submission.passing_score
+      submission: {
+        ...submission,
+        exam_title: exam?.title,
+        total_marks: exam?.total_marks,
+        passing_marks: exam?.passing_marks
+      },
+      answers: answers || []
     };
-  } finally {
-    client.release();
+  } catch (error) {
+    console.error('Error fetching results:', error);
+    throw error;
   }
 };
 
-/**
- * Get student's exam history
- */
-export const getStudentExamHistory = async (studentId: string) => {
-  const client = await pool.connect();
-  
-  try {
-    const result = await client.query(
-      `SELECT 
-        es.id as submission_id,
-        ce.title as exam_title,
-        c.title as course_title,
-        es.started_at,
-        es.submitted_at,
-        es.status,
-        es.total_score,
-        ce.total_marks,
-        ce.passing_score,
-        CASE 
-          WHEN es.total_score >= ce.passing_score THEN true
-          ELSE false
-        END as passed
-       FROM exam_submissions es
-       INNER JOIN course_exams ce ON es.exam_id = ce.id
-       INNER JOIN courses c ON ce.course_id = c.id
-       WHERE es.student_id = $1
-       ORDER BY es.started_at DESC`,
-      [studentId]
-    );
-    
-    return result.rows;
-  } finally {
-    client.release();
-  }
+export default {
+  getAvailableExams,
+  getExamForStudent,
+  startExamAttempt,
+  saveAnswer,
+  submitExam,
+  getSubmissionResults
 };

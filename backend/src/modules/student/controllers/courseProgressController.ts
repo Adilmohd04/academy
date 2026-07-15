@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import * as courseProgressService from '../services/courseProgressService';
+import { checkAndAwardCertificate } from '../../certificate/services/issuanceService';
 
 export const getCourseContent = async (req: Request, res: Response) => {
   try {
@@ -37,9 +38,25 @@ export const markLessonComplete = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    await courseProgressService.markLessonComplete(lessonId, studentId);
+    const { courseId, progressPercentage } = await courseProgressService.markLessonComplete(
+      lessonId,
+      studentId,
+    );
 
-    res.json({ message: 'Lesson marked as complete' });
+    // Issuance hook (Task 20.2): when the student completes all content,
+    // attempt to issue the certificate. This is the synchronous real-time
+    // path that meets the 60-second SLA (design §8.2). It's idempotent and
+    // safely no-ops if the student isn't yet fully eligible (e.g. an unpassed
+    // quiz). Errors here never block the lesson-completion response.
+    if (courseId && progressPercentage >= 100) {
+      try {
+        await checkAndAwardCertificate(courseId, studentId);
+      } catch (hookError) {
+        console.error('[lesson-complete] certificate issuance hook failed:', hookError);
+      }
+    }
+
+    res.json({ message: 'Lesson marked as complete', progress_percentage: progressPercentage });
   } catch (error: any) {
     console.error('Error completing lesson:', error);
     res.status(500).json({ error: error.message || 'Failed to complete lesson' });

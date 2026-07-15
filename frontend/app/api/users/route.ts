@@ -1,11 +1,9 @@
-import { NextResponse } from 'next/server';
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+
 import { auth } from '@clerk/nextjs/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 export async function GET() {
   try {
@@ -16,7 +14,7 @@ export async function GET() {
     }
 
     // Create Supabase client with service role key
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabaseAdminClient();
 
     // Fetch all users from the profiles table
     const { data: users, error } = await supabase

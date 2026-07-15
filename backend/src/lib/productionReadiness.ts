@@ -204,7 +204,7 @@ const checkCorsOrigin = (): CheckResult => {
  */
 const checkDatabaseConnection = async (): Promise<CheckResult> => {
   try {
-    const { supabase } = await import('../config/database');
+    const { supabase } = await import('../config/database.js');
     const start = Date.now();
     const { error } = await supabase.from('profiles').select('id').limit(1);
     const duration = Date.now() - start;

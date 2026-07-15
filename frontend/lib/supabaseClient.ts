@@ -7,4 +7,4 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 // when the client is imported but not used (or when we've migrated away from it).
 export const supabase = supabaseAnonKey
   ? createClient(supabaseUrl, supabaseAnonKey)
-  : (null as any);
+  : null;

@@ -2,6 +2,9 @@ import express from 'express';
 import { requireAuth, requireRole } from '../middleware/clerkAuth';
 import { supabase } from '../config/database';
 import { notifyTeacherInterviewAssignment } from '../services/courseNotificationService';
+import * as courseNotifications from '../services/courseNotificationService';
+import { calculateFinalScore } from '../services/certificateService';
+import { issueCertificate as issueQrCertificate } from '../modules/shared/services/certificateService';
 
 const router = express.Router();
 
@@ -30,6 +33,136 @@ function formatDateFromDayAndMinute(day: Date, minuteOfDay: number): string {
   const minutes = minuteOfDay % 60;
   result.setHours(hours, minutes, 0, 0);
   return result.toISOString();
+}
+
+function extractOwnerTeacherId(courses: any): string | null {
+  if (!courses) return null;
+  if (Array.isArray(courses)) return courses[0]?.teacher_id || null;
+  return courses.teacher_id || null;
+}
+
+function isTeacherOwner(
+  ownerTeacherId: string | null | undefined,
+  teacherProfileId: string | null | undefined,
+  clerkUserId: string | null | undefined
+): boolean {
+  return !!ownerTeacherId && (ownerTeacherId === teacherProfileId || ownerTeacherId === clerkUserId);
+}
+
+const RESOURCE_EMBED_MARKER = '__FINAL_EXAM_RESOURCES_JSON__:';
+let finalExamResourcesColumnSupported: boolean | undefined;
+
+async function supportsFinalExamResourcesColumn(): Promise<boolean> {
+  if (typeof finalExamResourcesColumnSupported === 'boolean') {
+    return finalExamResourcesColumnSupported;
+  }
+
+  const { error } = await supabase
+    .from('final_exams')
+    .select('resources')
+    .limit(1);
+
+  if (
+    error &&
+    ((error as any).code === 'PGRST204' ||
+      String((error as any).message || '').toLowerCase().includes("could not find the 'resources' column"))
+  ) {
+    finalExamResourcesColumnSupported = false;
+    return false;
+  }
+
+  finalExamResourcesColumnSupported = true;
+  return true;
+}
+
+function normalizeResourcesValue(resources: any): string | null {
+  if (resources === undefined || resources === null) return null;
+  if (typeof resources === 'string') return resources;
+
+  try {
+    return JSON.stringify(resources);
+  } catch {
+    return null;
+  }
+}
+
+function embedResourcesInInstructions(instructions: string | null | undefined, resources: any): string | null {
+  const baseInstructions = (instructions || '').trimEnd();
+  const normalizedResources = normalizeResourcesValue(resources);
+
+  if (!normalizedResources) {
+    return baseInstructions || null;
+  }
+
+  return `${baseInstructions}\n\n${RESOURCE_EMBED_MARKER}${normalizedResources}`;
+}
+
+function splitEmbeddedResources(instructions: string | null | undefined): {
+  instructions: string | null;
+  resources: any;
+} {
+  if (!instructions) {
+    return { instructions: null, resources: null };
+  }
+
+  const markerIndex = instructions.indexOf(RESOURCE_EMBED_MARKER);
+  if (markerIndex === -1) {
+    return { instructions, resources: null };
+  }
+
+  const plainInstructions = instructions.slice(0, markerIndex).trimEnd() || null;
+  const resourcesPayload = instructions.slice(markerIndex + RESOURCE_EMBED_MARKER.length).trim();
+
+  return {
+    instructions: plainInstructions,
+    resources: parseResources(resourcesPayload)
+  };
+}
+
+function normalizeExamInstructionsAndResources(exam: any): any {
+  const extracted = splitEmbeddedResources(exam?.instructions);
+  const columnResources = parseResources(exam?.resources);
+
+  return {
+    ...exam,
+    instructions: extracted.instructions,
+    resources: columnResources ?? extracted.resources
+  };
+}
+
+async function getTeacherProfileId(userId: string | undefined): Promise<string | null> {
+  if (!userId) return null;
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('clerk_user_id', userId)
+    .maybeSingle();
+
+  return profile?.id || null;
+}
+
+async function getStudentProfileId(userId: string | undefined): Promise<string | null> {
+  if (!userId) return null;
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('clerk_user_id', userId)
+    .maybeSingle();
+
+  return profile?.id || null;
+}
+
+async function hasCoTeacherAccess(courseId: string, teacherProfileId: string): Promise<boolean> {
+  const { data: coTeacher } = await supabase
+    .from('course_teachers')
+    .select('teacher_id')
+    .eq('course_id', courseId)
+    .eq('teacher_id', teacherProfileId)
+    .maybeSingle();
+
+  return !!coTeacher;
 }
 
 /**
@@ -66,21 +199,16 @@ router.post(
         return res.status(400).json({ error: 'Title and exam type are required' });
       }
 
-      // Get teacher profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const teacherProfileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      if (!teacherProfileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
       // Verify teacher owns the course
       const { data: course } = await supabase
         .from('courses')
-        .select('id, teacher_id')
+        .select('id, title, teacher_id')
         .eq('id', courseId)
         .single();
 
@@ -88,32 +216,76 @@ router.post(
         return res.status(404).json({ error: 'Course not found' });
       }
 
-      if (course.teacher_id !== profile.id) {
+      if (!isTeacherOwner(course.teacher_id, teacherProfileId, userId)) {
         return res.status(403).json({ error: 'Only the course teacher can create final exams' });
       }
 
+      const supportsResources = await supportsFinalExamResourcesColumn();
+      const insertPayload: any = {
+        course_id: courseId,
+        title,
+        description: description || null,
+        exam_type,
+        points: points || 100,
+        due_date: due_date || null,
+        duration_minutes: duration_minutes || null,
+        is_published: is_published || false,
+        created_by: teacherProfileId
+      };
+
+      if (supportsResources) {
+        insertPayload.instructions = instructions || null;
+        insertPayload.resources = normalizeResourcesValue(resources);
+      } else {
+        insertPayload.instructions = embedResourcesInInstructions(instructions || null, resources);
+      }
+
       // Create final exam
-      const { data: finalExam, error } = await supabase
+      let { data: finalExam, error } = await supabase
         .from('final_exams')
-        .insert({
-          course_id: courseId,
-          title,
-          description: description || null,
-          exam_type,
-          points: points || 100,
-          due_date: due_date || null,
-          instructions: instructions || null,
-          resources: resources || null,
-          duration_minutes: duration_minutes || null,
-          is_published: is_published || false,
-          created_by: profile.id
-        })
+        .insert(insertPayload)
         .select()
         .single();
+
+      // Defensive fallback for environments where PostgREST schema cache lags
+      if (
+        error &&
+        String((error as any).message || '').toLowerCase().includes("could not find the 'resources' column")
+      ) {
+        finalExamResourcesColumnSupported = false;
+        const fallbackPayload: any = {
+          ...insertPayload,
+          instructions: embedResourcesInInstructions(instructions || null, resources)
+        };
+        delete fallbackPayload.resources;
+
+        const fallbackResult = await supabase
+          .from('final_exams')
+          .insert(fallbackPayload)
+          .select()
+          .single();
+
+        finalExam = fallbackResult.data;
+        error = fallbackResult.error;
+      }
 
       if (error) {
         console.error('Error creating final exam:', error);
         return res.status(500).json({ error: 'Failed to create final exam' });
+      }
+
+      if (finalExam?.is_published) {
+        try {
+          await courseNotifications.notifyFinalExamPublished(
+            courseId,
+            course?.title || 'Course',
+            finalExam.title || 'Final Exam',
+            finalExam.exam_type || 'exam',
+            finalExam.id
+          );
+        } catch (notifError) {
+          console.error('⚠️ Failed to send final exam notification:', notifError);
+        }
       }
 
       res.status(201).json({
@@ -137,14 +309,9 @@ router.get(
       const { courseId } = req.params;
       const userId = req.auth?.userId;
 
-      // Get teacher profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const teacherProfileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      if (!teacherProfileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
@@ -159,9 +326,11 @@ router.get(
         return res.status(404).json({ error: 'Course not found' });
       }
 
-      if (course.teacher_id !== profile.id) {
+      if (!isTeacherOwner(course.teacher_id, teacherProfileId, userId)) {
         return res.status(403).json({ error: 'Access denied' });
       }
+
+      const supportsResources = await supportsFinalExamResourcesColumn();
 
       // Get all final exams for the course
       const { data: finalExams, error } = await supabase
@@ -184,7 +353,9 @@ router.get(
         return res.status(500).json({ error: 'Failed to fetch final exams' });
       }
 
-      res.json({ finalExams: finalExams || [] });
+      const normalizedExams = (finalExams || []).map((exam: any) => normalizeExamInstructionsAndResources(exam));
+
+      res.json({ finalExams: normalizedExams });
     } catch (error: any) {
       console.error('Error in getCourseFinalExams:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -213,14 +384,9 @@ router.put(
       } = req.body;
       const userId = req.auth?.userId;
 
-      // Get teacher profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const teacherProfileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      if (!teacherProfileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
@@ -242,31 +408,85 @@ router.put(
         return res.status(404).json({ error: 'Final exam not found' });
       }
 
-      const courses: any = finalExam.courses;
-      const teacherId = Array.isArray(courses) ? courses[0]?.teacher_id : courses?.teacher_id;
+      const teacherId = extractOwnerTeacherId((finalExam as any).courses);
 
-      if (teacherId !== profile.id) {
+      if (!isTeacherOwner(teacherId, teacherProfileId, userId)) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
+      const supportsResources = await supportsFinalExamResourcesColumn();
+      const updatePayload: any = {
+        title: title || undefined,
+        description: description || undefined,
+        exam_type: exam_type || undefined,
+        points: points || undefined,
+        due_date: due_date || undefined,
+        duration_minutes: duration_minutes || undefined,
+        is_published: is_published !== undefined ? is_published : undefined,
+        updated_at: new Date().toISOString()
+      };
+
+      if (supportsResources) {
+        updatePayload.instructions = instructions || undefined;
+        updatePayload.resources = resources !== undefined ? normalizeResourcesValue(resources) : undefined;
+      } else {
+        if (instructions !== undefined || resources !== undefined) {
+          const { data: currentExam, error: currentExamError } = await supabase
+            .from('final_exams')
+            .select('instructions')
+            .eq('id', examId)
+            .single();
+
+          if (currentExamError || !currentExam) {
+            return res.status(404).json({ error: 'Final exam not found' });
+          }
+
+          const extracted = splitEmbeddedResources((currentExam as any).instructions);
+          const nextInstructions = instructions !== undefined ? instructions : extracted.instructions;
+          const nextResources = resources !== undefined ? resources : extracted.resources;
+          updatePayload.instructions = embedResourcesInInstructions(nextInstructions, nextResources);
+        }
+      }
+
       // Update final exam
-      const { data: updatedExam, error } = await supabase
+      let { data: updatedExam, error } = await supabase
         .from('final_exams')
-        .update({
-          title: title || undefined,
-          description: description || undefined,
-          exam_type: exam_type || undefined,
-          points: points || undefined,
-          due_date: due_date || undefined,
-          instructions: instructions || undefined,
-          resources: resources || undefined,
-          duration_minutes: duration_minutes || undefined,
-          is_published: is_published !== undefined ? is_published : undefined,
-          updated_at: new Date().toISOString()
-        })
+        .update(updatePayload)
         .eq('id', examId)
         .select()
         .single();
+
+      if (
+        error &&
+        String((error as any).message || '').toLowerCase().includes("could not find the 'resources' column")
+      ) {
+        finalExamResourcesColumnSupported = false;
+        const fallbackPayload: any = { ...updatePayload };
+        delete fallbackPayload.resources;
+
+        if (instructions !== undefined || resources !== undefined) {
+          const { data: currentExam } = await supabase
+            .from('final_exams')
+            .select('instructions')
+            .eq('id', examId)
+            .single();
+
+          const extracted = splitEmbeddedResources((currentExam as any)?.instructions);
+          const nextInstructions = instructions !== undefined ? instructions : extracted.instructions;
+          const nextResources = resources !== undefined ? resources : extracted.resources;
+          fallbackPayload.instructions = embedResourcesInInstructions(nextInstructions, nextResources);
+        }
+
+        const fallbackResult = await supabase
+          .from('final_exams')
+          .update(fallbackPayload)
+          .eq('id', examId)
+          .select()
+          .single();
+
+        updatedExam = fallbackResult.data;
+        error = fallbackResult.error;
+      }
 
       if (error) {
         console.error('Error updating final exam:', error);
@@ -294,13 +514,9 @@ router.get(
       const { examId } = req.params;
       const userId = req.auth?.userId;
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const teacherProfileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      if (!teacherProfileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
@@ -314,19 +530,10 @@ router.get(
         return res.status(404).json({ error: 'Final exam not found' });
       }
 
-      const courses: any = finalExam.courses;
-      const ownerTeacherId = Array.isArray(courses) ? courses[0]?.teacher_id : courses?.teacher_id;
-
-      let hasAccess = ownerTeacherId === profile.id;
-
+      const ownerTeacherId = extractOwnerTeacherId((finalExam as any).courses);
+      let hasAccess = isTeacherOwner(ownerTeacherId, teacherProfileId, userId);
       if (!hasAccess) {
-        const { data: coTeacher } = await supabase
-          .from('course_teachers')
-          .select('teacher_id')
-          .eq('course_id', finalExam.course_id)
-          .eq('teacher_id', profile.id)
-          .maybeSingle();
-        hasAccess = !!coTeacher;
+        hasAccess = await hasCoTeacherAccess(finalExam.course_id, teacherProfileId);
       }
 
       if (!hasAccess) {
@@ -420,19 +627,20 @@ router.post(
       const { examId } = req.params;
       const userId = req.auth?.userId;
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const teacherProfileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      if (!teacherProfileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
+      const supportsResources = await supportsFinalExamResourcesColumn();
+      const finalExamSelect = supportsResources
+        ? 'id, title, exam_type, duration_minutes, resources, course_id, courses!inner(id, title, teacher_id)'
+        : 'id, title, exam_type, duration_minutes, instructions, course_id, courses!inner(id, title, teacher_id)';
+
       const { data: finalExam } = await supabase
         .from('final_exams')
-        .select('id, title, exam_type, duration_minutes, resources, course_id, courses!inner(id, title, teacher_id)')
+        .select(finalExamSelect)
         .eq('id', examId)
         .single();
 
@@ -444,26 +652,19 @@ router.post(
         return res.status(400).json({ error: 'Autoscheduling is available only for interview final exams' });
       }
 
-      const courses: any = finalExam.courses;
-      const ownerTeacherId = Array.isArray(courses) ? courses[0]?.teacher_id : courses?.teacher_id;
-
-      let hasAccess = ownerTeacherId === profile.id;
-
+      const ownerTeacherId = extractOwnerTeacherId((finalExam as any).courses);
+      let hasAccess = isTeacherOwner(ownerTeacherId, teacherProfileId, userId);
       if (!hasAccess) {
-        const { data: coTeacher } = await supabase
-          .from('course_teachers')
-          .select('teacher_id')
-          .eq('course_id', finalExam.course_id)
-          .eq('teacher_id', profile.id)
-          .maybeSingle();
-        hasAccess = !!coTeacher;
+        hasAccess = await hasCoTeacherAccess(finalExam.course_id, teacherProfileId);
       }
 
       if (!hasAccess) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      const parsedResources = parseResources(finalExam.resources);
+      const parsedResources = supportsResources
+        ? parseResources((finalExam as any).resources)
+        : splitEmbeddedResources((finalExam as any).instructions).resources;
       const interviewConfig = parsedResources?.interview_config || {};
 
       const {
@@ -562,7 +763,7 @@ router.post(
         .select('id, scheduled_date, notes, status')
         .gte('scheduled_date', new Date(`${schedulerStartDate}T00:00:00`).toISOString())
         .lte('scheduled_date', new Date(`${schedulerEndDate}T23:59:59`).toISOString())
-        .in('status', ['scheduled', 'rescheduled', 'in-progress']);
+        .in('status', ['scheduled', 'confirmed', 'rescheduled', 'in-progress']);
 
       const existingTeacherSlotKeys = new Set(
         (teacherScheduledInterviews || [])
@@ -625,7 +826,7 @@ router.post(
         const notePayload = {
           auto_scheduled: true,
           assigned_interviewer_id: slot.interviewer_id,
-          assigned_by: profile.id,
+          assigned_by: teacherProfileId,
           scheduling_window: {
             start_date: schedulerStartDate,
             end_date: schedulerEndDate,
@@ -720,13 +921,9 @@ router.patch(
         notes
       } = req.body || {};
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const teacherProfileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      if (!teacherProfileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
@@ -744,18 +941,10 @@ router.patch(
         return res.status(400).json({ error: 'Interview management is only available for interview final exams' });
       }
 
-      const courses: any = finalExam.courses;
-      const ownerTeacherId = Array.isArray(courses) ? courses[0]?.teacher_id : courses?.teacher_id;
-
-      let hasAccess = ownerTeacherId === profile.id;
+      const ownerTeacherId = extractOwnerTeacherId((finalExam as any).courses);
+      let hasAccess = isTeacherOwner(ownerTeacherId, teacherProfileId, userId);
       if (!hasAccess) {
-        const { data: coTeacher } = await supabase
-          .from('course_teachers')
-          .select('teacher_id')
-          .eq('course_id', finalExam.course_id)
-          .eq('teacher_id', profile.id)
-          .maybeSingle();
-        hasAccess = !!coTeacher;
+        hasAccess = await hasCoTeacherAccess(finalExam.course_id, teacherProfileId);
       }
 
       if (!hasAccess) {
@@ -788,7 +977,7 @@ router.patch(
         ...existingNotes,
         ...(typeof notes === 'object' && notes ? notes : {}),
         ...(assigned_interviewer_id ? { assigned_interviewer_id } : {}),
-        updated_by: profile.id,
+        updated_by: teacherProfileId,
         updated_at: new Date().toISOString()
       };
 
@@ -864,14 +1053,9 @@ router.get(
       const { examId } = req.params;
       const userId = req.auth?.userId;
 
-      // Get teacher profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const teacherProfileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      if (!teacherProfileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
@@ -895,10 +1079,9 @@ router.get(
         return res.status(404).json({ error: 'Final exam not found' });
       }
 
-      const courses: any = finalExam.courses;
-      const teacherId = Array.isArray(courses) ? courses[0]?.teacher_id : courses?.teacher_id;
+      const teacherId = extractOwnerTeacherId((finalExam as any).courses);
 
-      if (teacherId !== profile.id) {
+      if (!isTeacherOwner(teacherId, teacherProfileId, userId)) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
@@ -969,14 +1152,9 @@ router.post(
         return res.status(400).json({ error: 'Valid grade is required' });
       }
 
-      // Get teacher profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const teacherProfileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      if (!teacherProfileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
@@ -989,6 +1167,7 @@ router.post(
             id,
             courses!inner (
               id,
+              title,
               teacher_id
             )
           )
@@ -1006,7 +1185,7 @@ router.post(
       const courses: any = finalExamData?.courses;
       const teacherId = Array.isArray(courses) ? courses[0]?.teacher_id : courses?.teacher_id;
 
-      if (teacherId !== profile.id) {
+      if (!isTeacherOwner(teacherId, teacherProfileId, userId)) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
@@ -1019,7 +1198,7 @@ router.post(
           feedback: feedback || null,
           status: status || 'graded',
           graded_at: new Date().toISOString(),
-          graded_by: profile.id
+          graded_by: teacherProfileId
         })
         .eq('id', submissionId)
         .select()
@@ -1030,9 +1209,87 @@ router.post(
         return res.status(500).json({ error: 'Failed to grade submission' });
       }
 
+      try {
+        const courseId = finalExamData?.courses?.id || finalExamData?.courses?.[0]?.id;
+        const courseTitle = Array.isArray(finalExamData?.courses)
+          ? finalExamData.courses[0]?.title
+          : finalExamData?.courses?.title;
+
+        if (courseId && gradedSubmission?.student_id) {
+          const { data: studentProfile } = await supabase
+            .from('profiles')
+            .select('id, full_name, email')
+            .eq('id', gradedSubmission.student_id)
+            .single();
+
+          if (studentProfile?.email) {
+            await courseNotifications.notifyFinalExamResults(
+              {
+                id: studentProfile.id,
+                email: studentProfile.email,
+                name: studentProfile.full_name || 'Student',
+              },
+              {
+                courseId,
+                courseTitle: courseTitle || 'Course',
+                examTitle: finalExamData?.title || 'Final Exam',
+                grade,
+                maxGrade: max_grade || 100,
+                passed: Number(grade) >= (Number(max_grade || 100) * 0.7),
+                submissionId: gradedSubmission.id,
+              }
+            );
+          }
+        }
+      } catch (notifError) {
+        console.error('⚠️ Failed to send final exam result notification:', notifError);
+      }
+
+      let certificate: any = null;
+      try {
+        const courseId = finalExamData?.courses?.id || finalExamData?.courses?.[0]?.id;
+
+        if (courseId && gradedSubmission?.student_id) {
+          const { data: course } = await supabase
+            .from('courses')
+            .select('enable_certificates')
+            .eq('id', courseId)
+            .single();
+
+          const { data: enrollment } = await supabase
+            .from('enrollments')
+            .select('progress_percentage')
+            .eq('course_id', courseId)
+            .eq('student_id', gradedSubmission.student_id)
+            .maybeSingle();
+
+          const progressPercentage = enrollment?.progress_percentage || 0;
+
+          if (course?.enable_certificates && progressPercentage >= 100) {
+            const scoreData = await calculateFinalScore(courseId, gradedSubmission.student_id);
+
+            if (scoreData?.passed) {
+              certificate = await issueQrCertificate(
+                courseId,
+                gradedSubmission.student_id,
+                scoreData.final_score,
+                {
+                  isManualOverride: false,
+                  overrideBy: teacherProfileId,
+                  overrideReason: 'Auto-issued after final exam completion'
+                }
+              );
+            }
+          }
+        }
+      } catch (certificateError) {
+        console.error('Error auto-issuing certificate after final exam grading:', certificateError);
+      }
+
       res.json({
         message: 'Final exam graded successfully',
-        submission: gradedSubmission
+        submission: gradedSubmission,
+        certificate: certificate?.id ? certificate : null
       });
     } catch (error: any) {
       console.error('Error in gradeFinalExamSubmission:', error);
@@ -1068,10 +1325,21 @@ router.get(
         .from('enrollments')
         .select('id')
         .eq('course_id', courseId)
-        .eq('student_id', profile.id)
-        .single();
+        .eq('student_id', userId)
+        .maybeSingle();
 
+      let legacyEnrollment = null;
       if (!enrollment) {
+        const { data } = await supabase
+          .from('enrollments')
+          .select('id')
+          .eq('course_id', courseId)
+          .eq('student_id', profile.id)
+          .maybeSingle();
+        legacyEnrollment = data;
+      }
+
+      if (!enrollment && !legacyEnrollment) {
         return res.status(403).json({ error: 'You are not enrolled in this course' });
       }
 
@@ -1102,8 +1370,11 @@ router.get(
       // Filter to show only student's own submissions
       const now = new Date();
 
-      const visibleExams = (finalExams || []).filter((exam: any) => {
-        const publishAtRaw = exam?.resources?.publish_at;
+      const normalizedExams = (finalExams || []).map((exam: any) => normalizeExamInstructionsAndResources(exam));
+
+      const visibleExams = normalizedExams.filter((exam: any) => {
+        const parsedExamResources = parseResources(exam?.resources) || {};
+        const publishAtRaw = parsedExamResources?.publish_at;
         if (!publishAtRaw) return true;
 
         const publishAt = new Date(publishAtRaw);
@@ -1208,7 +1479,7 @@ router.get(
         .from('enrollments')
         .select('id')
         .eq('course_id', courseData?.id)
-        .eq('student_id', profile.id)
+        .in('student_id', [profile.id, userId].filter(Boolean))
         .maybeSingle();
 
       if (!enrollment) {
@@ -1243,6 +1514,384 @@ router.get(
       });
     } catch (error: any) {
       console.error('Error in getStudentInterviewDetails:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+router.post(
+  '/student/final-exams/:examId/interviews/book',
+  requireAuth,
+  async (req: any, res) => {
+    try {
+      const { examId } = req.params;
+      const {
+        scheduled_date,
+        duration_minutes,
+        meeting_link,
+        slot_id,
+        category_id
+      } = req.body || {};
+      const userId = req.auth?.userId;
+
+      const studentProfileId = await getStudentProfileId(userId);
+
+      if (!studentProfileId) {
+        return res.status(404).json({ error: 'Student profile not found' });
+      }
+
+      const supportsResources = await supportsFinalExamResourcesColumn();
+      const finalExamSelect = supportsResources
+        ? 'id, course_id, title, exam_type, is_published, resources, duration_minutes'
+        : 'id, course_id, title, exam_type, is_published, instructions, duration_minutes';
+
+      const { data: finalExam } = await supabase
+        .from('final_exams')
+        .select(finalExamSelect)
+        .eq('id', examId)
+        .single();
+
+      if (!finalExam) {
+        return res.status(404).json({ error: 'Final exam not found' });
+      }
+
+      if (finalExam.exam_type !== 'interview') {
+        return res.status(400).json({ error: 'This final exam does not support interviews' });
+      }
+
+      if (!finalExam.is_published) {
+        return res.status(403).json({ error: 'Final exam is not published yet' });
+      }
+
+      const { data: enrollment } = await supabase
+        .from('enrollments')
+        .select('id')
+        .eq('course_id', finalExam.course_id)
+        .in('student_id', [studentProfileId, userId].filter(Boolean))
+        .maybeSingle();
+
+      if (!enrollment) {
+        return res.status(403).json({ error: 'You are not enrolled in this course' });
+      }
+
+      if (!scheduled_date) {
+        return res.status(400).json({ error: 'scheduled_date is required for interview booking' });
+      }
+
+      const parsedScheduledDate = new Date(scheduled_date);
+      if (isNaN(parsedScheduledDate.getTime())) {
+        return res.status(400).json({ error: 'Invalid scheduled_date format' });
+      }
+
+      const interviewResources = supportsResources
+        ? (parseResources((finalExam as any).resources) || {})
+        : (splitEmbeddedResources((finalExam as any).instructions).resources || {});
+      const interviewSettings = interviewResources?.interview_config || interviewResources?.interviewSettings || {};
+      const normalizedDuration = Number(duration_minutes || finalExam.duration_minutes || interviewSettings.slot_duration_minutes || 15);
+
+      if (!Number.isFinite(normalizedDuration) || normalizedDuration <= 0) {
+        return res.status(400).json({ error: 'duration_minutes must be greater than 0' });
+      }
+
+      const activeStatuses = ['scheduled', 'confirmed', 'rescheduled', 'in-progress'];
+      const { data: conflictingInterview } = await supabase
+        .from('final_exam_interviews')
+        .select('id')
+        .eq('final_exam_id', examId)
+        .eq('scheduled_date', parsedScheduledDate.toISOString())
+        .in('status', activeStatuses)
+        .neq('student_id', studentProfileId)
+        .maybeSingle();
+
+      if (conflictingInterview) {
+        return res.status(409).json({ error: 'Selected slot is no longer available' });
+      }
+
+      const { data: existingInterview } = await supabase
+        .from('final_exam_interviews')
+        .select('id, status, notes')
+        .eq('final_exam_id', examId)
+        .eq('student_id', studentProfileId)
+        .maybeSingle();
+
+      const notePayload = {
+        ...(parseResources(existingInterview?.notes) || {}),
+        student_booked: true,
+        slot_id: slot_id || null,
+        category_id: category_id || null,
+        booked_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      if (existingInterview && activeStatuses.includes(existingInterview.status)) {
+        return res.status(400).json({ error: 'Interview already booked. Use reschedule to change your slot.' });
+      }
+
+      let upsertedInterview: any = null;
+      if (existingInterview) {
+        const { data, error } = await supabase
+          .from('final_exam_interviews')
+          .update({
+            scheduled_date: parsedScheduledDate.toISOString(),
+            duration_minutes: normalizedDuration,
+            meeting_link: meeting_link || null,
+            status: 'scheduled',
+            notes: JSON.stringify(notePayload),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingInterview.id)
+          .select('*')
+          .single();
+
+        if (error) {
+          console.error('Error updating interview booking:', error);
+          return res.status(500).json({ error: 'Failed to book interview slot' });
+        }
+
+        upsertedInterview = data;
+      } else {
+        const { data, error } = await supabase
+          .from('final_exam_interviews')
+          .insert({
+            final_exam_id: examId,
+            student_id: studentProfileId,
+            scheduled_date: parsedScheduledDate.toISOString(),
+            duration_minutes: normalizedDuration,
+            meeting_link: meeting_link || null,
+            status: 'scheduled',
+            notes: JSON.stringify(notePayload),
+            updated_at: new Date().toISOString()
+          })
+          .select('*')
+          .single();
+
+        if (error) {
+          console.error('Error creating interview booking:', error);
+          return res.status(500).json({ error: 'Failed to book interview slot' });
+        }
+
+        upsertedInterview = data;
+      }
+
+      res.status(201).json({
+        message: 'Interview slot booked successfully',
+        interview: upsertedInterview
+      });
+    } catch (error: any) {
+      console.error('Error in bookStudentInterview:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+router.patch(
+  '/student/final-exams/:examId/interviews/:interviewId/reschedule',
+  requireAuth,
+  async (req: any, res) => {
+    try {
+      const { examId, interviewId } = req.params;
+      const { scheduled_date, duration_minutes, meeting_link, slot_id } = req.body || {};
+      const userId = req.auth?.userId;
+
+      const studentProfileId = await getStudentProfileId(userId);
+
+      if (!studentProfileId) {
+        return res.status(404).json({ error: 'Student profile not found' });
+      }
+
+      if (!scheduled_date) {
+        return res.status(400).json({ error: 'scheduled_date is required to reschedule interview' });
+      }
+
+      const parsedScheduledDate = new Date(scheduled_date);
+      if (isNaN(parsedScheduledDate.getTime())) {
+        return res.status(400).json({ error: 'Invalid scheduled_date format' });
+      }
+
+      const supportsResources = await supportsFinalExamResourcesColumn();
+      const finalExamSelect = supportsResources
+        ? 'id, course_id, exam_type, resources, duration_minutes'
+        : 'id, course_id, exam_type, instructions, duration_minutes';
+
+      const { data: finalExam } = await supabase
+        .from('final_exams')
+        .select(finalExamSelect)
+        .eq('id', examId)
+        .single();
+
+      if (!finalExam) {
+        return res.status(404).json({ error: 'Final exam not found' });
+      }
+
+      if (finalExam.exam_type !== 'interview') {
+        return res.status(400).json({ error: 'This final exam does not support interviews' });
+      }
+
+      const interviewResources = supportsResources
+        ? (parseResources((finalExam as any).resources) || {})
+        : (splitEmbeddedResources((finalExam as any).instructions).resources || {});
+      const interviewSettings = interviewResources?.interview_config || interviewResources?.interviewSettings || {};
+      const allowRescheduling = interviewSettings.allowRescheduling !== false && interviewSettings.allow_rescheduling !== false;
+      const rescheduleDeadline = interviewSettings.rescheduleDeadline || interviewSettings.reschedule_deadline || null;
+
+      if (!allowRescheduling) {
+        return res.status(403).json({ error: 'Rescheduling is disabled for this interview' });
+      }
+
+      if (rescheduleDeadline) {
+        const parsedDeadline = new Date(rescheduleDeadline);
+        if (!isNaN(parsedDeadline.getTime()) && parsedDeadline < new Date()) {
+          return res.status(403).json({ error: 'Reschedule deadline has passed' });
+        }
+      }
+
+      const { data: enrollment } = await supabase
+        .from('enrollments')
+        .select('id')
+        .eq('course_id', finalExam.course_id)
+        .in('student_id', [studentProfileId, userId].filter(Boolean))
+        .maybeSingle();
+
+      if (!enrollment) {
+        return res.status(403).json({ error: 'You are not enrolled in this course' });
+      }
+
+      const { data: existingInterview } = await supabase
+        .from('final_exam_interviews')
+        .select('id, status, notes')
+        .eq('id', interviewId)
+        .eq('final_exam_id', examId)
+        .eq('student_id', studentProfileId)
+        .maybeSingle();
+
+      if (!existingInterview) {
+        return res.status(404).json({ error: 'Interview not found for this student' });
+      }
+
+      if (existingInterview.status === 'completed') {
+        return res.status(400).json({ error: 'Completed interviews cannot be rescheduled' });
+      }
+
+      const activeStatuses = ['scheduled', 'confirmed', 'rescheduled', 'in-progress'];
+      const { data: conflictingInterview } = await supabase
+        .from('final_exam_interviews')
+        .select('id')
+        .eq('final_exam_id', examId)
+        .eq('scheduled_date', parsedScheduledDate.toISOString())
+        .in('status', activeStatuses)
+        .neq('id', interviewId)
+        .maybeSingle();
+
+      if (conflictingInterview) {
+        return res.status(409).json({ error: 'Selected slot is no longer available' });
+      }
+
+      const notePayload = {
+        ...(parseResources(existingInterview.notes) || {}),
+        rescheduled_by_student: true,
+        rescheduled_at: new Date().toISOString(),
+        slot_id: slot_id || null,
+        updated_at: new Date().toISOString()
+      };
+
+      const normalizedDuration = Number(duration_minutes || finalExam.duration_minutes || interviewSettings.slot_duration_minutes || 15);
+      if (!Number.isFinite(normalizedDuration) || normalizedDuration <= 0) {
+        return res.status(400).json({ error: 'duration_minutes must be greater than 0' });
+      }
+
+      const { data: updatedInterview, error: updateError } = await supabase
+        .from('final_exam_interviews')
+        .update({
+          scheduled_date: parsedScheduledDate.toISOString(),
+          duration_minutes: normalizedDuration,
+          meeting_link: meeting_link || null,
+          status: 'rescheduled',
+          notes: JSON.stringify(notePayload),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', interviewId)
+        .eq('final_exam_id', examId)
+        .eq('student_id', studentProfileId)
+        .select('*')
+        .single();
+
+      if (updateError || !updatedInterview) {
+        console.error('Error rescheduling interview:', updateError);
+        return res.status(500).json({ error: 'Failed to reschedule interview' });
+      }
+
+      res.json({
+        message: 'Interview rescheduled successfully',
+        interview: updatedInterview
+      });
+    } catch (error: any) {
+      console.error('Error in rescheduleStudentInterview:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+router.post(
+  '/student/final-exams/:examId/interviews/:interviewId/confirm',
+  requireAuth,
+  async (req: any, res) => {
+    try {
+      const { examId, interviewId } = req.params;
+      const userId = req.auth?.userId;
+
+      const studentProfileId = await getStudentProfileId(userId);
+
+      if (!studentProfileId) {
+        return res.status(404).json({ error: 'Student profile not found' });
+      }
+
+      const { data: existingInterview } = await supabase
+        .from('final_exam_interviews')
+        .select('id, status, notes')
+        .eq('id', interviewId)
+        .eq('final_exam_id', examId)
+        .eq('student_id', studentProfileId)
+        .maybeSingle();
+
+      if (!existingInterview) {
+        return res.status(404).json({ error: 'Interview not found for this student' });
+      }
+
+      if (existingInterview.status === 'completed') {
+        return res.status(400).json({ error: 'Completed interviews cannot be confirmed again' });
+      }
+
+      const notePayload = {
+        ...(parseResources(existingInterview.notes) || {}),
+        student_confirmed: true,
+        confirmed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const { data: updatedInterview, error: updateError } = await supabase
+        .from('final_exam_interviews')
+        .update({
+          status: 'confirmed',
+          notes: JSON.stringify(notePayload),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', interviewId)
+        .eq('final_exam_id', examId)
+        .eq('student_id', studentProfileId)
+        .select('*')
+        .single();
+
+      if (updateError || !updatedInterview) {
+        console.error('Error confirming interview:', updateError);
+        return res.status(500).json({ error: 'Failed to confirm interview' });
+      }
+
+      res.json({
+        message: 'Interview confirmed successfully',
+        interview: updatedInterview
+      });
+    } catch (error: any) {
+      console.error('Error in confirmStudentInterview:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   }
@@ -1314,9 +1963,14 @@ router.post(
       }
 
       // Validate final exam visibility and enrollment
+      const supportsResources = await supportsFinalExamResourcesColumn();
+      const finalExamSelect = supportsResources
+        ? 'id, course_id, is_published, resources'
+        : 'id, course_id, is_published, instructions';
+
       const { data: finalExam, error: finalExamError } = await supabase
         .from('final_exams')
-        .select('id, course_id, is_published, resources')
+        .select(finalExamSelect)
         .eq('id', examId)
         .single();
 
@@ -1328,7 +1982,10 @@ router.post(
         return res.status(403).json({ error: 'Final exam is not published yet' });
       }
 
-      const publishAtRaw = (finalExam as any)?.resources?.publish_at;
+      const parsedExamResources = supportsResources
+        ? (parseResources((finalExam as any)?.resources) || {})
+        : (splitEmbeddedResources((finalExam as any)?.instructions).resources || {});
+      const publishAtRaw = parsedExamResources?.publish_at;
       if (publishAtRaw) {
         const publishAt = new Date(publishAtRaw);
         if (!isNaN(publishAt.getTime()) && publishAt > new Date()) {
@@ -1340,8 +1997,8 @@ router.post(
         .from('enrollments')
         .select('id')
         .eq('course_id', finalExam.course_id)
-        .eq('student_id', profile.id)
-        .single();
+        .in('student_id', [profile.id, userId].filter(Boolean))
+        .maybeSingle();
 
       if (!enrollment) {
         return res.status(403).json({ error: 'You are not enrolled in this course' });

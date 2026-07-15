@@ -31,7 +31,7 @@ export default async function StudentMeetingsPage() {
     redirect('/sign-in')
   }
 
-  const { getToken } = auth()
+  const { getToken } = await auth()
   const token = await getToken()
   const meetings = await getMeetings(token)
 

@@ -3,6 +3,12 @@
 @tailwind utilities;
 
 :root {
+  /* Font families (loaded via Google Fonts stylesheet link) */
+  --font-sans: 'Nunito', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Amiri', Georgia, 'Times New Roman', serif;
+  --font-fredoka: 'Fredoka', system-ui, sans-serif;
+  --font-cinzel: 'Cinzel', Georgia, serif;
+
   /* Little Muslimah Brand Theme */
   --background: #FDFBF7; /* Warm Parchment */
   --foreground: #1B365D; /* Deep Royal Blue */

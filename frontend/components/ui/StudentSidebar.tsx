@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -21,6 +21,8 @@ import {
 } from 'lucide-react';
 import { useClerk, useUser } from '@clerk/nextjs';
 import { cn } from '@/lib/utils';
+import { BrandLogo } from '@/components/ui/BrandLogo';
+import { useCollapsedState } from '@/contexts/CollapsedStateContext';
 
 const navItems = [
   { label: 'My Garden', href: '/student', icon: LayoutDashboard },
@@ -37,13 +39,13 @@ export const StudentSidebar = () => {
   const pathname = usePathname();
   const { user } = useUser();
   const { signOut } = useClerk();
-  const [collapsed, setCollapsed] = useState(false);
-  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const { collapsed, setCollapsed } = useCollapsedState();
+  const [showProfileMenu, setShowProfileMenu] = React.useState(false);
 
   return (
     <motion.div 
       initial={{ width: 260 }}
-      animate={{ width: collapsed ? 80 : 260 }}
+      animate={{ width: collapsed ? 95 : 260 }}
       className={cn(
         "h-screen sticky top-0 flex flex-col border-r border-[#D1E7DD] z-50",
         "bg-[#F0F7F4] text-[#1e1b4b] relative overflow-visible shadow-xl"
@@ -66,14 +68,7 @@ export const StudentSidebar = () => {
               exit={{ opacity: 0 }}
               className="flex items-center gap-3"
             >
-              {/* Logo Placeholder */}
-              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-[#10B981] font-bold shadow-sm border border-[#D1E7DD]">
-                <BookOpen className="w-6 h-6" />
-              </div>
-              <div className="flex flex-col">
-                <h1 className="font-serif text-lg text-[#1e1b4b] tracking-wide font-bold leading-none">Little Muslimah</h1>
-                <span className="text-[10px] text-[#64748B] uppercase tracking-[0.2em] mt-1">Academy</span>
-              </div>
+              <BrandLogo href="/student" className="text-[#1e1b4b]" />
             </motion.div>
           )}
           {collapsed && (
@@ -81,34 +76,35 @@ export const StudentSidebar = () => {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="relative group"
+              className="flex items-center justify-center"
             >
-              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-[#10B981] font-bold shadow-sm border border-[#D1E7DD]">
-                <BookOpen className="w-6 h-6" />
-              </div>
-              <span className="absolute left-1/2 top-full -translate-x-1/2 mt-2 w-[64px] px-2 py-1.5 rounded-lg text-[10px] leading-tight text-center font-semibold bg-[#1e1b4b] text-white whitespace-normal shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                Little Muslimah Academy
-              </span>
+              <BrandLogo href="/student" compact showText={false} />
             </motion.div>
           )}
         </AnimatePresence>
         
         <button 
           onClick={() => setCollapsed(!collapsed)}
-          className="text-[#94A3B8] hover:text-[#10B981] transition-colors"
+          className="flex-shrink-0 text-[#94A3B8] hover:text-[#10B981] transition-colors"
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {collapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
         </button>
       </div>
 
       {/* Navigation */}
-      <div className="px-3 pt-3 pb-2 flex-1 flex flex-col gap-2 relative z-10 min-h-0 overflow-visible">
+      <div className="px-3 pt-3 pb-2 flex-1 flex flex-col gap-2 relative z-10 min-h-0 overflow-y-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        <style jsx>{`
+          div::-webkit-scrollbar {
+            display: none;
+          }
+        `}</style>
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           return (
-            <Link key={item.href} href={item.href} className="block group relative">
+            <Link key={item.href} href={item.href} className="block group relative z-20 pointer-events-auto">
               <div className={cn(
-                "flex items-center gap-4 transition-all duration-300 px-4 py-3.5 rounded-xl mx-1",
+                "flex items-center gap-4 transition-all duration-300 px-4 py-3.5 rounded-xl mx-1 cursor-pointer",
                 collapsed ? "justify-center" : "",
                 isActive 
                   ? "bg-white text-[#1e1b4b] border border-[#D1E7DD] shadow-sm font-bold" 
@@ -124,9 +120,14 @@ export const StudentSidebar = () => {
                 )}
               </div>
               {collapsed && (
-                <span className="absolute left-full top-1/2 -translate-y-1/2 ml-3 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#1e1b4b] text-white whitespace-nowrap shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                  {item.label}
-                </span>
+                <div className="absolute left-full top-1/2 -translate-y-1/2 ml-3 pointer-events-none z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                  <div className="relative">
+                    <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-t-transparent border-b-transparent border-r-[#1e1b4b]"></div>
+                    <div className="px-3 py-2.5 rounded-lg text-xs font-semibold bg-[#1e1b4b] text-white whitespace-nowrap shadow-lg border border-white/20 backdrop-blur-sm">
+                      {item.label}
+                    </div>
+                  </div>
+                </div>
               )}
             </Link>
           );
@@ -134,9 +135,9 @@ export const StudentSidebar = () => {
 
         {/* Book Session */}
         <div className="px-1 mt-1">
-          <Link href="/student/meetings/select-teacher" className="block group relative">
+          <Link href="/student/meetings/select-teacher" className="block group relative z-20 pointer-events-auto">
             <div className={cn(
-              "flex items-center gap-4 transition-all duration-300 px-4 py-3.5 rounded-xl mx-1",
+              "flex items-center gap-4 transition-all duration-300 px-4 py-3.5 rounded-xl mx-1 cursor-pointer",
               collapsed 
                 ? "justify-center bg-transparent text-[#10B981] hover:bg-[#10B981]/10" 
                 : "bg-gradient-to-r from-[#10B981] to-[#059669] text-white shadow-lg shadow-[#10B981]/10"
@@ -150,9 +151,14 @@ export const StudentSidebar = () => {
               )}
             </div>
             {collapsed && (
-              <span className="absolute left-full top-1/2 -translate-y-1/2 ml-3 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#1e1b4b] text-white whitespace-nowrap shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-                Book Session
-              </span>
+              <div className="absolute left-full top-1/2 -translate-y-1/2 ml-3 pointer-events-none z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                <div className="relative">
+                  <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-t-transparent border-b-transparent border-r-[#1e1b4b]"></div>
+                  <div className="px-3 py-2.5 rounded-lg text-xs font-semibold bg-[#1e1b4b] text-white whitespace-nowrap shadow-lg border border-white/20 backdrop-blur-sm">
+                    Book Session
+                  </div>
+                </div>
+              </div>
             )}
           </Link>
         </div>

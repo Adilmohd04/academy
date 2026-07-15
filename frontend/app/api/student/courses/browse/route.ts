@@ -3,11 +3,16 @@ import { auth } from '@clerk/nextjs/server';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_BACKEND_URL = 'https://academy-backend-git-dev-fixes-adilmohd04s-projects.vercel.app';
+const DEFAULT_LOCAL_BACKEND_URL = 'http://127.0.0.1:5000';
+const DEFAULT_REMOTE_BACKEND_URL = 'https://academy-backend-git-dev-fixes-adilmohd04s-projects.vercel.app';
 
 const resolveBackendUrl = () => {
   const envUrl = process.env.BACKEND_API_URL || process.env.NEXT_PUBLIC_API_URL || '';
-  if (!envUrl) return DEFAULT_BACKEND_URL;
+  if (!envUrl) {
+    return process.env.NODE_ENV === 'development'
+      ? DEFAULT_LOCAL_BACKEND_URL
+      : DEFAULT_REMOTE_BACKEND_URL;
+  }
   return envUrl.replace(/\/$/, '');
 };
 
@@ -57,21 +62,15 @@ const fetchFromBackend = async (
 
 export async function GET(request: NextRequest) {
   try {
-    const { userId, getToken } = await auth();
+    const { userId } = await auth();
     const backendUrl = resolveBackendUrl();
-    const fallbackBackendUrl = resolveFallbackBackendUrl();
     const bypassSecret = getProtectionBypassSecret();
-    const token = await getToken();
 
     const resolvedUserId = userId || request.headers.get('x-clerk-user-id') || '';
-    const resolvedAuthorization = request.headers.get('authorization') || (token ? `Bearer ${token}` : '');
 
     const proxyHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       ...(resolvedUserId ? { 'x-clerk-user-id': resolvedUserId } : {}),
-      ...(resolvedAuthorization
-        ? { Authorization: resolvedAuthorization }
-        : {}),
       ...(bypassSecret
         ? {
             'x-vercel-protection-bypass': bypassSecret,
@@ -80,30 +79,19 @@ export async function GET(request: NextRequest) {
         : {}),
     };
 
-    let { response, text, contentType } = await fetchFromBackend(
-      backendUrl,
-      '/api/student/courses/published',
-      proxyHeaders,
-      bypassSecret
-    );
-
-    const shouldRetryWithFallback =
-      !!fallbackBackendUrl &&
-      fallbackBackendUrl !== backendUrl &&
-      isLikelyVercelProtectionBlock(response.status, contentType, text);
-
-    if (shouldRetryWithFallback) {
-      console.warn('[Proxy] Primary backend blocked by Vercel protection, retrying fallback backend.');
-      const fallbackResult = await fetchFromBackend(
-        fallbackBackendUrl,
-        '/api/student/courses/published',
-        proxyHeaders,
-        bypassSecret
-      );
-      response = fallbackResult.response;
-      text = fallbackResult.text;
-      contentType = fallbackResult.contentType;
+    const targetUrl = new URL(`${backendUrl}/api/student/courses/browse`);
+    if (bypassSecret) {
+      targetUrl.searchParams.set('x-vercel-protection-bypass', bypassSecret);
     }
+
+    const response = await fetch(targetUrl.toString(), {
+      method: 'GET',
+      headers: proxyHeaders,
+      cache: 'no-store',
+    });
+
+    const text = await response.text();
+    const contentType = response.headers.get('content-type') || 'application/json';
 
     return new NextResponse(text, {
       status: response.status,

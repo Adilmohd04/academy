@@ -1,71 +1,30 @@
-/**
- * Custom Error Classes for Production-Grade Error Handling
- * 
- * Provides consistent error types, codes, and HTTP status mapping
- */
-
 export enum ErrorCode {
-  // Authentication errors (401)
-  UNAUTHORIZED = 'UNAUTHORIZED',
-  INVALID_TOKEN = 'INVALID_TOKEN',
-  TOKEN_EXPIRED = 'TOKEN_EXPIRED',
-  
-  // Authorization errors (403)
-  FORBIDDEN = 'FORBIDDEN',
-  INSUFFICIENT_PERMISSIONS = 'INSUFFICIENT_PERMISSIONS',
-  
-  // Resource errors (404)
-  NOT_FOUND = 'NOT_FOUND',
-  USER_NOT_FOUND = 'USER_NOT_FOUND',
-  COURSE_NOT_FOUND = 'COURSE_NOT_FOUND',
-  MEETING_NOT_FOUND = 'MEETING_NOT_FOUND',
-  
-  // Validation errors (400)
-  VALIDATION_ERROR = 'VALIDATION_ERROR',
-  INVALID_INPUT = 'INVALID_INPUT',
-  MISSING_REQUIRED_FIELD = 'MISSING_REQUIRED_FIELD',
-  
-  // Conflict errors (409)
-  CONFLICT = 'CONFLICT',
-  DUPLICATE_ENTRY = 'DUPLICATE_ENTRY',
-  ALREADY_EXISTS = 'ALREADY_EXISTS',
-  SLOT_FULL = 'SLOT_FULL',
-  
-  // Payment errors (402)
-  PAYMENT_REQUIRED = 'PAYMENT_REQUIRED',
-  PAYMENT_FAILED = 'PAYMENT_FAILED',
-  
-  // Rate limiting (429)
-  RATE_LIMITED = 'RATE_LIMITED',
-  
-  // Server errors (500)
   INTERNAL_ERROR = 'INTERNAL_ERROR',
+  VALIDATION_ERROR = 'VALIDATION_ERROR',
+  NOT_FOUND = 'NOT_FOUND',
+  UNAUTHORIZED = 'UNAUTHORIZED',
+  FORBIDDEN = 'FORBIDDEN',
+  CONFLICT = 'CONFLICT',
   DATABASE_ERROR = 'DATABASE_ERROR',
-  EXTERNAL_SERVICE_ERROR = 'EXTERNAL_SERVICE_ERROR',
+  PAYMENT_FAILED = 'PAYMENT_FAILED',
+  RATE_LIMIT = 'RATE_LIMIT',
 }
 
 export class AppError extends Error {
-  public readonly code: ErrorCode;
-  public readonly statusCode: number;
-  public readonly isOperational: boolean;
-  public readonly details?: any;
-  public readonly timestamp: string;
+  public statusCode: number;
+  public isOperational: boolean;
+  public code: ErrorCode;
+  public details?: any;
+  public timestamp: string;
 
-  constructor(
-    message: string,
-    code: ErrorCode = ErrorCode.INTERNAL_ERROR,
-    statusCode: number = 500,
-    details?: any
-  ) {
+  constructor(message: string, code: ErrorCode = ErrorCode.INTERNAL_ERROR, statusCode = 500, details?: any) {
     super(message);
-    this.name = 'AppError';
     this.code = code;
     this.statusCode = statusCode;
     this.isOperational = true;
     this.details = details;
     this.timestamp = new Date().toISOString();
-
-    Error.captureStackTrace(this, this.constructor);
+    Object.setPrototypeOf(this, AppError.prototype);
   }
 
   toJSON() {
@@ -81,81 +40,78 @@ export class AppError extends Error {
   }
 }
 
-// Specific error classes for common scenarios
 export class ValidationError extends AppError {
-  constructor(message: string, details?: any) {
+  constructor(message = 'Validation failed', details?: any) {
     super(message, ErrorCode.VALIDATION_ERROR, 400, details);
     this.name = 'ValidationError';
+    Object.setPrototypeOf(this, ValidationError.prototype);
   }
 }
 
 export class NotFoundError extends AppError {
-  constructor(resource: string, id?: string) {
-    const message = id ? `${resource} with ID '${id}' not found` : `${resource} not found`;
-    super(message, ErrorCode.NOT_FOUND, 404, { resource, id });
+  constructor(resource = 'Resource', id?: string) {
+    const msg = id ? `${resource} with ID '${id}' not found` : `${resource} not found`;
+    const details = id ? { resource, id } : { resource };
+    super(msg, ErrorCode.NOT_FOUND, 404, details);
     this.name = 'NotFoundError';
+    Object.setPrototypeOf(this, NotFoundError.prototype);
   }
 }
 
 export class UnauthorizedError extends AppError {
-  constructor(message: string = 'Authentication required') {
+  constructor(message = 'Authentication required') {
     super(message, ErrorCode.UNAUTHORIZED, 401);
     this.name = 'UnauthorizedError';
+    Object.setPrototypeOf(this, UnauthorizedError.prototype);
   }
 }
 
 export class ForbiddenError extends AppError {
-  constructor(message: string = 'You do not have permission to perform this action') {
+  constructor(message = 'Forbidden') {
     super(message, ErrorCode.FORBIDDEN, 403);
     this.name = 'ForbiddenError';
+    Object.setPrototypeOf(this, ForbiddenError.prototype);
   }
 }
 
 export class ConflictError extends AppError {
-  constructor(message: string, details?: any) {
-    super(message, ErrorCode.CONFLICT, 409, details);
+  constructor(message = 'Resource conflict') {
+    super(message, ErrorCode.CONFLICT, 409);
     this.name = 'ConflictError';
+    Object.setPrototypeOf(this, ConflictError.prototype);
   }
 }
 
 export class DatabaseError extends AppError {
-  constructor(message: string, originalError?: any) {
-    super(
-      message,
-      ErrorCode.DATABASE_ERROR,
-      500,
-      process.env.NODE_ENV === 'development' ? { originalError: originalError?.message } : undefined
-    );
+  constructor(message = 'Database error') {
+    super(message, ErrorCode.DATABASE_ERROR, 500);
     this.name = 'DatabaseError';
+    Object.setPrototypeOf(this, DatabaseError.prototype);
   }
 }
 
 export class PaymentError extends AppError {
-  constructor(message: string, details?: any) {
-    super(message, ErrorCode.PAYMENT_FAILED, 402, details);
+  constructor(message = 'Payment failed') {
+    super(message, ErrorCode.PAYMENT_FAILED, 402);
     this.name = 'PaymentError';
+    Object.setPrototypeOf(this, PaymentError.prototype);
   }
 }
 
 export class RateLimitError extends AppError {
-  constructor(retryAfter: number = 60) {
-    super('Too many requests. Please try again later.', ErrorCode.RATE_LIMITED, 429, { retryAfter });
+  constructor(retryAfter = 60) {
+    super('Too many requests', ErrorCode.RATE_LIMIT, 429, { retryAfter });
     this.name = 'RateLimitError';
+    Object.setPrototypeOf(this, RateLimitError.prototype);
   }
 }
 
-/**
- * Utility to check if error is an operational AppError
- */
-export const isAppError = (error: unknown): error is AppError => {
+export function isAppError(error: unknown): error is AppError {
   return error instanceof AppError;
-};
+}
 
-/**
- * Wrap async route handlers to catch errors
- */
-export const asyncHandler = (fn: Function) => {
+export function asyncHandler(fn: Function) {
   return (req: any, res: any, next: any) => {
     Promise.resolve(fn(req, res, next)).catch(next);
   };
-};
+}

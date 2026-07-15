@@ -18,6 +18,7 @@ interface Config {
   clerkSecretKey: string;
   clerkPublishableKey: string;
   corsOrigin: string;
+  frontendUrl: string;
   rateLimitWindowMs: number;
   rateLimitMaxRequests: number;
 }
@@ -28,6 +29,7 @@ const config: Config = {
   clerkSecretKey: process.env.CLERK_SECRET_KEY || '',
   clerkPublishableKey: process.env.CLERK_PUBLISHABLE_KEY || '',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+  frontendUrl: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || 'http://localhost:3000',
   rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000'),
   rateLimitMaxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '100'),
 };

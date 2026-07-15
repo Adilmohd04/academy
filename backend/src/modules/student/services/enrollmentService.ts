@@ -221,7 +221,7 @@ export async function checkEligibility(studentId: string, courseId: string) {
     // Get course details
     const { data: course, error: courseError } = await supabase
       .from('courses')
-      .select('id, title, max_students, approval_status')
+      .select('id, title, enrollment_limit, approval_status')
       .eq('id', courseId)
       .single();
 
@@ -303,7 +303,8 @@ export async function checkEligibility(studentId: string, courseId: string) {
       .eq('course_id', courseId)
       .eq('status', 'active');
 
-    const hasCapacity = (enrolledCount || 0) < (course.max_students || 30);
+    const enrollmentLimit = Number((course as any).enrollment_limit || 0);
+    const hasCapacity = enrollmentLimit > 0 ? (enrolledCount || 0) < enrollmentLimit : true;
 
     // Determine eligibility
     const eligible = missingPrerequisites.length === 0 && hasCapacity;
@@ -322,7 +323,7 @@ export async function checkEligibility(studentId: string, courseId: string) {
       has_capacity: hasCapacity,
       already_enrolled: false,
       current_enrollment: enrolledCount || 0,
-      max_students: course.max_students || 30
+      max_students: enrollmentLimit
     };
   } catch (error) {
     console.error('Error checking eligibility:', error);

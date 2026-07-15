@@ -5,6 +5,8 @@ import * as courseController from '../modules/admin/controllers/courseController
 import * as teacherController from '../modules/admin/controllers/teacherController';
 import * as courseArchivalController from '../modules/admin/controllers/courseArchivalController';
 import * as teacherPricingService from '../modules/teacher/services/teacherPricingService';
+import { UserService } from '../modules/shared/services/userService';
+import { UserRole } from '../types';
 
 const router = Router();
 
@@ -52,6 +54,49 @@ router.post('/teacher-free', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to update status' });
   }
 });
+
+  // Admin: change user role via clerk_user_id (used by frontend admin UI)
+  router.post('/change-role', async (req: Request, res: Response) => {
+    try {
+      const { clerk_user_id, role } = req.body;
+
+      if (!clerk_user_id || !role) {
+        return res.status(400).json({ success: false, message: 'Missing clerk_user_id or role' });
+      }
+
+      if (!Object.values(UserRole).includes(role)) {
+        return res.status(400).json({ success: false, message: 'Invalid role', validRoles: Object.values(UserRole) });
+      }
+
+      const profile = await UserService.getUserByClerkId(clerk_user_id);
+      if (!profile) return res.status(404).json({ success: false, message: 'User profile not found' });
+
+      await UserService.updateUserRole(profile.id, role);
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error changing role:', error);
+      res.status(500).json({ success: false, message: 'Failed to change role' });
+    }
+  });
+
+  // Admin: delete user by clerk_user_id (used by frontend admin UI)
+  router.delete('/delete-user', async (req: Request, res: Response) => {
+    try {
+      const { clerk_user_id } = req.body;
+      if (!clerk_user_id) return res.status(400).json({ success: false, message: 'Missing clerk_user_id' });
+
+      const profile = await UserService.getUserByClerkId(clerk_user_id);
+      if (!profile) return res.status(404).json({ success: false, message: 'User profile not found' });
+
+      await UserService.deleteUser(profile.id);
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      res.status(500).json({ success: false, message: 'Failed to delete user' });
+    }
+  });
 
 // Course Archival System
 router.post('/courses/:courseId/archive', courseArchivalController.archiveCourse);

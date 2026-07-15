@@ -1457,8 +1457,8 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
     setPublishing(true);
     try {
       const newStatus = course?.is_published ? false : true;
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}/publish`, {
-        method: 'POST',
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/publish`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'x-clerk-user-id': userId || ''

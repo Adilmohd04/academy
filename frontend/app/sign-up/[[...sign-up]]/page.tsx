@@ -92,11 +92,14 @@ export default function SignUpPage() {
             routing="path"
             path="/sign-up"
             signInUrl="/sign-in"
-            fallbackRedirectUrl="/dashboard"
+            forceRedirectUrl="/sync"
+            fallbackRedirectUrl="/sync"
+            afterSignInUrl="/sync"
+            afterSignUpUrl="/sync"
             appearance={{
               elements: {
                 rootBox: 'w-full',
-                card: 'shadow-none bg-transparent p-0 gap-0',
+                card: 'rounded-3xl border border-slate-200/80 bg-white p-5 sm:p-7 shadow-xl m-0',
                 headerTitle: 'hidden',
                 headerSubtitle: 'hidden',
                 header: 'hidden',
@@ -110,6 +113,7 @@ export default function SignUpPage() {
                   'rounded-xl border-gray-200 bg-white focus:border-[#1B365D] focus:ring-2 focus:ring-[#1B365D]/10 text-gray-900 placeholder-gray-400',
                 formButtonPrimary:
                   'rounded-xl font-semibold text-white shadow-lg hover:opacity-90 transition-opacity',
+                formFieldAction: 'text-[#C5A059] hover:text-[#a8882f] font-medium',
                 footerActionLink: 'font-semibold',
                 identityPreviewEditButton: 'text-gray-500',
                 alert: 'rounded-xl text-sm',

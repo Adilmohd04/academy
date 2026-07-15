@@ -24,6 +24,24 @@ interface Week {
   isExpanded: boolean;
 }
 
+// Open Profile Button (navigates to teacher student detail page)
+function OpenProfileButton({ student }: { student: Student | null }) {
+  const router = useRouter();
+  const params = useParams();
+  const courseId = (params as any).courseId as string;
+  if (!student) return null;
+
+  const openProfile = () => {
+    router.push(`/teacher/courses/${courseId}/students/${student.id}`);
+  };
+
+  return (
+    <IslamicButton variant="primary" onClick={openProfile} className="bg-indigo-700">
+      Open Profile
+    </IslamicButton>
+  );
+}
+
 interface Lesson {
   id: string;
   title: string;
@@ -62,6 +80,7 @@ interface Student {
   email: string;
   enrolled_at: string;
   progress: number;
+  profile_image_url?: string;
 }
 
 interface Submission {
@@ -888,57 +907,107 @@ function LessonEditorModal({ lesson, setLesson, onSave, onClose }: any) {
 
 // Students Tab Component
 function StudentsTab({ students, submissions }: any) {
+  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+
   const getStudentProgress = (studentId: string) => {
     const studentSubmissions = submissions.filter((s: Submission) => s.student_id === studentId);
     return studentSubmissions.length > 0 ? Math.round(studentSubmissions.reduce((sum: number, s: Submission) => sum + (s.grade || 0), 0) / studentSubmissions.length) : 0;
   };
 
+  const overallStats = () => {
+    if (!students || students.length === 0) return { avgProgress: 0, total: 0 };
+    const avg = Math.round(students.reduce((sum: number, s: Student) => sum + (s.progress || 0), 0) / students.length);
+    return { avgProgress: avg, total: students.length };
+  };
+
   return (
-    <div className="max-w-6xl">
-      <IslamicCard className="p-6">
-        <h3 className="text-lg font-bold text-emerald-900 mb-4">Enrolled Students</h3>
-        
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-emerald-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-emerald-900">#</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-emerald-900">Name</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-emerald-900">Email</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-emerald-900">Enrolled Date</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-emerald-900">Progress</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold text-emerald-900">Grade</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200">
-              {students.map((student: Student, index: number) => (
-                <tr key={student.id} className="hover:bg-emerald-50/50">
-                  <td className="px-4 py-3 text-sm text-slate-700">{index + 1}</td>
-                  <td className="px-4 py-3 text-sm font-medium text-slate-900">{student.name}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600">{student.email}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600">
-                    {new Date(student.enrolled_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 bg-slate-200 rounded-full h-2">
-                        <div 
-                          className="bg-emerald-600 h-2 rounded-full" 
-                          style={{ width: `${student.progress}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-slate-600">{student.progress}%</span>
+    <div className="max-w-7xl mx-auto">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Sidebar stats */}
+        <div className="lg:col-span-1">
+          <IslamicCard className="p-4 sticky top-6">
+            <h3 className="text-lg font-semibold text-slate-800 mb-3">Students Overview</h3>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-500">Enrolled</p>
+                  <p className="text-2xl font-bold text-slate-900">{overallStats().total}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">Avg Progress</p>
+                  <p className="text-2xl font-bold text-indigo-700">{overallStats().avgProgress}%</p>
+                </div>
+              </div>
+
+              <div className="border-t pt-3">
+                <p className="text-sm font-medium text-slate-700 mb-2">Quick Insights</p>
+                <ul className="text-sm text-slate-600 space-y-2">
+                  <li>Completed lessons: {students.reduce((sum: number, s: Student) => sum + Math.round((s.progress || 0) / 10), 0)}</li>
+                  <li>Pending submissions: {submissions.filter((s: Submission) => s.status === 'pending').length}</li>
+                  <li>Certificate eligible: {students.filter((s: Student) => getStudentProgress(s.id) >= 70).length}</li>
+                </ul>
+              </div>
+            </div>
+          </IslamicCard>
+
+          <IslamicCard className="p-4 mt-4">
+            <h4 className="text-sm font-semibold text-slate-800 mb-2">Filters</h4>
+            <div className="flex flex-col gap-2">
+              <button className="text-left px-3 py-2 rounded-lg hover:bg-slate-50">All Students</button>
+              <button className="text-left px-3 py-2 rounded-lg hover:bg-slate-50">Active</button>
+              <button className="text-left px-3 py-2 rounded-lg hover:bg-slate-50">At-risk</button>
+              <button className="text-left px-3 py-2 rounded-lg hover:bg-slate-50">Certificate Eligible</button>
+            </div>
+          </IslamicCard>
+        </div>
+
+        {/* Students grid */}
+        <div className="lg:col-span-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {students.map((student: Student) => (
+              <div key={student.id} className="bg-white rounded-lg shadow-sm border hover:shadow-md transition cursor-pointer" onClick={() => setSelectedStudent(student)}>
+                <div className="p-4">
+                  <div className="flex items-center gap-3">
+                    <div>
+                      {student.profile_image_url ? (
+                        <img src={student.profile_image_url} alt="" className="w-12 h-12 rounded-full object-cover" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-700 font-semibold text-lg">
+                          {student.name ? student.name.split(' ').map(n => n[0]).slice(0,2).join('') : 'S'}
+                        </div>
+                      )}
                     </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-sm font-semibold">
-                      {getStudentProgress(student.id)}%
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <div className="flex-1">
+                      <p className="font-semibold text-slate-900">{student.name}</p>
+                      <p className="text-sm text-slate-500">{student.email}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-slate-500">Enrolled</p>
+                      <p className="text-sm font-medium text-slate-700">{new Date(student.enrolled_at).toLocaleDateString()}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-slate-600">Progress</p>
+                      <p className="text-sm font-semibold text-slate-800">{student.progress}%</p>
+                    </div>
+                    <div className="w-full h-3 bg-slate-100 rounded-full mt-2 overflow-hidden">
+                      <div className="h-3 bg-indigo-600 rounded-full" style={{ width: `${student.progress}%` }} />
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <div className="text-sm text-slate-600">Grade</div>
+                    <div className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full font-semibold text-sm">{getStudentProgress(student.id)}%</div>
+                  </div>
+                </div>
+                <div className="px-4 py-2 border-t bg-slate-50 rounded-b-lg text-right">
+                  <button className="text-sm text-indigo-700 font-medium" onClick={(e) => { e.stopPropagation(); setSelectedStudent(student); }}>View Details</button>
+                </div>
+              </div>
+            ))}
+          </div>
 
           {students.length === 0 && (
             <div className="text-center py-12 text-slate-500">
@@ -947,7 +1016,46 @@ function StudentsTab({ students, submissions }: any) {
             </div>
           )}
         </div>
-      </IslamicCard>
+      </div>
+
+      {/* Student Detail Modal */}
+      {selectedStudent && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <IslamicCard className="max-w-3xl w-full p-6">
+            <div className="flex items-start gap-4">
+              <div className="w-20 h-20 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-2xl">
+                {selectedStudent.name ? selectedStudent.name.split(' ').map(n => n[0]).slice(0,2).join('') : 'S'}
+              </div>
+              <div className="flex-1">
+                <h3 className="text-xl font-semibold text-slate-900">{selectedStudent.name}</h3>
+                <p className="text-sm text-slate-600">{selectedStudent.email}</p>
+
+                <div className="mt-4 grid grid-cols-2 gap-4">
+                  <div className="p-3 bg-slate-50 rounded">
+                    <p className="text-xs text-slate-500">Progress</p>
+                    <p className="text-lg font-bold text-indigo-700">{selectedStudent.progress}%</p>
+                  </div>
+                  <div className="p-3 bg-slate-50 rounded">
+                    <p className="text-xs text-slate-500">Overall Grade</p>
+                    <p className="text-lg font-bold text-slate-900">{getStudentProgress(selectedStudent.id)}%</p>
+                  </div>
+                </div>
+
+                <div className="mt-4">
+                  <h4 className="text-sm font-semibold text-slate-800">Overview</h4>
+                  <p className="text-sm text-slate-600 mt-2">Completed lessons: {Math.round(selectedStudent.progress / 10)}</p>
+                  <p className="text-sm text-slate-600">Quizzes completed: {submissions.filter((s: Submission) => s.student_id === selectedStudent.id).length}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <IslamicButton variant="secondary" onClick={() => setSelectedStudent(null)}>Close</IslamicButton>
+              <OpenProfileButton student={selectedStudent} />
+            </div>
+          </IslamicCard>
+        </div>
+      )}
     </div>
   );
 }

@@ -11,9 +11,10 @@ import {
 } from 'lucide-react';
 import { IslamicCard } from '@/components/ui/IslamicCards';
 import { IslamicButton } from '@/components/ui/IslamicButtons';
+import { CertificateTemplateDesigner } from '@/features/certificates';
 import { utcToLocal, localToUTC } from '@/lib/dateUtils';
 
-type TabType = 'about' | 'content' | 'finalExams' | 'students' | 'submissions' | 'discussion' | 'announcements' | 'schedule' | 'settings';
+type TabType = 'about' | 'content' | 'finalExams' | 'students' | 'submissions' | 'discussion' | 'announcements' | 'schedule' | 'certificateDesign' | 'settings';
 
 interface Week {
   id: string;
@@ -165,12 +166,13 @@ const LANGUAGES = ['English', 'Tamil', 'Arabic', 'Urdu', 'Hindi', 'Other'];
 export default function CourseBuilderPage() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   const router = useRouter();
   const courseId = params.courseId as string;
   const isAdmin = searchParams.get('from') === 'admin';
+  const initialTab = (searchParams.get('tab') as TabType | null) || 'about';
   
-  const [activeTab, setActiveTab] = useState<TabType>('about');
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [course, setCourse] = useState<Course | null>(null);
   const [weeks, setWeeks] = useState<Week[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -197,20 +199,28 @@ export default function CourseBuilderPage() {
     }
   }, [userId, courseId]);
 
+  useEffect(() => {
+    const nextTab = (searchParams.get('tab') as TabType | null) || 'about';
+    setActiveTab(nextTab);
+  }, [searchParams]);
+
   const fetchAllData = async () => {
     if (isFetching) return; // Prevent multiple simultaneous fetches
     
     setIsFetching(true);
     try {
+      const token = getToken ? await getToken() : null;
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      
       const [courseRes, weeksRes, coursesListRes] = await Promise.all([
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
-          headers: { 'x-clerk-user-id': userId || '' }
+          headers
         }).catch(() => null),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}/weeks`, {
-          headers: { 'x-clerk-user-id': userId || '' }
+          headers
         }).catch(() => null),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses?status=published`, {
-          headers: { 'x-clerk-user-id': userId || '' }
+          headers
         }).catch(() => null)
       ]);
 
@@ -227,11 +237,18 @@ export default function CourseBuilderPage() {
         // Load grading policy from course data
         if (courseObj.grading_weights) {
           const w = courseObj.grading_weights;
+          const hasAnyWeight = Object.values(w || {}).some((value) => value !== null && value !== undefined && value !== '');
+          const toPolicyString = (value: unknown, fallback: number) => {
+            if (value === null || value === undefined || value === '') return String(fallback);
+            const parsed = Number(value);
+            return Number.isNaN(parsed) ? String(fallback) : String(parsed);
+          };
+
           setGradingPolicy({
-            quiz_percentage: String(w.quiz_percentage || 30),
-            activity_percentage: String(w.assignment_percentage || 40),
-            final_exam_percentage: String(w.final_exam_percentage || 30),
-            passing_percentage: String(courseObj.passing_percentage || 70)
+            quiz_percentage: toPolicyString(w.quiz_percentage ?? w.quiz_weight ?? w.quiz, hasAnyWeight ? 0 : 30),
+            activity_percentage: toPolicyString(w.assignment_percentage ?? w.activity_percentage ?? w.activity_weight, hasAnyWeight ? 0 : 40),
+            final_exam_percentage: toPolicyString(w.final_exam_percentage ?? w.final_percentage ?? w.final_exam_weight, hasAnyWeight ? 0 : 30),
+            passing_percentage: toPolicyString(courseObj.passing_percentage, 70)
           });
         }
         console.log('Course loaded:', mappedCourse);
@@ -252,7 +269,7 @@ export default function CourseBuilderPage() {
 
       // Fetch enrolled students
       const studentsRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/students`, {
-        headers: { 'x-clerk-user-id': userId || '' }
+        headers
       }).catch(() => null);
       
       if (studentsRes?.ok) {
@@ -302,16 +319,24 @@ export default function CourseBuilderPage() {
         'grading_weights', 'passing_percentage'
       ];
       
+      const parsePolicyValue = (value: string, fallback: number) => {
+        const trimmed = String(value ?? '').trim();
+        if (trimmed === '') return fallback;
+        const parsed = Number(trimmed);
+        return Number.isNaN(parsed) ? fallback : parsed;
+      };
+
       // Map image_url to course_image_url and inject grading policy
       const preparedCourse = {
         ...course,
         course_image_url: course.image_url || course.course_image_url,
         grading_weights: {
-          quiz_percentage: parseInt(gradingPolicy.quiz_percentage) || 30,
-          assignment_percentage: parseInt(gradingPolicy.activity_percentage) || 40,
-          final_exam_percentage: parseInt(gradingPolicy.final_exam_percentage) || 30
+          quiz_percentage: parsePolicyValue(gradingPolicy.quiz_percentage, 30),
+          assignment_percentage: parsePolicyValue(gradingPolicy.activity_percentage, 40),
+          activity_percentage: parsePolicyValue(gradingPolicy.activity_percentage, 40),
+          final_exam_percentage: parsePolicyValue(gradingPolicy.final_exam_percentage, 30)
         },
-        passing_percentage: parseInt(gradingPolicy.passing_percentage) || 70
+        passing_percentage: parsePolicyValue(gradingPolicy.passing_percentage, 70)
       };
       
       const courseData = Object.keys(preparedCourse)
@@ -380,6 +405,7 @@ export default function CourseBuilderPage() {
     { id: 'discussion' as TabType, label: 'Discussion', icon: MessageSquare },
     { id: 'announcements' as TabType, label: 'Announcements', icon: Bell },
     { id: 'schedule' as TabType, label: 'Schedule Classes', icon: Calendar },
+    { id: 'certificateDesign' as TabType, label: 'Certificate Design', icon: Award },
     { id: 'settings' as TabType, label: 'Settings', icon: SettingsIcon }
   ];
 
@@ -562,6 +588,13 @@ export default function CourseBuilderPage() {
           {activeTab === 'discussion' && <DiscussionTab courseId={courseId} userId={userId} />}
           {activeTab === 'announcements' && <AnnouncementsTab announcements={announcements} setAnnouncements={setAnnouncements} courseId={courseId} userId={userId} />}
           {activeTab === 'schedule' && <ScheduleTab scheduledClasses={scheduledClasses} setScheduledClasses={setScheduledClasses} courseId={courseId} userId={userId} />}
+          {activeTab === 'certificateDesign' && (
+            <CertificateTemplateDesigner
+              mode="teacher"
+              courseId={courseId}
+              userId={userId}
+            />
+          )}
           {activeTab === 'settings' && <SettingsTab course={course} setCourse={setCourse} gradingPolicy={gradingPolicy} setGradingPolicy={setGradingPolicy} setHasUnsavedChanges={setHasUnsavedChanges} userId={userId} courseId={courseId} />}
         </div>
       </div>
@@ -612,6 +645,8 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
   });
 
   const [quizQuestions, setQuizQuestions] = useState<FinalExamQuizQuestion[]>([createDefaultQuizQuestion()]);
+  const [questionPasteInputs, setQuestionPasteInputs] = useState<Record<number, string>>({});
+  const [questionImportFeedback, setQuestionImportFeedback] = useState<Record<number, { type: 'success' | 'error'; message: string }>>({});
 
   const [interviewConfig, setInterviewConfig] = useState({
     timezone: 'Asia/Kolkata',
@@ -855,6 +890,270 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
 
   const removeQuestion = (index: number) => {
     setQuizQuestions((prev) => prev.filter((_, i) => i !== index));
+    setQuestionPasteInputs((prev) => {
+      const next: Record<number, string> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        const idx = Number(key);
+        if (idx < index) {
+          next[idx] = value;
+        } else if (idx > index) {
+          next[idx - 1] = value;
+        }
+      });
+      return next;
+    });
+    setQuestionImportFeedback((prev) => {
+      const next: Record<number, { type: 'success' | 'error'; message: string }> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        const idx = Number(key);
+        if (idx < index) {
+          next[idx] = value;
+        } else if (idx > index) {
+          next[idx - 1] = value;
+        }
+      });
+      return next;
+    });
+  };
+
+  const normalizeCompareText = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const resolveCorrectOptionIndex = (answerToken: string, options: string[]) => {
+    if (!answerToken?.trim()) return -1;
+
+    const normalizedAnswer = answerToken.trim().toLowerCase();
+    const directKeyMatch = normalizedAnswer.match(/^(?:option\s*)?([a-d]|[1-4])(?:\b|[\)\].:\-].*)?$/i);
+    if (directKeyMatch) {
+      const key = directKeyMatch[1];
+      if (/^[a-d]$/i.test(key)) {
+        return key.toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
+      }
+      return Number(key) - 1;
+    }
+
+    const normalizedOptions = options.map((opt) => normalizeCompareText(opt));
+    const cleanAnswer = normalizeCompareText(normalizedAnswer);
+
+    const exactIndex = normalizedOptions.findIndex((opt) => opt && opt === cleanAnswer);
+    if (exactIndex >= 0) return exactIndex;
+
+    const includeIndex = normalizedOptions.findIndex(
+      (opt) => opt && (opt.includes(cleanAnswer) || cleanAnswer.includes(opt))
+    );
+    return includeIndex;
+  };
+
+  const parsePastedQuestionBlock = (raw: string) => {
+    const lines = raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    const optionPattern = /^(?:option\s*)?([A-Da-d]|[1-4])[\)\].:\-\s]+(.+)$/i;
+    const answerPattern = /^(?:answer|correct\s*(?:answer|option)|ans)\s*[:\-]\s*(.+)$/i;
+
+    let question = '';
+    let answerToken = '';
+    const options: string[] = [];
+
+    for (const line of lines) {
+      const answerMatch = line.match(answerPattern);
+      if (answerMatch) {
+        answerToken = answerMatch[1].trim();
+        continue;
+      }
+
+      const optionMatch = line.match(optionPattern);
+      if (optionMatch) {
+        options.push(optionMatch[2].trim());
+        continue;
+      }
+
+      if (!question) {
+        question = line.replace(/^question\s*[:\-]\s*/i, '').trim();
+      } else if (options.length === 0) {
+        question = `${question} ${line}`.trim();
+      }
+    }
+
+    const normalizedOptions = [...options, '', '', '', ''].slice(0, 4);
+
+    const correctOptionIndex = resolveCorrectOptionIndex(answerToken, normalizedOptions);
+
+    return {
+      question,
+      options: normalizedOptions,
+      correctOptionIndex,
+      correctAnswer:
+        correctOptionIndex >= 0 && normalizedOptions[correctOptionIndex]
+          ? normalizedOptions[correctOptionIndex]
+          : ''
+    };
+  };
+
+  // Parse a long pasted document containing many MCQ questions.
+  // Splits on blank lines OR on detection of a new question (line ending with "?"
+  // followed by lines starting with A)/B)/1)/2)). Each block is then run through
+  // parsePastedQuestionBlock.
+  const parseBulkQuestionsText = (raw: string): FinalExamQuizQuestion[] => {
+    if (!raw?.trim()) return [];
+
+    const lines = raw.split(/\r?\n/);
+    const optionPattern = /^\s*(?:option\s*)?([A-Da-d]|[1-4])[\)\].:\-\s]+.+$/i;
+    const answerPattern = /^\s*(?:answer|correct\s*(?:answer|option)|ans)\s*[:\-]\s*.+$/i;
+
+    // Greedy block splitter: a block is a contiguous group of non-empty lines.
+    // After we hit an "Answer:" line or a blank line, the block ends.
+    const blocks: string[][] = [];
+    let current: string[] = [];
+    let sawAnswerInCurrent = false;
+
+    const flush = () => {
+      if (current.length > 0) {
+        blocks.push(current);
+        current = [];
+        sawAnswerInCurrent = false;
+      }
+    };
+
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/\s+$/, '');
+      const trimmed = line.trim();
+
+      if (!trimmed) {
+        flush();
+        continue;
+      }
+
+      // If we already captured an answer for this block, the next non-empty line
+      // starts a new block.
+      if (sawAnswerInCurrent) {
+        flush();
+      }
+
+      current.push(trimmed);
+
+      if (answerPattern.test(trimmed)) {
+        sawAnswerInCurrent = true;
+      }
+    }
+    flush();
+
+    // Filter blocks that look like real MCQs: must contain at least one option line
+    // and at least one non-option line (the question).
+    const parsedQuestions: FinalExamQuizQuestion[] = [];
+    for (const block of blocks) {
+      const hasOption = block.some((l) => optionPattern.test(l));
+      if (!hasOption) continue;
+      const hasNonOption = block.some((l) => !optionPattern.test(l) && !answerPattern.test(l));
+      if (!hasNonOption) continue;
+
+      const parsed = parsePastedQuestionBlock(block.join('\n'));
+      if (!parsed.question) continue;
+      parsedQuestions.push({
+        type: 'mcq',
+        question: parsed.question,
+        options: parsed.options,
+        correctOptionIndex: parsed.correctOptionIndex,
+        correctAnswer: parsed.correctAnswer,
+        marks: 1,
+      });
+    }
+
+    return parsedQuestions;
+  };
+
+  const [bulkImportText, setBulkImportText] = useState('');
+  const [bulkImportFeedback, setBulkImportFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const applyBulkImport = (mode: 'append' | 'replace') => {
+    const parsed = parseBulkQuestionsText(bulkImportText);
+    if (parsed.length === 0) {
+      setBulkImportFeedback({
+        type: 'error',
+        message:
+          'No MCQ blocks detected. Each question needs options like "A) ..." or "1) ..." and ideally an "Answer: X" line.',
+      });
+      return;
+    }
+
+    setQuizQuestions((prev) => {
+      if (mode === 'replace') return parsed;
+      const filtered = prev.filter((q) => q.question?.trim() || (q.options || []).some((o) => o.trim()));
+      return [...filtered, ...parsed];
+    });
+    setBulkImportText('');
+    setBulkImportFeedback({
+      type: 'success',
+      message: `Imported ${parsed.length} question${parsed.length === 1 ? '' : 's'}.`,
+    });
+  };
+
+  const applyPastedQuestion = (index: number) => {
+    const rawText = questionPasteInputs[index]?.trim() || '';
+    if (!rawText) {
+      setQuestionImportFeedback((prev) => ({
+        ...prev,
+        [index]: { type: 'error', message: 'Paste question content first.' }
+      }));
+      return;
+    }
+
+    const parsed = parsePastedQuestionBlock(rawText);
+    const hasQuestion = !!parsed.question;
+    const hasOptions = parsed.options.some((opt) => opt.trim().length > 0);
+
+    if (!hasQuestion && !hasOptions) {
+      setQuestionImportFeedback((prev) => ({
+        ...prev,
+        [index]: {
+          type: 'error',
+          message: 'Could not parse text. Use one question line and option lines (A/B/C/D or 1/2/3/4).'
+        }
+      }));
+      return;
+    }
+
+    setQuizQuestions((prev) =>
+      prev.map((item, i) => {
+        if (i !== index) return item;
+
+        const nextOptions = hasOptions ? parsed.options : item.options;
+        const nextCorrectOptionIndex = parsed.correctOptionIndex >= 0
+          ? parsed.correctOptionIndex
+          : (typeof item.correctOptionIndex === 'number' ? item.correctOptionIndex : -1);
+        const nextCorrectAnswer = nextCorrectOptionIndex >= 0
+          ? (nextOptions[nextCorrectOptionIndex] || '')
+          : '';
+
+        return {
+          ...item,
+          type: 'mcq',
+          question: hasQuestion ? parsed.question : item.question,
+          options: nextOptions,
+          correctOptionIndex: nextCorrectOptionIndex,
+          correctAnswer: nextCorrectAnswer
+        };
+      })
+    );
+
+    setQuestionPasteInputs((prev) => ({ ...prev, [index]: '' }));
+    setQuestionImportFeedback((prev) => ({
+      ...prev,
+      [index]: {
+        type: parsed.correctOptionIndex >= 0
+          ? 'success'
+          : 'error',
+        message: parsed.correctOptionIndex >= 0
+          ? 'Auto-fill complete. Question, options, and correct option were set.'
+          : 'Question/options imported. Set the correct option manually below.'
+      }
+    }));
   };
 
   const autoScheduleInterviews = async () => {
@@ -951,6 +1250,45 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
 
   return (
     <div className="max-w-6xl space-y-6">
+      {/* Prominent status banner — shows current draft/published state for the
+          exam being edited (if any) so teachers know the workflow state at a glance. */}
+      {selectedExamId && (
+        <div
+          className={`rounded-lg border px-5 py-4 flex items-center justify-between ${
+            form.is_published
+              ? 'bg-emerald-50 border-emerald-200'
+              : 'bg-amber-50 border-amber-200'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <span
+              className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
+                form.is_published
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-amber-600 text-white'
+              }`}
+            >
+              {form.is_published ? 'Published' : 'Draft'}
+            </span>
+            <span className={`text-sm ${form.is_published ? 'text-emerald-800' : 'text-amber-800'}`}>
+              {form.is_published
+                ? 'Students can see and submit this exam.'
+                : 'Saved as draft. Students will not see this exam until you publish it.'}
+            </span>
+          </div>
+          {form.is_published && (
+            <button
+              onClick={() =>
+                setForm((prev: any) => ({ ...prev, is_published: false }))
+              }
+              className="text-xs font-semibold text-amber-700 hover:text-amber-900 underline"
+            >
+              Mark as draft
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -1059,89 +1397,84 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
             <h4 className="text-sm font-semibold text-gray-900">Quiz Questions</h4>
           </div>
 
+          {/* Bulk import: paste many MCQs at once */}
+          <div className="mb-5 rounded-lg border border-purple-200 bg-purple-50/40 p-4">
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div>
+                <h5 className="text-sm font-semibold text-purple-900">Bulk import questions</h5>
+                <p className="text-xs text-purple-700 mt-0.5">
+                  Paste an entire document. Separate questions with a blank line or an{' '}
+                  <code className="bg-white px-1 rounded">Answer:</code> line. Each block needs option lines starting with{' '}
+                  <code className="bg-white px-1 rounded">A) B) C) D)</code> or <code className="bg-white px-1 rounded">1) 2) 3) 4)</code>.
+                </p>
+              </div>
+            </div>
+            <textarea
+              value={bulkImportText}
+              onChange={(e) => setBulkImportText(e.target.value)}
+              placeholder={
+                'What is the meaning of Idgham?\nA) Hiding a sound\nB) Merging one letter into another\nC) Changing a letter\nD) Stopping the recitation\nAnswer: B\n\nHow many letters are there in Idgham?\nA) 4\nB) 5\nC) 6\nD) 7\nAnswer: C'
+              }
+              rows={8}
+              className="w-full px-3 py-2 border border-purple-200 rounded text-sm bg-white font-mono"
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <div className="text-[11px] min-h-[18px]">
+                {bulkImportFeedback && (
+                  <span className={bulkImportFeedback.type === 'success' ? 'text-emerald-700' : 'text-rose-700'}>
+                    {bulkImportFeedback.message}
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => applyBulkImport('append')}
+                  disabled={!bulkImportText.trim()}
+                  className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-medium disabled:opacity-50"
+                >
+                  Append to list
+                </button>
+                <button
+                  onClick={() => applyBulkImport('replace')}
+                  disabled={!bulkImportText.trim()}
+                  className="px-3 py-1.5 bg-white border border-purple-300 text-purple-700 hover:bg-purple-50 rounded-lg text-xs font-medium disabled:opacity-50"
+                >
+                  Replace all
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="space-y-4">
             {quizQuestions.map((q, idx) => (
-              <div key={idx} className="border border-gray-200 rounded-lg p-4">
+              <div key={idx} className="border border-gray-200 rounded-xl p-4 bg-gradient-to-b from-gray-50/70 to-white">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs font-semibold text-gray-500">Question {idx + 1}</p>
                   <button onClick={() => removeQuestion(idx)} className="text-xs text-red-600 hover:text-red-700">Remove</button>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
-                  <input
-                    type="text"
-                    value={q.question}
-                    onChange={(e) => updateQuestion(idx, 'question', e.target.value)}
-                    placeholder="Question text"
-                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
-                  />
-                  <select
-                    value={q.type || 'mcq'}
-                    onChange={(e) => {
-                      const newType = e.target.value === 'fill' ? 'fill' : 'mcq';
-                      if (newType === 'fill') {
-                        updateQuestion(idx, 'type', 'fill');
-                        updateQuestion(idx, 'correctOptionIndex', -1);
-                        updateQuestion(idx, 'correctAnswer', '');
-                      } else {
-                        const selectedIndex = typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : -1;
-                        const selectedAnswer = selectedIndex >= 0 ? (q.options?.[selectedIndex] || '') : '';
-                        setQuizQuestions((prev) =>
-                          prev.map((item, i) =>
-                            i !== idx
-                              ? item
-                              : {
-                                  ...item,
-                                  type: 'mcq' as const,
-                                  correctOptionIndex: selectedIndex,
-                                  correctAnswer: selectedAnswer
-                                }
-                          )
-                        );
-                      }
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
-                  >
-                    <option value="mcq">MCQ</option>
-                    <option value="fill">Fill in the blank</option>
-                  </select>
-                </div>
-
-                {(q.type || 'mcq') === 'mcq' ? (
-                  <>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
-                      {q.options.map((opt, oIdx) => (
-                        <input
-                          key={oIdx}
-                          type="text"
-                          value={opt}
-                          onChange={(e) => {
-                            const newOptions = [...q.options];
-                            newOptions[oIdx] = e.target.value;
-                            const selectedIndex = typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : -1;
-                            const selectedAnswer = selectedIndex >= 0 ? (newOptions[selectedIndex] || '') : '';
-
-                            setQuizQuestions((prev) =>
-                              prev.map((item, i) =>
-                                i !== idx
-                                  ? item
-                                  : {
-                                      ...item,
-                                      options: newOptions,
-                                      correctAnswer: selectedAnswer
-                                    }
-                              )
-                            );
-                          }}
-                          placeholder={`Option ${oIdx + 1}`}
-                          className="px-3 py-2 border border-gray-300 rounded text-sm"
-                        />
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      <select
-                        value={typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : -1}
-                        onChange={(e) => {
-                          const selectedIndex = Number(e.target.value);
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Question text *</label>
+                    <textarea
+                      value={q.question}
+                      onChange={(e) => updateQuestion(idx, 'question', e.target.value)}
+                      placeholder="Type one complete question here (or use auto-fill below)."
+                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                      rows={3}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Question type</label>
+                    <select
+                      value={q.type || 'mcq'}
+                      onChange={(e) => {
+                        const newType = e.target.value === 'fill' ? 'fill' : 'mcq';
+                        if (newType === 'fill') {
+                          updateQuestion(idx, 'type', 'fill');
+                          updateQuestion(idx, 'correctOptionIndex', -1);
+                          updateQuestion(idx, 'correctAnswer', '');
+                        } else {
+                          const selectedIndex = typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : -1;
                           const selectedAnswer = selectedIndex >= 0 ? (q.options?.[selectedIndex] || '') : '';
                           setQuizQuestions((prev) =>
                             prev.map((item, i) =>
@@ -1149,35 +1482,135 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
                                 ? item
                                 : {
                                     ...item,
+                                    type: 'mcq' as const,
                                     correctOptionIndex: selectedIndex,
                                     correctAnswer: selectedAnswer
                                   }
                             )
                           );
-                        }}
-                        className="px-3 py-2 border border-gray-300 rounded text-sm"
-                      >
-                        <option value={-1}>Select correct option</option>
-                        {q.options.map((opt, oIdx) => (
-                          <option key={oIdx} value={oIdx}>
-                            {opt?.trim() ? `Option ${oIdx + 1}: ${opt}` : `Option ${oIdx + 1}`}
-                          </option>
-                        ))}
-                      </select>
+                        }
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                    >
+                      <option value="mcq">MCQ</option>
+                      <option value="fill">Fill in the blank</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50/50 p-3">
+                  <label className="block text-xs font-semibold text-blue-800 mb-1">Quick import (paste question + options)</label>
+                  <textarea
+                    value={questionPasteInputs[idx] || ''}
+                    onChange={(e) => setQuestionPasteInputs((prev) => ({ ...prev, [idx]: e.target.value }))}
+                    placeholder={"Example:\nQuestion: What is Tajweed?\nA) Science of Quran recitation\nB) Type of prayer\nC) Arabic alphabet\nD) Translation\nAnswer: A\n\nOr:\n1) ...\n2) ...\n3) ...\n4) ...\nAnswer: 3"}
+                    className="w-full px-3 py-2 border border-blue-200 rounded text-sm bg-white"
+                    rows={6}
+                  />
+                  <p className="text-[11px] text-blue-700 mt-1">Step 1: Paste content. Step 2: Click auto-fill. Step 3: Review and edit fields below if needed.</p>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="text-[11px] text-gray-600 min-h-[18px]">
+                      {questionImportFeedback[idx] && (
+                        <span className={questionImportFeedback[idx].type === 'success' ? 'text-emerald-700' : 'text-rose-700'}>
+                          {questionImportFeedback[idx].message}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => applyPastedQuestion(idx)}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs hover:bg-blue-700"
+                    >
+                      Auto-fill from pasted content
+                    </button>
+                  </div>
+                </div>
+
+                {(q.type || 'mcq') === 'mcq' ? (
+                  <>
+                    <div className="mb-3">
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Options *</label>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
+                      {q.options.map((opt, oIdx) => (
+                        <div key={oIdx} className="border border-gray-200 rounded-lg bg-white p-2">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-[11px] font-semibold text-gray-500">Option {oIdx + 1}</span>
+                            <label className="inline-flex items-center gap-1 text-[11px] text-gray-700 cursor-pointer">
+                              <input
+                                type="radio"
+                                name={`correct-option-${idx}`}
+                                checked={(typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : -1) === oIdx}
+                                onChange={() => {
+                                  const selectedAnswer = q.options?.[oIdx] || '';
+                                  setQuizQuestions((prev) =>
+                                    prev.map((item, i) =>
+                                      i !== idx
+                                        ? item
+                                        : {
+                                            ...item,
+                                            correctOptionIndex: oIdx,
+                                            correctAnswer: selectedAnswer
+                                          }
+                                    )
+                                  );
+                                }}
+                              />
+                              Correct
+                            </label>
+                          </div>
+                          <input
+                            type="text"
+                            value={opt}
+                            onChange={(e) => {
+                              const newOptions = [...q.options];
+                              newOptions[oIdx] = e.target.value;
+                              const selectedIndex = typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : -1;
+                              const selectedAnswer = selectedIndex >= 0 ? (newOptions[selectedIndex] || '') : '';
+
+                              setQuizQuestions((prev) =>
+                                prev.map((item, i) =>
+                                  i !== idx
+                                    ? item
+                                    : {
+                                        ...item,
+                                        options: newOptions,
+                                        correctAnswer: selectedAnswer
+                                      }
+                                )
+                              );
+                            }}
+                            placeholder={`Option ${oIdx + 1}`}
+                            className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Correct option *</label>
+                        <div className="px-3 py-2 border border-gray-200 rounded text-sm bg-white min-h-[40px] flex items-center">
+                          {(typeof q.correctOptionIndex === 'number' ? q.correctOptionIndex : -1) >= 0
+                            ? `Option ${(q.correctOptionIndex || 0) + 1}: ${q.options?.[q.correctOptionIndex || 0] || ''}`
+                            : 'No correct option selected yet'}
+                        </div>
+                      </div>
                       <div className="px-3 py-2 border border-gray-200 rounded text-xs bg-gray-50 text-gray-600 flex items-center">
-                        Teacher only selects the correct option for MCQ.
+                        Choose the correct option once. Students will only see options, not the correct answer.
                       </div>
                     </div>
                   </>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <input
-                      type="text"
-                      value={q.correctAnswer}
-                      onChange={(e) => updateQuestion(idx, 'correctAnswer', e.target.value)}
-                      placeholder="Correct answer for fill in the blank"
-                      className="px-3 py-2 border border-gray-300 rounded text-sm"
-                    />
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Correct answer *</label>
+                      <input
+                        type="text"
+                        value={q.correctAnswer}
+                        onChange={(e) => updateQuestion(idx, 'correctAnswer', e.target.value)}
+                        placeholder="Expected answer for fill-in-the-blank"
+                        className="px-3 py-2 border border-gray-300 rounded text-sm w-full"
+                      />
+                    </div>
                     <div className="px-3 py-2 border border-gray-200 rounded text-xs bg-gray-50 text-gray-600 flex items-center">
                       Teacher writes the expected answer for fill questions.
                     </div>
@@ -1501,20 +1934,31 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
         </div>
       )}
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3 sticky bottom-0 bg-gradient-to-t from-white to-white/70 backdrop-blur p-4 rounded-lg border border-gray-200">
+        <div className="flex-1 min-w-[200px] text-xs text-gray-600">
+          {form.is_published ? (
+            <span className="font-medium text-emerald-700">
+              ✓ Published — students can see this exam
+            </span>
+          ) : (
+            <span className="font-medium text-amber-700">
+              ✎ Draft — only you can see this exam
+            </span>
+          )}
+        </div>
         <button
           onClick={() => saveExam(false)}
           disabled={saving}
-          className="px-4 py-2.5 bg-gray-900 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+          className="px-4 py-2.5 bg-white border border-gray-300 text-gray-800 hover:bg-gray-50 rounded-lg text-sm font-semibold disabled:opacity-50"
         >
-          {saving ? 'Saving...' : selectedExamId ? 'Update Draft' : 'Save Draft'}
+          {saving ? 'Saving...' : 'Save as Draft'}
         </button>
         <button
           onClick={() => saveExam(true)}
           disabled={saving}
-          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+          className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-semibold shadow-sm disabled:opacity-50"
         >
-          Publish Now
+          {saving ? 'Publishing...' : 'Publish Exam'}
         </button>
       </div>
     </div>
@@ -3153,22 +3597,24 @@ function LessonEditorModal({ lesson, setLesson, onSave, onClose }: any) {
 }
 
 
-// Students Tab Component with Comprehensive Tracking
+// Students Tab Component with Modern List Design
 function StudentsTab({ students, submissions, courseId, userId, weeks }: any) {
   const [searchTerm, setSearchTerm] = useState('');
   const [studentsTracking, setStudentsTracking] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
-  
+  const { getToken } = useAuth();
+
   // Fetch comprehensive tracking data
   useEffect(() => {
     const fetchTracking = async () => {
       try {
+        const token = getToken ? await getToken() : null;
         const res = await fetch(
           `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/students/tracking`,
           {
             headers: {
-              'x-clerk-user-id': userId || ''
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
             }
           }
         );
@@ -3197,20 +3643,20 @@ function StudentsTab({ students, submissions, courseId, userId, weeks }: any) {
   if (loading) {
     return (
       <div className="flex justify-center items-center py-20">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
       </div>
     );
   }
 
   return (
     <div className="max-w-full">
-      <IslamicCard className="p-8 shadow-xl border border-purple-100">
+      <IslamicCard className="p-8 shadow-lg border border-slate-200">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h3 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-              Enrolled Students - Comprehensive Tracking
+            <h3 className="text-xl font-bold text-slate-900">
+              Enrolled Students
             </h3>
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-slate-500 mt-1">
               {studentsTracking.length} student{studentsTracking.length !== 1 ? 's' : ''} enrolled
             </p>
           </div>
@@ -3220,52 +3666,52 @@ function StudentsTab({ students, submissions, courseId, userId, weeks }: any) {
               placeholder="Search students..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 text-sm"
+              className="pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm bg-white"
             />
-            <Users className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+            <Users className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
           </div>
         </div>
         
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gradient-to-r from-indigo-50 to-purple-50">
+            <thead className="bg-gradient-to-r from-indigo-50 to-slate-50">
               <tr>
-                <th className="px-4 py-4 text-left text-xs font-bold text-purple-900">#</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-purple-900">Name</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-purple-900">Email</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-purple-900">Progress</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-purple-900">Quizzes</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-purple-900">Quiz Avg</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-purple-900">Assignments</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-purple-900">Assign Avg</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-purple-900">Attendance</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-purple-900">Overall</th>
-                <th className="px-4 py-4 text-left text-xs font-bold text-purple-900">Certificate</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-indigo-900">#</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-indigo-900">Name</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-indigo-900">Email</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-indigo-900">Progress</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-indigo-900">Quizzes</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-indigo-900">Quiz Avg</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-indigo-900">Assignments</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-indigo-900">Assign Avg</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-indigo-900">Attendance</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-indigo-900">Grade</th>
+                <th className="px-4 py-3 text-left text-xs font-bold text-indigo-900">Certificate</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-purple-100">
+            <tbody className="divide-y divide-slate-200">
               {filteredStudents.map((student: any, index: number) => {
-                const overallColor = student.overall_grade >= 80 ? 'text-green-700 bg-green-100' : 
+                const gradeColor = student.overall_grade >= 80 ? 'text-emerald-700 bg-emerald-100' : 
                                     student.overall_grade >= 60 ? 'text-blue-700 bg-blue-100' : 
-                                    student.overall_grade >= 40 ? 'text-yellow-700 bg-yellow-100' : 
+                                    student.overall_grade >= 40 ? 'text-amber-700 bg-amber-100' : 
                                     'text-red-700 bg-red-100';
                 
                 return (
                   <tr 
                     key={student.student_id} 
-                    className="hover:bg-purple-50/50 transition-colors cursor-pointer"
+                    className="hover:bg-indigo-50/50 transition-colors cursor-pointer"
                     onClick={() => setSelectedStudent(student)}
                   >
                     <td className="px-4 py-3 text-sm text-slate-700 font-medium">{index + 1}</td>
-                    <td className="px-4 py-3 text-sm font-bold text-slate-900">{student.full_name}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-slate-900">{student.full_name}</td>
                     <td className="px-4 py-3 text-sm text-slate-600">{student.email}</td>
                     
                     {/* Overall Progress */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div className="w-16 h-2 bg-slate-200 rounded-full overflow-hidden">
                           <div 
-                            className="h-full bg-gradient-to-r from-indigo-500 to-purple-600 rounded-full"
+                            className="h-full bg-gradient-to-r from-indigo-600 to-indigo-400"
                             style={{ width: `${Math.min(student.overall_progress || 0, 100)}%` }}
                           />
                         </div>
@@ -3278,14 +3724,11 @@ function StudentsTab({ students, submissions, courseId, userId, weeks }: any) {
                       <span className="font-semibold text-slate-900">
                         {student.quizzes_completed || 0}/{student.total_quizzes || 0}
                       </span>
-                      <span className="text-xs text-slate-600 ml-1">
-                        ({Math.round(student.quizzes_percentage || 0)}%)
-                      </span>
                     </td>
                     
                     {/* Quiz Average */}
                     <td className="px-4 py-3">
-                      <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">
+                      <span className="px-3 py-1 bg-cyan-100 text-cyan-700 rounded-full text-xs font-bold">
                         {Math.round(student.average_quiz_score || 0)}%
                       </span>
                     </td>
@@ -3295,14 +3738,11 @@ function StudentsTab({ students, submissions, courseId, userId, weeks }: any) {
                       <span className="font-semibold text-slate-900">
                         {student.assignments_completed || 0}/{student.total_assignments || 0}
                       </span>
-                      <span className="text-xs text-slate-600 ml-1">
-                        ({Math.round(student.assignments_percentage || 0)}%)
-                      </span>
                     </td>
                     
                     {/* Assignment Average */}
                     <td className="px-4 py-3">
-                      <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-bold">
+                      <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-bold">
                         {Math.round(student.average_assignment_grade || 0)}%
                       </span>
                     </td>
@@ -3312,14 +3752,11 @@ function StudentsTab({ students, submissions, courseId, userId, weeks }: any) {
                       <span className="font-semibold text-slate-900">
                         {student.live_classes_attended || 0}/{student.total_live_classes || 0}
                       </span>
-                      <span className="text-xs text-slate-600 ml-1">
-                        ({Math.round(student.attendance_percentage || 0)}%)
-                      </span>
                     </td>
                     
                     {/* Overall Grade */}
                     <td className="px-4 py-3">
-                      <span className={`px-4 py-2 rounded-full text-sm font-bold ${overallColor}`}>
+                      <span className={`px-4 py-1.5 rounded-full text-sm font-bold ${gradeColor}`}>
                         {Math.round(student.overall_grade || 0)}%
                       </span>
                     </td>
@@ -3328,16 +3765,16 @@ function StudentsTab({ students, submissions, courseId, userId, weeks }: any) {
                     <td className="px-4 py-3">
                       {student.certificate_eligible ? (
                         student.certificate_issued ? (
-                          <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold">
+                          <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">
                             ✓ Issued
                           </span>
                         ) : (
-                          <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">
+                          <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-bold">
                             ⚠ Eligible
                           </span>
                         )
                       ) : (
-                        <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-xs">
+                        <span className="px-3 py-1 bg-slate-100 text-slate-600 rounded-full text-xs">
                           Not Yet
                         </span>
                       )}
@@ -3350,7 +3787,7 @@ function StudentsTab({ students, submissions, courseId, userId, weeks }: any) {
 
           {filteredStudents.length === 0 && (
             <div className="text-center py-16 text-slate-500">
-              <Users className="w-16 h-16 mx-auto mb-4 text-purple-300" />
+              <Users className="w-16 h-16 mx-auto mb-4 text-indigo-300" />
               <p className="font-medium">
                 {searchTerm ? 'No students found matching your search' : 'No students enrolled yet'}
               </p>
@@ -3502,7 +3939,7 @@ function StudentDetailModal({ student, courseId, userId, weeks, onClose }: { stu
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-white rounded-xl p-0 max-w-5xl w-full max-h-[90vh] overflow-hidden shadow-2xl" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-8 py-6">
+        <div className="bg-gradient-to-r from-indigo-700 to-indigo-600 text-white px-8 py-6">
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-2xl font-bold">{student.full_name}</h2>
@@ -3515,35 +3952,35 @@ function StudentDetailModal({ student, courseId, userId, weeks, onClose }: { stu
           
           {/* Stats Summary */}
           <div className="grid grid-cols-4 gap-4 mt-6">
-            <div className="bg-white/10 rounded-lg p-3 text-center">
-              <p className="text-xs text-indigo-200">Progress</p>
+            <div className="bg-indigo-500/40 rounded-lg p-3 text-center border border-indigo-400/50">
+              <p className="text-xs text-indigo-100">Progress</p>
               <p className="text-xl font-bold">{Math.round(student.overall_progress || 0)}%</p>
             </div>
-            <div className="bg-white/10 rounded-lg p-3 text-center">
-              <p className="text-xs text-indigo-200">Overall Grade</p>
+            <div className="bg-emerald-500/40 rounded-lg p-3 text-center border border-emerald-400/50">
+              <p className="text-xs text-emerald-100">Overall Grade</p>
               <p className="text-xl font-bold">{Math.round(student.overall_grade || 0)}%</p>
             </div>
-            <div className="bg-white/10 rounded-lg p-3 text-center">
-              <p className="text-xs text-indigo-200">Quiz Avg</p>
+            <div className="bg-cyan-500/40 rounded-lg p-3 text-center border border-cyan-400/50">
+              <p className="text-xs text-cyan-100">Quiz Avg</p>
               <p className="text-xl font-bold">{Math.round(student.average_quiz_score || 0)}%</p>
             </div>
-            <div className="bg-white/10 rounded-lg p-3 text-center">
-              <p className="text-xs text-indigo-200">Assign Avg</p>
+            <div className="bg-orange-500/40 rounded-lg p-3 text-center border border-orange-400/50">
+              <p className="text-xs text-orange-100">Assign Avg</p>
               <p className="text-xl font-bold">{Math.round(student.average_assignment_grade || 0)}%</p>
             </div>
           </div>
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex border-b bg-gray-50 px-8">
+        <div className="flex border-b bg-slate-50 px-8">
           {(['overview', 'assignments', 'quizzes'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveSubTab(tab)}
               className={`px-6 py-3 text-sm font-semibold border-b-2 transition-colors capitalize ${
                 activeSubTab === tab 
-                  ? 'border-purple-600 text-purple-700 bg-white' 
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
+                  ? 'border-indigo-600 text-indigo-700 bg-white' 
+                  : 'border-transparent text-slate-500 hover:text-slate-700'
               }`}
             >
               {tab === 'overview' ? '📊 Overview' : tab === 'assignments' ? `📋 Assignments (${assignmentSubmissions.length})` : `📝 Quizzes (${quizSubmissions.length})`}
@@ -3556,38 +3993,38 @@ function StudentDetailModal({ student, courseId, userId, weeks, onClose }: { stu
           {activeSubTab === 'overview' && (
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-6">
-                <div className="bg-blue-50 p-5 rounded-xl border border-blue-200">
-                  <h3 className="font-bold text-blue-900 mb-2">📝 Quiz Performance</h3>
-                  <p className="text-sm text-blue-700">
+                <div className="bg-cyan-50 p-5 rounded-xl border border-cyan-200">
+                  <h3 className="font-bold text-cyan-900 mb-2">📝 Quiz Performance</h3>
+                  <p className="text-sm text-cyan-700">
                     Completed: <span className="font-bold">{student.quizzes_completed || 0}/{student.total_quizzes || 0}</span>
                   </p>
-                  <p className="text-sm text-blue-700">
+                  <p className="text-sm text-cyan-700">
                     Average Score: <span className="font-bold">{Math.round(student.average_quiz_score || 0)}%</span>
                   </p>
                 </div>
-                <div className="bg-purple-50 p-5 rounded-xl border border-purple-200">
-                  <h3 className="font-bold text-purple-900 mb-2">📋 Assignment Performance</h3>
-                  <p className="text-sm text-purple-700">
+                <div className="bg-orange-50 p-5 rounded-xl border border-orange-200">
+                  <h3 className="font-bold text-orange-900 mb-2">📋 Assignment Performance</h3>
+                  <p className="text-sm text-orange-700">
                     Completed: <span className="font-bold">{student.assignments_completed || 0}/{student.total_assignments || 0}</span>
                   </p>
-                  <p className="text-sm text-purple-700">
+                  <p className="text-sm text-orange-700">
                     Average Grade: <span className="font-bold">{Math.round(student.average_assignment_grade || 0)}%</span>
                   </p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-6">
-                <div className="bg-green-50 p-5 rounded-xl border border-green-200">
-                  <h3 className="font-bold text-green-900 mb-2">📚 Lessons Progress</h3>
-                  <p className="text-sm text-green-700">
+                <div className="bg-indigo-50 p-5 rounded-xl border border-indigo-200">
+                  <h3 className="font-bold text-indigo-900 mb-2">📚 Lessons Progress</h3>
+                  <p className="text-sm text-indigo-700">
                     Completed: <span className="font-bold">{student.lessons_completed || 0}/{student.total_lessons || 0}</span>
                   </p>
-                  <div className="w-full h-3 bg-green-200 rounded-full mt-2">
-                    <div className="h-full bg-green-600 rounded-full transition-all" style={{ width: `${Math.min(student.lessons_percentage || 0, 100)}%` }} />
+                  <div className="w-full h-3 bg-indigo-200 rounded-full mt-2">
+                    <div className="h-full bg-indigo-600 rounded-full transition-all" style={{ width: `${Math.min(student.lessons_percentage || 0, 100)}%` }} />
                   </div>
                 </div>
-                <div className="bg-amber-50 p-5 rounded-xl border border-amber-200">
-                  <h3 className="font-bold text-amber-900 mb-2">🎓 Certificate</h3>
-                  <p className="text-sm text-amber-700">
+                <div className="bg-emerald-50 p-5 rounded-xl border border-emerald-200">
+                  <h3 className="font-bold text-emerald-900 mb-2">🎓 Certificate</h3>
+                  <p className="text-sm text-emerald-700">
                     {student.certificate_eligible 
                       ? student.certificate_issued 
                         ? '✅ Certificate has been issued' 
@@ -5509,15 +5946,22 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
   const [publishing, setPublishing] = useState(false);
   const [completionText, setCompletionText] = useState('');
   const [markingComplete, setMarkingComplete] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const updatePolicy = (field: string, value: string) => {
-    setGradingPolicy((prev: any) => ({ ...prev, [field]: value }));
+    const normalized = value === '' ? '' : String(Math.max(0, Math.min(100, Number(value) || 0)));
+    setGradingPolicy((prev: any) => ({ ...prev, [field]: normalized }));
     setHasUnsavedChanges(true);
   };
 
   const markCourseComplete = async () => {
+    if (!userId) {
+      setStatusMessage({ type: 'error', text: 'Unable to verify completion. Please sign in again and retry.' });
+      return;
+    }
+
     if (completionText.trim().toUpperCase() !== 'COMPLETE') {
-      alert('Please type "COMPLETE" to verify the course is ready');
+      setStatusMessage({ type: 'error', text: 'Please type COMPLETE exactly to verify this course.' });
       return;
     }
 
@@ -5531,36 +5975,69 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
         }
       });
 
-      if (!response.ok) throw new Error('Failed to mark course complete');
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || payload.message || `Request failed (${response.status})`);
+      }
 
       setCourse((prev: any) => ({ ...prev, is_completed: true, completed_at: new Date().toISOString() }));
       setCompletionText('');
-      alert('Course marked as complete! It can now be submitted for approval.');
+      setStatusMessage({
+        type: 'success',
+        text: payload.message || 'Course marked as complete. You can now submit it for admin approval.'
+      });
     } catch (error) {
       console.error('Error marking course complete:', error);
-      alert('Failed to mark course complete');
+      setStatusMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Failed to mark course complete'
+      });
     } finally {
       setMarkingComplete(false);
     }
   };
 
   const togglePublish = async () => {
+    if (!userId) {
+      setStatusMessage({ type: 'error', text: 'Unable to update publish status. Please sign in again.' });
+      return;
+    }
+
     setPublishing(true);
     try {
       const newStatus = course?.is_published ? false : true;
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}/publish`, {
-        method: 'POST',
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/publish`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'x-clerk-user-id': userId || ''
         },
-        body: JSON.stringify({ is_published: newStatus })
+        body: JSON.stringify({
+          is_published: newStatus,
+          status: newStatus ? 'published' : 'draft'
+        })
       });
-      setCourse((prev: any) => ({ ...prev, is_published: newStatus }));
-      alert(newStatus ? 'Course published successfully!' : 'Course unpublished successfully!');
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || payload.message || `Request failed (${response.status})`);
+      }
+
+      setCourse((prev: any) => ({
+        ...prev,
+        is_published: newStatus,
+        status: newStatus ? 'published' : 'draft'
+      }));
+      setStatusMessage({
+        type: 'success',
+        text: newStatus ? 'Course is now published and visible to students.' : 'Course moved to draft mode.'
+      });
     } catch (error) {
       console.error('Error toggling publish:', error);
-      alert('Failed to update publish status');
+      setStatusMessage({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Failed to update publish status'
+      });
     } finally {
       setPublishing(false);
     }
@@ -5573,33 +6050,52 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
 
   return (
     <div className="max-w-5xl space-y-6">
+      {statusMessage && (
+        <IslamicCard
+          className={`p-4 border ${
+            statusMessage.type === 'success'
+              ? 'border-emerald-200 bg-emerald-50'
+              : 'border-rose-200 bg-rose-50'
+          }`}
+        >
+          <p
+            className={`text-sm font-medium ${
+              statusMessage.type === 'success' ? 'text-emerald-800' : 'text-rose-800'
+            }`}
+          >
+            {statusMessage.text}
+          </p>
+        </IslamicCard>
+      )}
+
       {/* Course Completion Verification */}
-      <IslamicCard className="p-8 shadow-xl border border-amber-100 bg-gradient-to-br from-amber-50 to-yellow-50">
-        <h3 className="text-xl font-bold bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent mb-6">Course Completion Verification</h3>
+      <IslamicCard className="p-8 shadow-lg border border-slate-200 bg-white">
+        <h3 className="text-xl font-bold text-slate-900 mb-2">Course Completion Verification</h3>
+        <p className="text-sm text-slate-600 mb-6">Confirm this course is production-ready before submitting for admin approval.</p>
         
         {course?.is_completed ? (
-          <div className="p-6 bg-green-50 rounded-xl border-2 border-green-300">
+          <div className="p-6 bg-emerald-50 rounded-xl border border-emerald-200">
             <div className="flex items-center gap-3 mb-3">
-              <CheckCircle className="w-8 h-8 text-green-600" />
+              <CheckCircle className="w-8 h-8 text-emerald-600" />
               <div>
-                <p className="font-bold text-lg text-green-900">Course Verified as Complete</p>
-                <p className="text-sm text-green-700">
+                <p className="font-bold text-lg text-emerald-900">Course Verified as Complete</p>
+                <p className="text-sm text-emerald-700">
                   Completed on {new Date(course.completed_at).toLocaleDateString()}
                 </p>
               </div>
             </div>
-            <p className="text-sm text-green-700 mt-3">
+            <p className="text-sm text-emerald-700 mt-3">
               Your course has been verified and is ready for admin approval. You can now submit it for review.
             </p>
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="p-6 bg-white rounded-xl border-2 border-amber-200">
-              <h4 className="font-bold text-amber-900 mb-3">Verify Course Completion</h4>
-              <p className="text-sm text-amber-800 mb-4">
+            <div className="p-6 bg-slate-50 rounded-xl border border-slate-200">
+              <h4 className="font-bold text-slate-900 mb-3">Verify Course Completion</h4>
+              <p className="text-sm text-slate-700 mb-4">
                 Before submitting for approval, please verify that:
               </p>
-              <ul className="text-sm text-amber-700 space-y-2 list-disc list-inside mb-4">
+              <ul className="text-sm text-slate-700 space-y-2 list-disc list-inside mb-4">
                 <li>All course weeks and lessons are added</li>
                 <li>All content URLs are working and correct</li>
                 <li>Quizzes and assignments are configured properly</li>
@@ -5608,7 +6104,7 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
               </ul>
               
               <div className="mt-4">
-                <label className="block text-sm font-bold text-amber-900 mb-2">
+                <label className="block text-sm font-bold text-slate-900 mb-2">
                   Type "COMPLETE" to verify
                 </label>
                 <div className="flex gap-3">
@@ -5617,13 +6113,13 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
                     value={completionText}
                     onChange={(e) => setCompletionText(e.target.value)}
                     placeholder="Type COMPLETE"
-                    className="flex-1 px-4 py-3 border-2 border-amber-300 rounded-lg font-medium text-center uppercase"
+                    className="flex-1 px-4 py-3 border-2 border-slate-300 rounded-lg font-medium text-center uppercase"
                     maxLength={8}
                   />
                   <button
                     onClick={markCourseComplete}
                     disabled={markingComplete || completionText.trim().toUpperCase() !== 'COMPLETE'}
-                    className="px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    className="px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                   >
                     {markingComplete ? (
                       <>
@@ -5641,8 +6137,8 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
               </div>
             </div>
             
-            <div className="p-4 bg-amber-100 rounded-lg border border-amber-200">
-              <p className="text-xs text-amber-800">
+            <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <p className="text-xs text-blue-800">
                 <strong>Note:</strong> Once verified, your course will be eligible for admin approval. 
                 Pre-recorded courses with unlock dates will auto-publish when the date is reached.
               </p>
@@ -5652,10 +6148,11 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
       </IslamicCard>
 
       {/* Publish Toggle */}
-      <IslamicCard className="p-8 shadow-xl border border-purple-100">
-        <h3 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-6">Publish Course</h3>
+      <IslamicCard className="p-8 shadow-lg border border-slate-200 bg-white">
+        <h3 className="text-xl font-bold text-slate-900 mb-2">Publish Course</h3>
+        <p className="text-sm text-slate-600 mb-6">Control whether students can see and enroll in this course.</p>
         
-        <div className="flex items-center justify-between p-6 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl border-2 border-purple-200">
+        <div className="flex items-center justify-between p-6 bg-slate-50 rounded-xl border border-slate-200">
           <div>
             <p className="font-bold text-lg text-slate-900 mb-2">
               {course?.is_published ? 'Course is Live' : 'Course is Draft'}
@@ -5668,7 +6165,7 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
             onClick={togglePublish}
             disabled={publishing}
             className={`relative inline-flex h-10 w-20 items-center rounded-full transition-colors ${
-              course?.is_published ? 'bg-gradient-to-r from-green-500 to-emerald-600' : 'bg-slate-300'
+              course?.is_published ? 'bg-emerald-600' : 'bg-slate-300'
             }`}
           >
             <span
@@ -5681,12 +6178,15 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
       </IslamicCard>
 
       {/* Grading Policy */}
-      <IslamicCard className="p-8 shadow-xl border border-purple-100">
-        <h3 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-6">Grading Policy</h3>
+      <IslamicCard className="p-8 shadow-lg border border-slate-200 bg-white">
+        <div className="mb-6">
+          <h3 className="text-xl font-bold text-slate-900">Grading Policy</h3>
+          <p className="text-sm text-slate-600 mt-1">Set how student performance is calculated. The total must be exactly 100%.</p>
+        </div>
         
         <div className="space-y-5">
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-3">
+          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50">
+            <label className="block text-sm font-bold text-slate-700 mb-2">
               Quiz Percentage
             </label>
             <input
@@ -5696,12 +6196,12 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
               value={gradingPolicy.quiz_percentage}
               onChange={(e) => updatePolicy('quiz_percentage', e.target.value)}
               placeholder="e.g., 30"
-              className="w-full px-5 py-3 border-2 border-purple-200 rounded-xl font-bold text-lg"
+              className="w-full px-4 py-3 border border-slate-300 rounded-xl font-semibold text-lg"
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-3">
+          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50">
+            <label className="block text-sm font-bold text-slate-700 mb-2">
               Activity Percentage
             </label>
             <input
@@ -5711,12 +6211,12 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
               value={gradingPolicy.activity_percentage}
               onChange={(e) => updatePolicy('activity_percentage', e.target.value)}
               placeholder="e.g., 10"
-              className="w-full px-5 py-3 border-2 border-purple-200 rounded-xl font-bold text-lg"
+              className="w-full px-4 py-3 border border-slate-300 rounded-xl font-semibold text-lg"
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-3">
+          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50">
+            <label className="block text-sm font-bold text-slate-700 mb-2">
               Final Exam Percentage
             </label>
             <input
@@ -5726,20 +6226,20 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
               value={gradingPolicy.final_exam_percentage}
               onChange={(e) => updatePolicy('final_exam_percentage', e.target.value)}
               placeholder="e.g., 60"
-              className="w-full px-5 py-3 border-2 border-purple-200 rounded-xl font-bold text-lg"
+              className="w-full px-4 py-3 border border-slate-300 rounded-xl font-semibold text-lg"
             />
           </div>
 
-          <div className={`p-5 rounded-xl ${totalPercentage === 100 ? 'bg-green-50 border-2 border-green-300' : 'bg-red-50 border-2 border-red-300'}`}>
-            <p className={`font-bold text-lg ${totalPercentage === 100 ? 'text-green-900' : 'text-red-900'}`}>
+          <div className={`p-5 rounded-xl ${totalPercentage === 100 ? 'bg-emerald-50 border border-emerald-300' : 'bg-rose-50 border border-rose-300'}`}>
+            <p className={`font-bold text-lg ${totalPercentage === 100 ? 'text-emerald-900' : 'text-rose-900'}`}>
               Total: {totalPercentage}%
               {totalPercentage !== 100 && ' (Must equal 100%)'}
               {totalPercentage === 100 && ' ✓'}
             </p>
           </div>
 
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-3">
+          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50">
+            <label className="block text-sm font-bold text-slate-700 mb-2">
               Certificate Passing Criteria (%)
             </label>
             <input
@@ -5749,14 +6249,14 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
               value={gradingPolicy.passing_percentage}
               onChange={(e) => updatePolicy('passing_percentage', e.target.value)}
               placeholder="e.g., 70"
-              className="w-full px-5 py-3 border-2 border-purple-200 rounded-xl font-bold text-lg"
+              className="w-full px-4 py-3 border border-slate-300 rounded-xl font-semibold text-lg"
             />
             <p className="text-xs text-slate-500 mt-2">Students must achieve this overall percentage to earn a certificate</p>
           </div>
 
-          <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-6 rounded-xl border-2 border-purple-200">
-            <h4 className="font-bold text-purple-900 mb-3">Certificate Requirements</h4>
-            <p className="text-sm text-purple-700 font-medium">
+          <div className="bg-slate-900 p-6 rounded-xl border border-slate-800">
+            <h4 className="font-bold text-white mb-2">Certificate Requirements</h4>
+            <p className="text-sm text-slate-200 font-medium">
               Students must achieve a minimum of {gradingPolicy.passing_percentage || 70}% overall grade to receive a certificate.
             </p>
           </div>

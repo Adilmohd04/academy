@@ -27,7 +27,8 @@ export const requireAuth = async (
 
     const e2eBypassEnabled =
       config.nodeEnv === 'development' &&
-      process.env.E2E_AUTH_BYPASS === 'true';
+      process.env.E2E_AUTH_BYPASS === 'true' &&
+      process.env.NODE_ENV !== 'production';
 
     const e2eRole = req.headers['x-e2e-role'] as string;
     const e2eUserId = req.headers['x-e2e-user-id'] as string;

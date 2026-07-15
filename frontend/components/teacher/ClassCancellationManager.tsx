@@ -9,6 +9,13 @@ interface ClassCancellationManagerProps {
   classData: WeekClass;
   courseId: string;
   onCancel: (reason: string, rescheduleDate?: string, rescheduleTime?: string) => Promise<void>;
+  onNotifyStudents?: (payload: {
+    courseId: string;
+    classId: string;
+    reason: string;
+    rescheduleDate?: string;
+    rescheduleTime?: string;
+  }) => Promise<void>;
   onClose: () => void;
 }
 
@@ -16,6 +23,7 @@ export default function ClassCancellationManager({
   classData,
   courseId,
   onCancel,
+  onNotifyStudents,
   onClose
 }: ClassCancellationManagerProps) {
   const [cancellationReason, setCancellationReason] = useState('');
@@ -36,10 +44,14 @@ export default function ClassCancellationManager({
         shouldReschedule ? rescheduleTime : undefined
       );
       
-      // TODO: Send notifications if enabled
-      if (notifyStudents) {
-        // POST /api/courses/:courseId/classes/:classId/cancel/notify
-        console.log('Sending notifications to students...');
+      if (notifyStudents && onNotifyStudents) {
+        await onNotifyStudents({
+          courseId,
+          classId: classData.id,
+          reason: cancellationReason,
+          rescheduleDate: shouldReschedule ? rescheduleDate : undefined,
+          rescheduleTime: shouldReschedule ? rescheduleTime : undefined,
+        });
       }
 
       onClose();
@@ -282,9 +294,7 @@ export function ClassCancellationExample() {
       rescheduleTime
     });
 
-    // TODO: API call
-    // PUT /api/courses/:courseId/classes/:classId/cancel
-    // Body: { reason, rescheduleDate, rescheduleTime }
+    await new Promise((resolve) => setTimeout(resolve, 300));
   };
 
   return (

@@ -10,7 +10,7 @@ export interface Certificate {
   teacher_name: string;
   completion_date: string;
   certificate_url?: string;
-  generated_at: string;
+  issued_at: string;
 }
 
 export const generateCertificate = async (
@@ -94,7 +94,7 @@ export const generateCertificate = async (
       student_name: studentName,
       teacher_name: teacherName,
       completion_date: new Date().toISOString(),
-      generated_at: new Date().toISOString()
+      issued_at: new Date().toISOString()
     })
     .select('*')
     .single();
@@ -113,7 +113,7 @@ export const getStudentCertificates = async (
     .from('certificates')
     .select('*')
     .eq('student_id', studentId)
-    .order('generated_at', { ascending: false });
+    .order('issued_at', { ascending: false });
 
   if (error) {
     throw error;

@@ -31,16 +31,33 @@ export interface CourseApprovalRequest {
  * Submit course for approval (Teacher)
  */
 export const submitForApproval = async (courseId: string, teacherId: string): Promise<CourseApprovalRequest> => {
-  // First verify the teacher owns this course
+  // First verify the course exists.
   const { data: course, error: fetchError } = await supabase
     .from('courses')
     .select('*')
     .eq('id', courseId)
-    .eq('teacher_id', teacherId)
     .single();
 
   if (fetchError || !course) {
-    throw new Error('Course not found or you do not have permission');
+    throw new Error('Course not found');
+  }
+
+  // teacher_id may store either Clerk user id or profile UUID depending on migration era.
+  const ownsByDirectMatch = course.teacher_id === teacherId;
+  let ownsByProfileMatch = false;
+
+  if (!ownsByDirectMatch) {
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('clerk_user_id', teacherId)
+      .maybeSingle();
+
+    ownsByProfileMatch = !!profile?.id && course.teacher_id === profile.id;
+  }
+
+  if (!ownsByDirectMatch && !ownsByProfileMatch) {
+    throw new Error('You do not have permission to submit this course');
   }
 
   if (course.approval_status === 'pending_approval') {
@@ -85,14 +102,23 @@ export const getPendingApprovals = async (): Promise<CourseApprovalRequest[]> =>
 
   if (!data || data.length === 0) return [];
 
-  // Enrich with teacher info from profiles
-  const teacherIds = [...new Set(data.map(c => c.teacher_id).filter(Boolean))];
-  const { data: profiles } = await supabase
+  // Enrich with teacher info from profiles (supports both clerk_user_id and profile.id storage).
+  const teacherIds = [...new Set(data.map(c => c.teacher_id).filter(Boolean))] as string[];
+  const { data: profilesByClerk } = await supabase
     .from('profiles')
-    .select('clerk_user_id, full_name, email')
+    .select('id, clerk_user_id, full_name, email')
     .in('clerk_user_id', teacherIds);
 
-  const profileMap = new Map((profiles || []).map(p => [p.clerk_user_id, p]));
+  const { data: profilesById } = await supabase
+    .from('profiles')
+    .select('id, clerk_user_id, full_name, email')
+    .in('id', teacherIds);
+
+  const profileMap = new Map<string, any>();
+  [...(profilesByClerk || []), ...(profilesById || [])].forEach((p: any) => {
+    if (p.clerk_user_id) profileMap.set(p.clerk_user_id, p);
+    if (p.id) profileMap.set(p.id, p);
+  });
 
   return data.map((course: any) => {
     const teacher = profileMap.get(course.teacher_id);
@@ -106,6 +132,9 @@ export const getPendingApprovals = async (): Promise<CourseApprovalRequest[]> =>
 
 /**
  * Approve a course (Admin)
+ * 
+ * When admin approves a course, it also gets published automatically
+ * so it immediately appears in the student browse page.
  */
 export const approveCourse = async (courseId: string, adminId: string): Promise<CourseApprovalRequest> => {
   const timestamp = new Date().toISOString();
@@ -114,6 +143,9 @@ export const approveCourse = async (courseId: string, adminId: string): Promise<
     .from('courses')
     .update({
       approval_status: 'approved',
+      status: 'published',
+      is_published: true,
+      published_at: timestamp,
       updated_at: timestamp
     })
     .eq('id', courseId)
@@ -221,14 +253,24 @@ export const getAllCoursesAdmin = async (filters?: {
 
   if (!data || data.length === 0) return [];
 
-  // Enrich with teacher info from profiles
+  // Enrich with teacher info from profiles (teacher_id may be clerk_user_id or profile.id)
   const teacherIds = [...new Set(data.map(c => c.teacher_id).filter(Boolean))];
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('clerk_user_id, full_name, email')
-    .in('clerk_user_id', teacherIds);
+  const [profilesByClerkResult, profilesByIdResult] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, clerk_user_id, full_name, email')
+      .in('clerk_user_id', teacherIds),
+    supabase
+      .from('profiles')
+      .select('id, clerk_user_id, full_name, email')
+      .in('id', teacherIds)
+  ]);
 
-  const profileMap = new Map((profiles || []).map(p => [p.clerk_user_id, p]));
+  const profileMap = new Map<string, any>();
+  [...(profilesByClerkResult.data || []), ...(profilesByIdResult.data || [])].forEach((p: any) => {
+    if (p.clerk_user_id) profileMap.set(p.clerk_user_id, p);
+    if (p.id) profileMap.set(p.id, p);
+  });
 
   return data.map((course: any) => {
     const teacher = profileMap.get(course.teacher_id);

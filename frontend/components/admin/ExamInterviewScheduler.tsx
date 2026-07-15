@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Calendar, Clock, Video, Users, Plus, X, CheckCircle,
-  AlertCircle, Edit2, Trash2, UserPlus, Settings, Save
+  Calendar, Clock, Video, Users, Plus, CheckCircle,
+  Edit2, Trash2, Settings, Save
 } from 'lucide-react';
 import {
   FinalExam,
@@ -19,9 +19,9 @@ interface ExamInterviewSchedulerProps {
 }
 
 export default function ExamInterviewScheduler({ exam, courseId }: ExamInterviewSchedulerProps) {
-  const [students, setStudents] = useState<CourseStudent[]>([]);
-  const [categories, setCategories] = useState<StudentExamCategory[]>([]);
-  const [timeSlots, setTimeSlots] = useState<ExamTimeSlot[]>([]);
+  const [students] = useState<CourseStudent[]>([]);
+  const [categories] = useState<StudentExamCategory[]>([]);
+  const [timeSlots] = useState<ExamTimeSlot[]>([]);
   const [showCategoryForm, setShowCategoryForm] = useState(false);
   const [showSlotForm, setShowSlotForm] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -199,7 +199,7 @@ function InterviewSettings({ exam }: { exam: FinalExam }) {
           {editing ? (
             <select
               value={settings.platform}
-              onChange={(e) => setSettings({ ...settings, platform: e.target.value as any })}
+              onChange={(e) => setSettings({ ...settings, platform: e.target.value as typeof settings.platform })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg"
             >
               <option value="google_meet">Google Meet</option>
@@ -467,7 +467,6 @@ function StudentAssignment({
   categories: StudentExamCategory[];
   onAssign: (studentId: string, categoryId: string) => void;
 }) {
-  const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
   const unassignedStudents = students.filter(

@@ -590,23 +590,53 @@ export const generateCertificateHTML = async (
       throw new Error('Certificate not found');
     }
     
-    // Get default template
-    const { data: template, error } = await supabase
+    const { data: courseTemplate, error: courseTemplateError } = await supabase
       .from('certificate_templates')
-      .select('template_html')
-      .eq('is_default', true)
-      .eq('is_active', true)
-      .limit(1)
+      .select('*')
+      .eq('course_id', certDetails.certificate.course_id)
       .maybeSingle();
 
-    if (error) throw error;
+    if (courseTemplateError) throw courseTemplateError;
+
+    let template = courseTemplate;
+
+    const isApprovedTemplate = (candidate: any) => {
+      const status = candidate?.template_data?.approval_status;
+      return !status || status === 'approved';
+    };
+
+    if (template && !isApprovedTemplate(template)) {
+      template = null;
+    }
+
+    if (!template) {
+      const { data: defaultTemplate, error: defaultTemplateError } = await supabase
+        .from('certificate_templates')
+        .select('*')
+        .eq('is_default', true)
+        .maybeSingle();
+
+      if (defaultTemplateError) throw defaultTemplateError;
+      template = isApprovedTemplate(defaultTemplate) ? defaultTemplate : null;
+    }
+
     if (!template) throw new Error('No certificate template found');
-    
-    const templateHtml = template.template_html;
+
+    const templateHtml =
+      template.template_html ||
+      template.template_data?.template_html ||
+      template.template_data?.html ||
+      template.template_data?.content;
+
+    if (!templateHtml) {
+      throw new Error('Certificate template is missing HTML content');
+    }
+
     const cert = certDetails.certificate;
+    const certificateNumber = (cert as any).certificate_number || (cert as any).verification_code || cert.id;
     
     // Replace placeholders
-    const html = templateHtml
+    const html = String(templateHtml)
       .replace('{{STUDENT_NAME}}', certDetails.student_name)
       .replace('{{COURSE_TITLE}}', certDetails.course_title)
       .replace('{{FINAL_GRADE}}', cert.final_grade?.toString() || 'N/A')
@@ -617,6 +647,8 @@ export const generateCertificateHTML = async (
       }))
       .replace('{{QR_CODE_URL}}', cert.qr_code_url || '')
       .replace('{{VERIFICATION_CODE}}', cert.verification_code)
+      .replace('{{CERTIFICATE_NUMBER}}', certificateNumber)
+      .replace('{{CERTIFICATE_ID}}', certificateNumber)
       .replace('{{TEACHER_NAME}}', certDetails.teacher_name);
     
     return html;

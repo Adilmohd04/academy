@@ -14,7 +14,9 @@ interface Course {
   category: string;
   level: string;
   price: number;
-  status: 'draft' | 'pending' | 'approved' | 'rejected';
+  status: string;
+  approval_status?: string;
+  is_published?: boolean;
   teacher_id: string;
   created_at: string;
   profiles?: {
@@ -26,13 +28,22 @@ interface Course {
   };
 }
 
+// Derive display status from the combination of status and approval_status fields
+function getDisplayStatus(course: Course): 'published' | 'pending' | 'approved' | 'rejected' | 'draft' {
+  if (course.is_published || course.status === 'published') return 'published';
+  if (course.approval_status === 'pending_approval') return 'pending';
+  if (course.approval_status === 'rejected') return 'rejected';
+  if (course.approval_status === 'approved') return 'approved';
+  return 'draft';
+}
+
 export default function AdminCoursesPage() {
   const { userId } = useAuth();
   const router = useRouter();
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'published' | 'rejected'>('all');
 
   useEffect(() => {
     if (userId) {
@@ -42,16 +53,17 @@ export default function AdminCoursesPage() {
 
   const fetchCourses = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses`);
-      if (res.ok) {
-        const response = await res.json();
-        console.log('Admin fetched courses:', response);
-        // Handle both array and object responses
-        const coursesData = Array.isArray(response) ? response : (response.data || []);
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000'}/api/admin/courses`, {
+        headers: {
+          ...(userId ? { 'x-clerk-user-id': userId } : {}),
+        },
+      });
+      if (response.ok) {
+        const result = await response.json();
+        const coursesData = Array.isArray(result) ? result : (result.data || []);
         setCourses(coursesData);
-        console.log('Courses loaded:', coursesData.length);
       } else {
-        console.error('Failed to fetch courses:', res.status, res.statusText);
+        console.error('Error fetching courses:', response.statusText);
         setCourses([]);
       }
     } catch (error) {
@@ -66,18 +78,20 @@ export default function AdminCoursesPage() {
     if (!confirm('Approve this course?')) return;
     
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
-        method: 'PUT',
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000'}/api/admin/courses/${courseId}/approve`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          ...(userId ? { 'x-clerk-user-id': userId } : {}),
         },
-        body: JSON.stringify({ status: 'approved' })
       });
 
-      if (res.ok) {
-        alert('Course approved successfully!');
+      if (response.ok) {
+        alert('Course approved and published successfully!');
         fetchCourses();
+      } else {
+        const err = await response.json().catch(() => ({}));
+        alert(err.error || 'Failed to approve course');
       }
     } catch (error) {
       console.error('Error approving course:', error);
@@ -90,18 +104,21 @@ export default function AdminCoursesPage() {
     if (!reason) return;
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
-        method: 'PUT',
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000'}/api/admin/courses/${courseId}/reject`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          ...(userId ? { 'x-clerk-user-id': userId } : {}),
         },
-        body: JSON.stringify({ status: 'rejected', rejection_reason: reason })
+        body: JSON.stringify({ reason }),
       });
 
-      if (res.ok) {
+      if (response.ok) {
         alert('Course rejected');
         fetchCourses();
+      } else {
+        const err = await response.json().catch(() => ({}));
+        alert(err.error || 'Failed to reject course');
       }
     } catch (error) {
       console.error('Error rejecting course:', error);
@@ -113,16 +130,18 @@ export default function AdminCoursesPage() {
     if (!confirm('Are you sure you want to delete this course? This action cannot be undone.')) return;
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000'}/api/admin/courses/${courseId}`, {
         method: 'DELETE',
         headers: {
-          'x-clerk-user-id': userId || ''
-        }
+          ...(userId ? { 'x-clerk-user-id': userId } : {}),
+        },
       });
 
-      if (res.ok) {
+      if (response.ok) {
         alert('Course deleted');
         fetchCourses();
+      } else {
+        alert('Failed to delete course');
       }
     } catch (error) {
       console.error('Error deleting course:', error);
@@ -133,28 +152,33 @@ export default function AdminCoursesPage() {
   const filteredCourses = Array.isArray(courses) ? courses.filter(course => {
     const matchesSearch = course.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          course.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || course.status === statusFilter;
+    const displayStatus = getDisplayStatus(course);
+    const matchesStatus = statusFilter === 'all' || displayStatus === statusFilter;
     return matchesSearch && matchesStatus;
   }) : [];
 
   const statusCounts = {
     all: Array.isArray(courses) ? courses.length : 0,
-    pending: Array.isArray(courses) ? courses.filter(c => c.status === 'pending').length : 0,
-    approved: Array.isArray(courses) ? courses.filter(c => c.status === 'approved').length : 0,
-    rejected: Array.isArray(courses) ? courses.filter(c => c.status === 'rejected').length : 0,
+    pending: Array.isArray(courses) ? courses.filter(c => getDisplayStatus(c) === 'pending').length : 0,
+    approved: Array.isArray(courses) ? courses.filter(c => getDisplayStatus(c) === 'approved').length : 0,
+    published: Array.isArray(courses) ? courses.filter(c => getDisplayStatus(c) === 'published').length : 0,
+    rejected: Array.isArray(courses) ? courses.filter(c => getDisplayStatus(c) === 'rejected').length : 0,
   };
 
   const getStatusBadge = (status: string) => {
+    // Use derived display status for the badge
     const styles = {
       draft: 'bg-gray-100 text-gray-700',
       pending: 'bg-yellow-100 text-yellow-700',
-      approved: 'bg-green-100 text-green-700',
+      approved: 'bg-blue-100 text-blue-700',
+      published: 'bg-green-100 text-green-700',
       rejected: 'bg-red-100 text-red-700',
     };
     const icons = {
       draft: Clock,
       pending: Clock,
       approved: CheckCircle,
+      published: CheckCircle,
       rejected: XCircle,
     };
     const Icon = icons[status as keyof typeof icons] || Clock;
@@ -192,7 +216,7 @@ export default function AdminCoursesPage() {
 
         {/* Status Filter Tabs */}
         <div className="flex gap-2 flex-wrap">
-          {(['all', 'pending', 'approved', 'rejected'] as const).map((status) => (
+          {(['all', 'pending', 'approved', 'published', 'rejected'] as const).map((status) => (
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
@@ -248,7 +272,7 @@ export default function AdminCoursesPage() {
                   </div>
                 )}
                 <div className="absolute top-3 right-3">
-                  {getStatusBadge(course.status)}
+                  {getStatusBadge(getDisplayStatus(course))}
                 </div>
                 {course.price > 0 && (
                   <div className="absolute top-3 left-3 bg-white px-3 py-1 rounded-full shadow-lg">
@@ -289,7 +313,7 @@ export default function AdminCoursesPage() {
 
                 {/* Actions */}
                 <div className="space-y-2">
-                  {course.status === 'pending' && (
+                  {getDisplayStatus(course) === 'pending' && (
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleApprove(course.id)}

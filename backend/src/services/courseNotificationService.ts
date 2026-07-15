@@ -15,6 +15,7 @@
 
 import nodemailer from 'nodemailer';
 import { supabase } from '../config/database';
+import { createNotification } from '../modules/shared/services/notificationService';
 
 // ---------------------------------------------------------------------------
 // Transporter setup — reuse SMTP config from emailNotifications.ts pattern
@@ -41,7 +42,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 // ---------------------------------------------------------------------------
 
 /** Get all enrolled students with email + name for a given course */
-async function getEnrolledStudents(courseId: string): Promise<{ email: string; name: string; clerk_user_id: string }[]> {
+async function getEnrolledStudents(courseId: string): Promise<{ id: string; email: string; name: string; clerk_user_id: string | null }[]> {
   // enrollments.student_id stores profile.id (UUID)
   const { data: enrollments } = await supabase
     .from('enrollments')
@@ -63,6 +64,7 @@ async function getEnrolledStudents(courseId: string): Promise<{ email: string; n
   return profiles
     .filter((p: any) => p.email)
     .map((p: any) => ({
+      id: p.id,
       email: p.email,
       name: p.full_name || 'Student',
       clerk_user_id: p.clerk_user_id,
@@ -94,6 +96,75 @@ async function safeSend(to: string, subject: string, html: string): Promise<void
     console.log(`✅ Email sent to ${to}: "${subject}"`);
   } catch (err) {
     console.error(`⚠️ Failed to send email to ${to}:`, err);
+  }
+}
+
+async function fanOutStudentNotifications(
+  students: { id: string; email: string; name: string }[],
+  notification: {
+    type: 'content' | 'quiz' | 'assignment' | 'grade' | 'live_session' | 'announcement' | 'deadline' | 'reminder';
+    category: 'success' | 'info' | 'warning' | 'error' | 'activity';
+    title: string;
+    message: string;
+    link?: string;
+    related_id?: string;
+    related_type?: string;
+  },
+  emailSubject?: string,
+  emailHtml?: string
+): Promise<void> {
+  await Promise.allSettled(
+    students.map((student) =>
+      createNotification({
+        user_id: student.id,
+        type: notification.type,
+        category: notification.category,
+        title: notification.title,
+        message: notification.message,
+        link: notification.link,
+        related_id: notification.related_id,
+        related_type: notification.related_type,
+      })
+    )
+  );
+
+  if (!emailSubject || !emailHtml) {
+    return;
+  }
+
+  for (let i = 0; i < students.length; i += 10) {
+    const batch = students.slice(i, i + 10);
+    await Promise.allSettled(batch.map((student) => safeSend(student.email, emailSubject, emailHtml)));
+  }
+}
+
+async function notifySingleStudent(
+  student: { id: string; email: string; name: string },
+  notification: {
+    type: 'quiz' | 'assignment' | 'grade' | 'certificate' | 'reminder' | 'system';
+    category: 'success' | 'info' | 'warning' | 'error' | 'activity';
+    title: string;
+    message: string;
+    link?: string;
+    related_id?: string;
+    related_type?: string;
+  },
+  emailSubject?: string,
+  emailHtml?: string
+): Promise<void> {
+  await createNotification({
+    user_id: student.id,
+    type: notification.type,
+    category: notification.category,
+    title: notification.title,
+    message: notification.message,
+    link: notification.link,
+    related_id: notification.related_id,
+    related_type: notification.related_type,
+  });
+
+  if (emailSubject && emailHtml) {
+    await safeSend(student.email, emailSubject, emailHtml);
   }
 }
 
@@ -234,10 +305,20 @@ export async function notifyCourseContentUpdate(
     </div>
   `);
 
-  for (let i = 0; i < students.length; i += 10) {
-    const batch = students.slice(i, i + 10);
-    await Promise.allSettled(batch.map((s) => safeSend(s.email, subject, html)));
-  }
+  await fanOutStudentNotifications(
+    students,
+    {
+      type: 'content',
+      category: 'activity',
+      title: `${typeLabel} added to ${weekTitle}`,
+      message: `${contentTitle} is now available in ${courseTitle}.`,
+      link: `${FRONTEND_URL}/learn/${courseId}`,
+      related_id: courseId,
+      related_type: contentType,
+    },
+    subject,
+    html
+  );
   console.log(`📧 Content update notification sent to ${students.length} enrolled students`);
 }
 
@@ -280,10 +361,20 @@ export async function notifyDeadlineUpdate(
     </div>
   `);
 
-  for (let i = 0; i < students.length; i += 10) {
-    const batch = students.slice(i, i + 10);
-    await Promise.allSettled(batch.map((s) => safeSend(s.email, subject, html)));
-  }
+  await fanOutStudentNotifications(
+    students,
+    {
+      type: 'deadline',
+      category: 'warning',
+      title: isNew ? `Deadline set for ${lessonTitle}` : `Deadline updated for ${lessonTitle}`,
+      message: `Your ${typeLabel.toLowerCase()} ${lessonTitle} is due on ${formattedDeadline} IST.`,
+      link: `${FRONTEND_URL}/learn/${courseId}`,
+      related_id: courseId,
+      related_type: contentType,
+    },
+    subject,
+    html
+  );
   console.log(`📧 Deadline notification sent to ${students.length} enrolled students`);
 }
 
@@ -329,11 +420,301 @@ export async function notifyLiveClassScheduled(
     </div>
   `);
 
-  for (let i = 0; i < students.length; i += 10) {
-    const batch = students.slice(i, i + 10);
-    await Promise.allSettled(batch.map((s) => safeSend(s.email, subject, html)));
-  }
+  await fanOutStudentNotifications(
+    students,
+    {
+      type: 'live_session',
+      category: 'info',
+      title: `Live class scheduled: ${sessionTitle}`,
+      message: `${sessionTitle} is scheduled for ${formattedDate}.`,
+      link: meetLink || `${FRONTEND_URL}/learn/${courseId}`,
+      related_id: courseId,
+      related_type: 'live_session',
+    },
+    subject,
+    html
+  );
   console.log(`📧 Live class notification sent to ${students.length} enrolled students`);
+}
+
+export async function notifyAssignmentPublished(
+  courseId: string,
+  courseTitle: string,
+  assignmentTitle: string,
+  dueDate: string,
+  assignmentId?: string
+): Promise<void> {
+  const students = await getEnrolledStudents(courseId);
+  if (students.length === 0) return;
+
+  const formattedDeadline = new Date(dueDate).toLocaleString('en-IN', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata'
+  });
+
+  const subject = `📋 New Assignment: ${assignmentTitle}`;
+  const html = wrapEmail('New Assignment Available', '📋', `
+    <p>As-salamu alaykum,</p>
+    <p>A new assignment has been added to <strong>${courseTitle}</strong>:</p>
+    <div style="background:#f3f4f6;padding:20px;border-left:4px solid #667eea;margin:20px 0;border-radius:8px;">
+      <h2 style="margin:0 0 8px;color:#667eea;">${assignmentTitle}</h2>
+      <p style="margin:0;color:#6b7280;">Due: <strong>${formattedDeadline} IST</strong></p>
+    </div>
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${FRONTEND_URL}/learn/${courseId}" style="display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:14px 36px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">Open Course</a>
+    </div>
+  `);
+
+  await fanOutStudentNotifications(
+    students,
+    {
+      type: 'assignment',
+      category: 'activity',
+      title: `New assignment in ${courseTitle}`,
+      message: `${assignmentTitle} is now available. Due ${formattedDeadline} IST.`,
+      link: `${FRONTEND_URL}/learn/${courseId}`,
+      related_id: assignmentId || courseId,
+      related_type: 'assignment',
+    },
+    subject,
+    html
+  );
+}
+
+export async function notifyAssignmentGraded(
+  student: { id: string; email: string; name: string },
+  payload: {
+    courseId: string;
+    courseTitle: string;
+    assignmentTitle: string;
+    grade: number;
+    maxGrade?: number | null;
+    feedback?: string | null;
+    submissionId?: string;
+  }
+): Promise<void> {
+  const maxGrade = payload.maxGrade || 100;
+  const percentage = maxGrade > 0 ? Math.round((payload.grade / maxGrade) * 100) : 0;
+  const subject = `📝 Assignment Graded: ${payload.assignmentTitle}`;
+  const html = wrapEmail('Assignment Graded', '📝', `
+    <p>As-salamu alaykum <strong>${student.name}</strong>,</p>
+    <p>Your assignment for <strong>${payload.courseTitle}</strong> has been graded.</p>
+    <div style="background:#f0fdf4;padding:20px;border-left:4px solid #22c55e;margin:20px 0;border-radius:8px;">
+      <h2 style="margin:0 0 8px;color:#15803d;">${payload.assignmentTitle}</h2>
+      <p style="margin:4px 0;color:#166534;">Score: <strong>${payload.grade}/${maxGrade}</strong> (${percentage}%)</p>
+      ${payload.feedback ? `<p style="margin:8px 0 0;color:#166534;">Feedback: ${payload.feedback}</p>` : ''}
+    </div>
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${FRONTEND_URL}/student/assignments" style="display:inline-block;background:linear-gradient(135deg,#16a34a,#0f766e);color:white;padding:14px 36px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">View Results</a>
+    </div>
+  `);
+
+  await notifySingleStudent(student, {
+    type: 'grade',
+    category: percentage >= 70 ? 'success' : 'info',
+    title: `Assignment graded: ${payload.assignmentTitle}`,
+    message: `You scored ${payload.grade}/${maxGrade} (${percentage}%) in ${payload.courseTitle}.`,
+    link: `${FRONTEND_URL}/student/assignments`,
+    related_id: payload.submissionId || payload.courseId,
+    related_type: 'assignment_submission',
+  }, subject, html);
+}
+
+export async function notifyQuizPublished(
+  courseId: string,
+  courseTitle: string,
+  quizTitle: string,
+  weekTitle?: string | null,
+  quizId?: string
+): Promise<void> {
+  const students = await getEnrolledStudents(courseId);
+  if (students.length === 0) return;
+
+  const subject = `📝 New Quiz: ${quizTitle}`;
+  const html = wrapEmail('Quiz Available', '📝', `
+    <p>As-salamu alaykum,</p>
+    <p>A new quiz is now available in <strong>${courseTitle}</strong>.</p>
+    <div style="background:#eff6ff;padding:20px;border-left:4px solid #3b82f6;margin:20px 0;border-radius:8px;">
+      <h2 style="margin:0 0 8px;color:#1d4ed8;">${quizTitle}</h2>
+      ${weekTitle ? `<p style="margin:0;color:#1e40af;">${weekTitle}</p>` : ''}
+    </div>
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${FRONTEND_URL}/learn/${courseId}" style="display:inline-block;background:linear-gradient(135deg,#3b82f6,#1d4ed8);color:white;padding:14px 36px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">Open Course</a>
+    </div>
+  `);
+
+  await fanOutStudentNotifications(
+    students,
+    {
+      type: 'quiz',
+      category: 'activity',
+      title: `New quiz in ${courseTitle}`,
+      message: `${quizTitle} is available${weekTitle ? ` for ${weekTitle}` : ''}.`,
+      link: `${FRONTEND_URL}/learn/${courseId}`,
+      related_id: quizId || courseId,
+      related_type: 'quiz',
+    },
+    subject,
+    html
+  );
+}
+
+export async function notifyQuizResults(
+  student: { id: string; email: string; name: string },
+  payload: {
+    courseId: string;
+    courseTitle: string;
+    quizTitle: string;
+    score: number;
+    totalPoints: number;
+    percentage: number;
+    passed: boolean;
+    attemptId?: string;
+  }
+): Promise<void> {
+  const subject = `${payload.passed ? '🎉' : '📊'} Quiz Results: ${payload.quizTitle}`;
+  const html = wrapEmail('Quiz Results', payload.passed ? '🎉' : '📊', `
+    <p>As-salamu alaykum <strong>${student.name}</strong>,</p>
+    <p>Your quiz attempt for <strong>${payload.courseTitle}</strong> is ready.</p>
+    <div style="background:${payload.passed ? '#f0fdf4' : '#eff6ff'};padding:20px;border-left:4px solid ${payload.passed ? '#22c55e' : '#3b82f6'};margin:20px 0;border-radius:8px;">
+      <h2 style="margin:0 0 8px;color:${payload.passed ? '#15803d' : '#1d4ed8'};">${payload.quizTitle}</h2>
+      <p style="margin:4px 0;color:${payload.passed ? '#166534' : '#1e40af'};">Score: <strong>${payload.score}/${payload.totalPoints}</strong> (${payload.percentage}%)</p>
+      <p style="margin:4px 0;color:${payload.passed ? '#166534' : '#1e40af'};">Result: <strong>${payload.passed ? 'Passed' : 'Keep practicing'}</strong></p>
+    </div>
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${FRONTEND_URL}/student/quizzes" style="display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:14px 36px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">Open Quiz History</a>
+    </div>
+  `);
+
+  await notifySingleStudent(student, {
+    type: 'quiz',
+    category: payload.passed ? 'success' : 'info',
+    title: `${payload.passed ? 'Passed' : 'Quiz results'}: ${payload.quizTitle}`,
+    message: `You scored ${payload.score}/${payload.totalPoints} (${payload.percentage}%) in ${payload.quizTitle}.`,
+    link: `${FRONTEND_URL}/student/quizzes`,
+    related_id: payload.attemptId || payload.courseId,
+    related_type: 'quiz_attempt',
+  }, subject, html);
+}
+
+export async function notifyFinalExamPublished(
+  courseId: string,
+  courseTitle: string,
+  examTitle: string,
+  examType: string,
+  examId?: string
+): Promise<void> {
+  const students = await getEnrolledStudents(courseId);
+  if (students.length === 0) return;
+
+  const subject = `🎓 Final Exam Available: ${examTitle}`;
+  const html = wrapEmail('Final Exam Available', '🎓', `
+    <p>As-salamu alaykum,</p>
+    <p>A final exam has been published for <strong>${courseTitle}</strong>.</p>
+    <div style="background:#fff7ed;padding:20px;border-left:4px solid #f59e0b;margin:20px 0;border-radius:8px;">
+      <h2 style="margin:0 0 8px;color:#b45309;">${examTitle}</h2>
+      <p style="margin:0;color:#92400e;">Type: <strong>${examType}</strong></p>
+    </div>
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${FRONTEND_URL}/student/exams" style="display:inline-block;background:linear-gradient(135deg,#f59e0b,#d97706);color:white;padding:14px 36px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">Open Exam Center</a>
+    </div>
+  `);
+
+  await fanOutStudentNotifications(
+    students,
+    {
+      type: 'assignment',
+      category: 'warning',
+      title: `Final exam available: ${examTitle}`,
+      message: `${examTitle} has been published for ${courseTitle}.`,
+      link: `${FRONTEND_URL}/student/exams`,
+      related_id: examId || courseId,
+      related_type: 'final_exam',
+    },
+    subject,
+    html
+  );
+}
+
+export async function notifyFinalExamResults(
+  student: { id: string; email: string; name: string },
+  payload: {
+    courseId: string;
+    courseTitle: string;
+    examTitle: string;
+    grade: number;
+    maxGrade?: number | null;
+    passed?: boolean;
+    certificateUrl?: string | null;
+    submissionId?: string;
+  }
+): Promise<void> {
+  const maxGrade = payload.maxGrade || 100;
+  const percentage = maxGrade > 0 ? Math.round((payload.grade / maxGrade) * 100) : 0;
+  const passed = payload.passed ?? percentage >= 70;
+  const subject = `${passed ? '🎉' : '📘'} Final Exam Results: ${payload.examTitle}`;
+  const html = wrapEmail('Final Exam Results', passed ? '🎉' : '📘', `
+    <p>As-salamu alaykum <strong>${student.name}</strong>,</p>
+    <p>Your final exam for <strong>${payload.courseTitle}</strong> has been graded.</p>
+    <div style="background:${passed ? '#f0fdf4' : '#eff6ff'};padding:20px;border-left:4px solid ${passed ? '#22c55e' : '#3b82f6'};margin:20px 0;border-radius:8px;">
+      <h2 style="margin:0 0 8px;color:${passed ? '#15803d' : '#1d4ed8'};">${payload.examTitle}</h2>
+      <p style="margin:4px 0;color:${passed ? '#166534' : '#1e40af'};">Score: <strong>${payload.grade}/${maxGrade}</strong> (${percentage}%)</p>
+      <p style="margin:4px 0;color:${passed ? '#166534' : '#1e40af'};">Result: <strong>${passed ? 'Passed' : 'Not passed yet'}</strong></p>
+    </div>
+    ${payload.certificateUrl ? `<div style="text-align:center;margin:20px 0;"><a href="${payload.certificateUrl}" style="display:inline-block;background:linear-gradient(135deg,#10b981,#059669);color:white;padding:14px 36px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">View Certificate</a></div>` : ''}
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${FRONTEND_URL}/student/exams" style="display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:white;padding:14px 36px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">Open Exam Center</a>
+    </div>
+  `);
+
+  await notifySingleStudent(student, {
+    type: 'grade',
+    category: passed ? 'success' : 'info',
+    title: `${passed ? 'Passed' : 'Final exam results'}: ${payload.examTitle}`,
+    message: `You scored ${payload.grade}/${maxGrade} (${percentage}%) in ${payload.examTitle}.`,
+    link: `${FRONTEND_URL}/student/exams`,
+    related_id: payload.submissionId || payload.courseId,
+    related_type: 'final_exam_submission',
+  }, subject, html);
+}
+
+export async function notifyAnnouncementCreated(
+  courseId: string,
+  courseTitle: string,
+  announcementTitle: string,
+  excerpt?: string,
+  announcementId?: string
+): Promise<void> {
+  const students = await getEnrolledStudents(courseId);
+  if (students.length === 0) return;
+
+  const subject = `📣 Announcement: ${announcementTitle}`;
+  const html = wrapEmail('New Announcement', '📣', `
+    <p>As-salamu alaykum,</p>
+    <p>A new announcement was posted in <strong>${courseTitle}</strong>.</p>
+    <div style="background:#f8fafc;padding:20px;border-left:4px solid #0f766e;margin:20px 0;border-radius:8px;">
+      <h2 style="margin:0 0 8px;color:#0f766e;">${announcementTitle}</h2>
+      ${excerpt ? `<p style="margin:0;color:#334155;">${excerpt}</p>` : ''}
+    </div>
+    <div style="text-align:center;margin:30px 0;">
+      <a href="${FRONTEND_URL}/student/announcements" style="display:inline-block;background:linear-gradient(135deg,#0f766e,#0f4c5c);color:white;padding:14px 36px;text-decoration:none;border-radius:8px;font-weight:bold;font-size:16px;">View Announcement</a>
+    </div>
+  `);
+
+  await fanOutStudentNotifications(
+    students,
+    {
+      type: 'announcement',
+      category: 'info',
+      title: announcementTitle,
+      message: excerpt || `New announcement posted in ${courseTitle}.`,
+      link: `${FRONTEND_URL}/student/announcements`,
+      related_id: announcementId || courseId,
+      related_type: 'announcement',
+    },
+    subject,
+    html
+  );
 }
 
 // ---------------------------------------------------------------------------

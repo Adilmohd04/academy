@@ -19,14 +19,22 @@ export default function PaymentPageClient() {
   const { getToken } = useAuth();
   const { user } = useUser();
 
+  const mode = searchParams.get('mode') || 'meeting';
   const meetingRequestId = searchParams.get('meeting_request_id');
+  const courseId = searchParams.get('course_id');
   const amountParam = searchParams.get('amount');
   const amount = amountParam ? parseFloat(amountParam) : 0;
   const topic = searchParams.get('topic') || '';
   const description = searchParams.get('description') || '';
+  const isCoursePayment = mode === 'course';
+
+  const studentName = searchParams.get('student_name') || '';
+  const studentEmail = searchParams.get('student_email') || '';
+  const studentPhone = searchParams.get('student_phone') || '';
+  const studentCity = searchParams.get('student_city') || '';
+  const studentCountry = searchParams.get('student_country') || '';
 
   const [isLoading, setIsLoading] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'card'>('card');
   const [error, setError] = useState('');
 
   const loadRazorpayScript = async (): Promise<boolean> => {
@@ -65,13 +73,15 @@ export default function PaymentPageClient() {
       const token = await getToken();
 
       // Create Razorpay order on backend
-      const orderResponse = await api.payments.createOrder({
-        meeting_request_id: meetingRequestId!,
-        amount: amount,
-      }, token);
+      const orderResponse = isCoursePayment
+        ? await api.student.createPaymentOrder(courseId!, token)
+        : await api.payments.createOrder({
+            meeting_request_id: meetingRequestId!,
+            amount: amount,
+          }, token);
 
       const order = orderResponse.data;
-      const razorpayKey = order?.key_id || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+      const razorpayKey = order?.key_id || order?.key || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
       const normalizedRazorpayKey = String(razorpayKey || '').trim();
 
       if (!normalizedRazorpayKey || normalizedRazorpayKey === 'undefined' || normalizedRazorpayKey === 'null') {
@@ -87,14 +97,14 @@ export default function PaymentPageClient() {
       const options = {
         key: normalizedRazorpayKey,
         amount: order.amount,
-        currency: order.currency,
+        currency: order.currency || 'INR',
         name: 'Islamic Academy',
-        description: 'Meeting Consultation Fee',
-        order_id: order.id,
+        description: isCoursePayment ? 'Course Enrollment Fee' : 'Meeting Consultation Fee',
+        order_id: order.id || order.order_id,
         prefill: {
-          name: user?.fullName || '',
-          email: user?.emailAddresses[0]?.emailAddress || '',
-          contact: '', // Can be added if available
+          name: studentName || user?.fullName || '',
+          email: studentEmail || user?.emailAddresses[0]?.emailAddress || '',
+          contact: studentPhone || '',
         },
         theme: {
           color: '#4F46E5',
@@ -102,16 +112,27 @@ export default function PaymentPageClient() {
         handler: async function (response: any) {
           try {
             const freshToken = await getToken();
-            const verifyResponse = await api.payments.verifyPayment({
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-              meeting_request_id: meetingRequestId!,
-            }, freshToken);
+            const verifyResponse = isCoursePayment
+              ? await api.student.verifyPayment(
+                  response.razorpay_order_id,
+                  response.razorpay_payment_id,
+                  response.razorpay_signature,
+                  freshToken,
+                )
+              : await api.payments.verifyPayment({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                  meeting_request_id: meetingRequestId!,
+                }, freshToken);
 
             if (verifyResponse.data.success) {
               const paymentId = verifyResponse.data.payment?.id || response.razorpay_payment_id;
-              router.push(`/student/payment/success?payment_id=${paymentId}`);
+              if (isCoursePayment && courseId) {
+                router.push(`/student/payment/success?payment_id=${paymentId}&mode=course&course_id=${courseId}`);
+              } else {
+                router.push(`/student/payment/success?payment_id=${paymentId}`);
+              }
             } else {
               setError('Payment verification failed.');
               setIsLoading(false);
@@ -157,7 +178,7 @@ export default function PaymentPageClient() {
           <div className="bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
             <div className="text-center mb-8">
               <h1 className="text-3xl font-bold text-slate-800 mb-2 font-serif">Complete Payment</h1>
-              <p className="text-slate-500">Secure payment for your session</p>
+              <p className="text-slate-500">{isCoursePayment ? 'Secure payment for your course enrollment' : 'Secure payment for your session'}</p>
             </div>
 
             {error && (
@@ -166,12 +187,12 @@ export default function PaymentPageClient() {
               </div>
             )}
 
-            {/* Session Details */}
+            {/* Detail Summary */}
             {(topic || description) && (
               <div className="bg-[#FDFBF7] border border-amber-100 rounded-xl p-5 mb-6">
                 <h3 className="text-sm font-bold text-amber-800 mb-3 flex items-center gap-2">
                   <BookOpen size={18} />
-                  Session Details
+                  {isCoursePayment ? 'Course Details' : 'Session Details'}
                 </h3>
                 {topic && (
                   <div className="mb-2">
@@ -188,9 +209,21 @@ export default function PaymentPageClient() {
               </div>
             )}
 
+            {isCoursePayment && (studentName || studentEmail || studentPhone) && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 mb-6">
+                <h3 className="text-sm font-bold text-emerald-800 mb-3">Enrollment Details</h3>
+                <div className="text-sm text-emerald-900 space-y-1.5">
+                  {studentName && <p><span className="text-emerald-700">Name:</span> {studentName}</p>}
+                  {studentEmail && <p><span className="text-emerald-700">Email:</span> {studentEmail}</p>}
+                  {studentPhone && <p><span className="text-emerald-700">Phone:</span> {studentPhone}</p>}
+                  {(studentCity || studentCountry) && <p><span className="text-emerald-700">Location:</span> {[studentCity, studentCountry].filter(Boolean).join(', ')}</p>}
+                </div>
+              </div>
+            )}
+
             <div className="bg-stone-50 rounded-xl p-6 mb-8 border border-stone-200">
               <div className="flex justify-between items-center mb-4">
-                <span className="text-slate-600">Session Fee</span>
+                <span className="text-slate-600">{isCoursePayment ? 'Course Fee' : 'Session Fee'}</span>
                 <span className="text-xl font-bold text-slate-800">
                   {amount === 0 ? 'Free' : `₹${amount}`}
                 </span>
@@ -215,7 +248,7 @@ export default function PaymentPageClient() {
               disabled={isLoading}
               className="w-full px-6 py-4 bg-amber-700 text-white rounded-xl font-semibold hover:bg-amber-800 transition-all shadow-lg shadow-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLoading ? 'Processing...' : amount === 0 ? 'Confirm Booking' : `Pay ₹${amount}`}
+              {isLoading ? 'Processing...' : amount === 0 ? 'Confirm Enrollment' : `Pay ₹${amount}`}
             </button>
 
             <div className="mt-6 flex items-center justify-center gap-2 text-slate-400 text-sm">

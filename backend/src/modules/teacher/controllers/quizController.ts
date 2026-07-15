@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabase } from '../../../config/database';
+import * as courseNotifications from '../../../services/courseNotificationService';
 
 /**
  * Teacher Quiz Management Controller
@@ -144,6 +145,30 @@ export const createQuiz = async (req: any, res: Response) => {
       }
     }
 
+    if (quiz.is_published) {
+      try {
+        const { data: course } = await supabase
+          .from('courses')
+          .select('title')
+          .eq('id', courseId)
+          .single();
+
+        const { data: week } = week_id
+          ? await supabase.from('course_weeks').select('title').eq('id', week_id).single()
+          : { data: null };
+
+        await courseNotifications.notifyQuizPublished(
+          courseId,
+          course?.title || 'Course',
+          title,
+          week?.title || null,
+          quiz.id
+        );
+      } catch (notifError) {
+        console.error('⚠️ Failed to send quiz notification:', notifError);
+      }
+    }
+
     res.status(201).json({ 
       message: 'Quiz created successfully',
       quiz 
@@ -212,6 +237,30 @@ export const updateQuiz = async (req: any, res: Response) => {
     if (updateError) {
       console.error('Error updating quiz:', updateError);
       return res.status(500).json({ error: 'Failed to update quiz' });
+    }
+
+    if (is_published) {
+      try {
+        const { data: course } = await supabase
+          .from('courses')
+          .select('title')
+          .eq('id', courseId)
+          .single();
+
+        const { data: week } = week_id
+          ? await supabase.from('course_weeks').select('title').eq('id', week_id).single()
+          : { data: null };
+
+        await courseNotifications.notifyQuizPublished(
+          courseId,
+          course?.title || 'Course',
+          title,
+          week?.title || null,
+          quizId
+        );
+      } catch (notifError) {
+        console.error('⚠️ Failed to send quiz update notification:', notifError);
+      }
     }
 
     // Update questions if provided

@@ -1,19 +1,8 @@
 import type { Metadata } from "next";
-import { Nunito, Amiri } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
-import { Providers } from "./providers";
+import "./admin/admin-premium.css";
 import { Toaster } from "react-hot-toast";
-
-const sans = Nunito({ 
-  subsets: ["latin"],
-  variable: '--font-sans',
-});
-
-const serif = Amiri({ 
-  weight: ['400', '700'],
-  subsets: ["arabic", "latin"],
-  variable: '--font-serif',
-});
 
 export const metadata: Metadata = {
   title: "Academy",
@@ -26,10 +15,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <head />
-      <body className={`${sans.variable} ${serif.variable} font-sans`}>
-        <Providers>
+    <ClerkProvider>
+      <html lang="en">
+        <head>
+          <link
+            href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,200..1000;1,200..1000&family=Amiri:wght@400;700&family=Fredoka:wght@300..700&family=Cinzel:wght@400..900&display=swap"
+            rel="stylesheet"
+          />
+          <script defer src="https://code.iconify.design/iconify-icon/1.0.7/iconify-icon.min.js"></script>
+        </head>
+        <body className="font-sans">
           {children}
           <Toaster 
             position="bottom-right" 
@@ -41,8 +36,8 @@ export default function RootLayout({
               },
             }} 
           />
-        </Providers>
-      </body>
-    </html>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

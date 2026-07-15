@@ -9,6 +9,14 @@ import * as courseService from '../services/courseService';
 import { supabase } from '../../../config/database';
 import { courseCache, cacheKeys, invalidateCache } from '../../../lib/cache';
 
+const isOwnedByTeacher = (
+  teacherId: string | null | undefined,
+  profileId: string | null | undefined,
+  clerkUserId: string | null | undefined
+): boolean => {
+  return !!teacherId && (teacherId === profileId || teacherId === clerkUserId);
+};
+
 /**
  * Create a new course (Teacher only)
  * POST /api/courses
@@ -256,11 +264,12 @@ export const updateCourse = async (
       courseTeacherId: course.teacher_id,
       profileId: profile.id,
       clerkUserId: userId,
-      match: course.teacher_id === profile.id
+      matchProfileId: course.teacher_id === profile.id,
+      matchClerkUserId: course.teacher_id === userId
     });
 
-    // Check if course belongs to this teacher (compare with profile ID)
-    if (course.teacher_id !== profile.id) {
+    // course.teacher_id can be either profile UUID or clerk user ID
+    if (!isOwnedByTeacher(course.teacher_id, profile.id, userId)) {
       res.status(403).json({ 
         error: 'You can only update your own courses'
       });
@@ -316,7 +325,7 @@ export const deleteCourse = async (
       return;
     }
 
-    if (course.teacher_id !== profile.id) {
+    if (!isOwnedByTeacher(course.teacher_id, profile.id, userId)) {
       res.status(403).json({ error: 'You can only delete your own courses' });
       return;
     }

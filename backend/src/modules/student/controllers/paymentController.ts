@@ -5,6 +5,7 @@
 
 import { Request, Response } from 'express';
 import * as paymentService from '../services/paymentService';
+import * as sharedPaymentController from '../../shared/controllers/paymentController';
 
 /**
  * Create a payment order for course enrollment
@@ -38,35 +39,8 @@ export const createPaymentOrder = async (req: Request, res: Response) => {
  * Verify and confirm Razorpay payment
  */
 export const verifyPayment = async (req: Request, res: Response) => {
-  try {
-    const studentId = req.auth?.userId;
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-
-    if (!studentId) {
-      return res.status(401).json({ success: false, message: 'Unauthorized' });
-    }
-
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Payment verification details are required' 
-      });
-    }
-
-    const result = await paymentService.confirmPayment(
-      razorpay_order_id, 
-      razorpay_payment_id, 
-      razorpay_signature
-    );
-
-    res.status(200).json(result);
-  } catch (error: any) {
-    console.error('Error verifying payment:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || 'Payment verification failed' 
-    });
-  }
+  // Delegate to shared payment controller which contains enrollment and booking logic
+  return sharedPaymentController.verifyRazorpayPayment(req as any, res as any);
 };
 
 /**

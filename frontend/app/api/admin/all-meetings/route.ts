@@ -1,12 +1,11 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabaseAdminClient();
 
     // Fetch all meetings with payment status 'paid'
     const { data: meetings, error } = await supabase
@@ -40,13 +39,18 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch teacher names
-    const teacherIds = [...new Set(meetings?.map((m: any) => m.teacher_id) || [])];
+    const teacherIds = Array.from(new Set(meetings?.map((m: any) => m.teacher_id) || []));
     const { data: teachers } = await supabase
       .from('profiles')
       .select('clerk_user_id, full_name, email')
       .in('clerk_user_id', teacherIds);
 
-    const teachersMap = new Map(teachers?.map(t => [t.clerk_user_id, t]) || []);
+    const teacherRows = (teachers || []) as Array<{
+      clerk_user_id: string;
+      full_name: string | null;
+      email: string | null;
+    }>;
+    const teachersMap = new Map(teacherRows.map((teacher) => [teacher.clerk_user_id, teacher]));
 
     // Transform data to include teacher info and time slot details
     const transformedMeetings = meetings?.map((meeting: any) => {

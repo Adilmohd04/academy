@@ -152,16 +152,20 @@ export const createDiscussion = async (
     throw new Error('Course not found');
   }
 
-  // Check if user is the teacher (need to get profile ID from clerk_user_id)
+  // Check if user is the teacher. courses.teacher_id may be either a Clerk user ID
+  // or a profiles.id UUID depending on how the course was created, so match both.
   const { data: userProfile } = await supabase
     .from('profiles')
-    .select('id')
+    .select('id, role')
     .eq('clerk_user_id', userId)
-    .single();
+    .maybeSingle();
 
-  const isTeacher = userProfile && course.teacher_id === userProfile.id;
+  const isTeacher =
+    course.teacher_id === userId ||
+    (userProfile && course.teacher_id === userProfile.id);
+  const isAdmin = userProfile?.role === 'admin';
   
-  if (!enrollment && !isTeacher) {
+  if (!enrollment && !isTeacher && !isAdmin) {
     throw new Error('Not authorized to post in this course');
   }
 
@@ -264,26 +268,29 @@ export const createReply = async (
     .eq('student_id', userId)
     .maybeSingle();
   
-  // Check if user is the teacher (teacher_id is profile UUID, userId is clerk ID)
+  // Check if user is the teacher (teacher_id may be a Clerk ID or a profile UUID)
   let isTeacher = false;
+  let isAdmin = false;
   if (!enrollment) {
     const { data: userProfile } = await supabase
       .from('profiles')
-      .select('id')
+      .select('id, role')
       .eq('clerk_user_id', userId)
       .maybeSingle();
-    if (userProfile) {
-      const { data: course } = await supabase
-        .from('courses')
-        .select('id')
-        .eq('id', discussion.course_id)
-        .eq('teacher_id', userProfile.id)
-        .maybeSingle();
-      isTeacher = !!course;
+    isAdmin = userProfile?.role === 'admin';
+    const { data: course } = await supabase
+      .from('courses')
+      .select('id, teacher_id')
+      .eq('id', discussion.course_id)
+      .maybeSingle();
+    if (course) {
+      isTeacher =
+        course.teacher_id === userId ||
+        (!!userProfile && course.teacher_id === userProfile.id);
     }
   }
   
-  if (!enrollment && !isTeacher) {
+  if (!enrollment && !isTeacher && !isAdmin) {
     throw new Error('Not authorized to reply to this discussion');
   }
 
@@ -423,7 +430,7 @@ export const editDiscussion = async (
         .eq('id', discussion.course_id)
         .single();
       
-      isTeacher = !!(course && course.teacher_id === userProfile.id);
+      isTeacher = !!(course && (course.teacher_id === userProfile.id || course.teacher_id === userId));
     }
 
     if (discussion.user_id !== userId && !isTeacher && !isTeacherOrAdmin) {
@@ -473,7 +480,7 @@ export const editDiscussion = async (
           .eq('id', discussion.course_id)
           .single();
         
-        isTeacher = !!(course && course.teacher_id === userProfile.id);
+        isTeacher = !!(course && (course.teacher_id === userProfile.id || course.teacher_id === userId));
       }
     }
 
@@ -542,7 +549,7 @@ export const deleteDiscussion = async (
     .eq('id', discussion.course_id)
     .single();
 
-  const isTeacher = userProfile && course && course.teacher_id === userProfile.id;
+  const isTeacher = userProfile && course && (course.teacher_id === userProfile.id || course.teacher_id === userId);
   const isTeacherOrAdmin = userProfile?.role === 'teacher' || userProfile?.role === 'admin';
 
   if (discussion.user_id !== userId && !isAdmin && !isTeacher && !isTeacherOrAdmin) {
@@ -601,8 +608,8 @@ export const deleteReply = async (
       .eq('id', discussion.course_id)
       .maybeSingle();
     
-    // Fixed: Compare profile.id with teacher_id
-    isTeacher = !!(course && course.teacher_id === userProfile.id);
+    // Fixed: Compare profile.id with teacher_id (also match Clerk ID)
+    isTeacher = !!(course && (course.teacher_id === userProfile.id || course.teacher_id === userId));
   }
 
   const isTeacherOrAdmin = userProfile?.role === 'teacher' || userProfile?.role === 'admin';

@@ -17,9 +17,12 @@ import {
   ExternalLink,
   X,
   Loader2,
+  Sparkles,
+  ShieldCheck,
+  Layers3,
 } from "lucide-react";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+import { api } from "@/lib/api";
 
 interface Resource {
   id: string;
@@ -44,12 +47,6 @@ const typeIcons: Record<string, React.ReactNode> = {
   book: <BookOpen className="w-5 h-5" />,
 };
 
-const statusColors: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800",
-  approved: "bg-green-100 text-green-800",
-  rejected: "bg-red-100 text-red-800",
-};
-
 export default function AdminResourcesPage() {
   const { getToken } = useAuth();
   const [resources, setResources] = useState<Resource[]>([]);
@@ -59,7 +56,6 @@ export default function AdminResourcesPage() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  // Create form state
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newType, setNewType] = useState("document");
@@ -73,13 +69,8 @@ export default function AdminResourcesPage() {
   const loadResources = async () => {
     try {
       const token = await getToken();
-      const res = await fetch(`${API_BASE_URL}/api/resources`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setResources(Array.isArray(data) ? data : []);
-      }
+      const response = await api.admin.getResources(token);
+      setResources(Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       console.error("Failed to load resources:", err);
     } finally {
@@ -91,18 +82,9 @@ export default function AdminResourcesPage() {
     setActionLoading(id);
     try {
       const token = await getToken();
-      const res = await fetch(`${API_BASE_URL}/api/resources/${id}/status`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) {
-        setResources((prev) =>
-          prev.map((r) => (r.id === id ? { ...r, status } : r))
-        );
+      const response = await api.admin.updateResourceStatus(id, status, token);
+      if (response.status >= 200 && response.status < 300) {
+        setResources((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
       }
     } catch (err) {
       console.error(`Failed to ${status} resource:`, err);
@@ -116,11 +98,8 @@ export default function AdminResourcesPage() {
     setActionLoading(id);
     try {
       const token = await getToken();
-      const res = await fetch(`${API_BASE_URL}/api/resources/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
+      const response = await api.admin.deleteResource(id, token);
+      if (response.status >= 200 && response.status < 300) {
         setResources((prev) => prev.filter((r) => r.id !== id));
       }
     } catch (err) {
@@ -136,20 +115,13 @@ export default function AdminResourcesPage() {
     setCreateLoading(true);
     try {
       const token = await getToken();
-      const res = await fetch(`${API_BASE_URL}/api/resources`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
+      const response = await api.admin.createResource({
           title: newTitle,
           description: newDescription || null,
           type: newType,
           url: newUrl,
-        }),
-      });
-      if (res.ok) {
+        }, token);
+      if (response.status >= 200 && response.status < 300) {
         setShowCreateModal(false);
         setNewTitle("");
         setNewDescription("");
@@ -182,68 +154,77 @@ export default function AdminResourcesPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-[#587067]">
+          <Loader2 className="w-8 h-8 animate-spin text-[#1f5b4b]" />
+          <p className="text-sm font-medium">Loading resources</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Resource Management</h1>
-          <p className="text-gray-500 text-sm mt-1">
-            Review, approve, and manage learning resources
-          </p>
+    <div className="admin-page-wrap space-y-6">
+      <section className="relative overflow-hidden rounded-[28px] border border-[rgba(230,225,213,0.95)] bg-[#20342d] p-8 text-white shadow-[0_20px_55px_rgba(18,30,24,0.18)]">
+        <div className="absolute inset-0 opacity-25" style={{ backgroundImage: 'radial-gradient(circle at 15% 20%, rgba(199,169,107,0.32) 0, transparent 30%), radial-gradient(circle at 85% 0%, rgba(255,255,255,0.10) 0, transparent 24%), radial-gradient(circle at 100% 100%, rgba(31,91,75,0.34) 0, transparent 30%)' }} />
+        <div className="relative z-10 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="admin-kicker !bg-white/10 !text-white !border-white/10 mb-3">Content library</p>
+            <h1 className="text-3xl lg:text-4xl font-semibold tracking-tight">Resource management</h1>
+            <p className="mt-3 max-w-2xl text-white/75 leading-7">Review learning materials, approve useful assets, and keep the knowledge library tidy and easy to scan.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-3 min-w-[280px]">
+            <MiniStat label="Total" value={resources.length} icon={<Layers3 className="h-4 w-4" />} />
+            <MiniStat label="Pending" value={resources.filter((r) => r.status === 'pending').length} icon={<Clock className="h-4 w-4" />} />
+            <MiniStat label="Approved" value={resources.filter((r) => r.status === 'approved').length} icon={<ShieldCheck className="h-4 w-4" />} />
+            <MiniStat label="Drafting" value={resources.filter((r) => r.status === 'rejected').length} icon={<Sparkles className="h-4 w-4" />} />
+          </div>
         </div>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add Resource
-        </button>
-      </div>
+      </section>
 
-      {/* Search + Tabs */}
-      <div className="flex flex-col sm:flex-row gap-4">
+      <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-[#7b857d]" />
           <input
             type="text"
             placeholder="Search resources..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+            className="admin-panel w-full pl-10 pr-4 py-3"
           />
         </div>
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          {tabs.map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => setActiveTab(tab.value)}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                activeTab === tab.value
-                  ? "bg-white text-emerald-700 shadow-sm"
-                  : "text-gray-600 hover:text-gray-900"
-              }`}
-            >
-              {tab.label} ({tab.count})
-            </button>
-          ))}
-        </div>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="admin-btn-primary inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 font-semibold whitespace-nowrap"
+        >
+          <Plus className="w-4 h-4" />
+          Add resource
+        </button>
       </div>
 
-      {/* Resources Grid */}
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {tabs.map((tab) => (
+          <button
+            key={tab.value}
+            onClick={() => setActiveTab(tab.value)}
+            className={`px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-all ${
+              activeTab === tab.value
+                ? 'bg-[#1f5b4b] text-white shadow-md'
+                : 'bg-white text-[#6f7a72] border border-[#e6e1d5] hover:bg-[#f6f2e8]'
+            }`}
+          >
+            {tab.label} ({tab.count})
+          </button>
+        ))}
+      </div>
+
       {filtered.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
+        <div className="admin-panel text-center py-12 text-[#6f7a72]">
           <FileText className="w-12 h-12 mx-auto mb-3 opacity-40" />
           <p>No resources found</p>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           <AnimatePresence>
             {filtered.map((resource) => (
               <motion.div
@@ -252,77 +233,70 @@ export default function AdminResourcesPage() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="bg-white border rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow"
+                className="admin-panel p-5"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 bg-emerald-50 rounded-lg text-emerald-600">
+                <div className="flex items-start justify-between mb-3 gap-4">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="p-2 bg-[#f4f1ea] rounded-lg text-[#1f5b4b] border border-[#e6e1d5]">
                       {typeIcons[resource.type] || <FileText className="w-5 h-5" />}
                     </div>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        statusColors[resource.status] || "bg-gray-100 text-gray-700"
-                      }`}
-                    >
-                      {resource.status}
-                    </span>
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-[#1f2a24] truncate">{resource.title}</h3>
+                      <p className="text-xs text-[#6f7a72]">{resource.profiles?.full_name || 'Unknown creator'}</p>
+                    </div>
                   </div>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                    resource.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : resource.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+                  }`}>
+                    {resource.status}
+                  </span>
                 </div>
 
-                <h3 className="font-semibold text-gray-900 mb-1 line-clamp-1">
-                  {resource.title}
-                </h3>
-                {resource.description && (
-                  <p className="text-sm text-gray-500 mb-3 line-clamp-2">
-                    {resource.description}
-                  </p>
-                )}
+                <p className="text-sm text-[#6f7a72] line-clamp-3 mb-4">{resource.description || 'No description provided.'}</p>
 
-                <div className="text-xs text-gray-400 mb-3 space-y-1">
-                  <p>By: {resource.profiles?.full_name || "Unknown"}</p>
-                  <p>{new Date(resource.created_at).toLocaleDateString()}</p>
+                <div className="flex items-center gap-2 text-xs text-[#6f7a72] mb-4">
+                  <Clock className="w-3.5 h-3.5" />
+                  {new Date(resource.created_at).toLocaleString()}
                 </div>
 
-                {resource.url && (
+                <div className="flex flex-wrap gap-2">
                   <a
                     href={resource.url}
                     target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-emerald-600 hover:text-emerald-700 flex items-center gap-1 mb-3"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-[#f4f1ea] text-[#1f5b4b] text-sm font-semibold hover:bg-[#e9e2d3]"
                   >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                    Open Resource
+                    <ExternalLink className="w-4 h-4" />
+                    Open
                   </a>
-                )}
 
-                <div className="flex items-center gap-2 pt-3 border-t">
-                  {resource.status === "pending" && (
-                    <>
-                      <button
-                        onClick={() => handleStatusUpdate(resource.id, "approved")}
-                        disabled={actionLoading === resource.id}
-                        className="flex-1 flex items-center justify-center gap-1 text-sm py-1.5 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 transition-colors disabled:opacity-50"
-                      >
-                        <CheckCircle className="w-4 h-4" />
-                        Approve
-                      </button>
-                      <button
-                        onClick={() => handleStatusUpdate(resource.id, "rejected")}
-                        disabled={actionLoading === resource.id}
-                        className="flex-1 flex items-center justify-center gap-1 text-sm py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50"
-                      >
-                        <XCircle className="w-4 h-4" />
-                        Reject
-                      </button>
-                    </>
+                  {resource.status !== "approved" && (
+                    <button
+                      onClick={() => handleStatusUpdate(resource.id, "approved")}
+                      disabled={actionLoading === resource.id}
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      Approve
+                    </button>
+                  )}
+                  {resource.status !== "rejected" && (
+                    <button
+                      onClick={() => handleStatusUpdate(resource.id, "rejected")}
+                      disabled={actionLoading === resource.id}
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60"
+                    >
+                      <XCircle className="w-4 h-4" />
+                      Reject
+                    </button>
                   )}
                   <button
                     onClick={() => handleDelete(resource.id)}
                     disabled={actionLoading === resource.id}
-                    className="p-1.5 text-gray-400 hover:text-red-600 transition-colors disabled:opacity-50"
-                    title="Delete"
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-white border border-[#e6e1d5] text-[#6f7a72] text-sm font-semibold hover:bg-[#f6f2e8] disabled:opacity-60"
                   >
                     <Trash2 className="w-4 h-4" />
+                    Delete
                   </button>
                 </div>
               </motion.div>
@@ -331,117 +305,53 @@ export default function AdminResourcesPage() {
         </div>
       )}
 
-      {/* Create Resource Modal */}
-      <AnimatePresence>
-        {showCreateModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-            onClick={() => setShowCreateModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              onClick={(e) => e.stopPropagation()}
-              className="bg-white rounded-xl shadow-xl w-full max-w-md p-6"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold">Add New Resource</h2>
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="p-1 hover:bg-gray-100 rounded"
-                >
-                  <X className="w-5 h-5" />
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="admin-panel w-full max-w-2xl p-6">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <p className="admin-kicker mb-2">Add new resource</p>
+                <h2 className="admin-section-title">Create resource</h2>
+              </div>
+              <button onClick={() => setShowCreateModal(false)} className="admin-btn-muted rounded-full p-2">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Title" className="admin-panel px-4 py-3" />
+                <select value={newType} onChange={(e) => setNewType(e.target.value)} className="admin-panel px-4 py-3">
+                  <option value="document">Document</option>
+                  <option value="video">Video</option>
+                  <option value="link">Link</option>
+                  <option value="book">Book</option>
+                </select>
+              </div>
+              <textarea value={newDescription} onChange={(e) => setNewDescription(e.target.value)} placeholder="Description" rows={4} className="admin-panel w-full px-4 py-3" />
+              <input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder="URL" className="admin-panel w-full px-4 py-3" />
+              <div className="flex gap-3 justify-end">
+                <button type="button" onClick={() => setShowCreateModal(false)} className="admin-btn-muted rounded-full px-4 py-2 font-semibold">Cancel</button>
+                <button type="submit" disabled={createLoading} className="admin-btn-primary rounded-full px-5 py-2 font-semibold disabled:opacity-60">
+                  {createLoading ? 'Creating...' : 'Create'}
                 </button>
               </div>
-
-              <form onSubmit={handleCreate} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Title *
-                  </label>
-                  <input
-                    type="text"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                    placeholder="Resource title"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Description
-                  </label>
-                  <textarea
-                    value={newDescription}
-                    onChange={(e) => setNewDescription(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none resize-none"
-                    placeholder="Optional description"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Type
-                  </label>
-                  <select
-                    value={newType}
-                    onChange={(e) => setNewType(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                  >
-                    <option value="document">Document</option>
-                    <option value="video">Video</option>
-                    <option value="link">Link</option>
-                    <option value="book">Book</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    URL *
-                  </label>
-                  <input
-                    type="url"
-                    value={newUrl}
-                    onChange={(e) => setNewUrl(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
-                    placeholder="https://..."
-                  />
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateModal(false)}
-                    className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={createLoading}
-                    className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {createLoading ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Plus className="w-4 h-4" />
-                    )}
-                    Create
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function MiniStat({ label, value, icon }: { label: string; value: string | number; icon: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-white/15 bg-white/10 backdrop-blur-md p-4">
+      <div className="flex items-center justify-between gap-3 text-white/80 mb-3">
+        <span className="text-xs uppercase tracking-[0.18em] font-semibold">{label}</span>
+        <span className="rounded-full bg-white/10 p-2">{icon}</span>
+      </div>
+      <p className="text-2xl font-semibold text-white truncate">{value}</p>
+    </div>
+  )
 }

@@ -1,6 +1,7 @@
 import express from 'express';
 import { requireAuth, requireRole } from '../middleware/clerkAuth';
 import { supabase } from '../config/database';
+import * as courseNotifications from '../services/courseNotificationService';
 
 const router = express.Router();
 
@@ -42,7 +43,7 @@ router.post(
       // Verify teacher owns the course or is a co-teacher
       const { data: course } = await supabase
         .from('courses')
-        .select('id, teacher_id')
+        .select('id, title, teacher_id')
         .eq('id', courseId)
         .eq('teacher_id', profile.clerk_user_id)
         .single();
@@ -108,6 +109,18 @@ router.post(
         if (contentError) {
           console.error('Error adding assignment to week content:', contentError);
         }
+      }
+
+      try {
+        await courseNotifications.notifyAssignmentPublished(
+          courseId,
+          course?.title || 'Course',
+          title,
+          due_date,
+          assignment.id
+        );
+      } catch (notifError) {
+        console.error('⚠️ Failed to send assignment notification:', notifError);
       }
 
       res.status(201).json({ 
@@ -276,7 +289,8 @@ router.post(
             id,
             courses!inner (
               id,
-              teacher_id
+              teacher_id,
+              title
             )
           )
         `)
@@ -345,7 +359,7 @@ router.get(
       // Verify teacher owns the course
       const { data: course } = await supabase
         .from('courses')
-        .select('id, teacher_id')
+        .select('id, title, teacher_id')
         .eq('id', courseId)
         .single();
 
@@ -635,6 +649,45 @@ router.post(
       if (gradeError) {
         console.error('Error grading submission:', gradeError);
         return res.status(500).json({ error: 'Failed to grade submission' });
+      }
+
+      try {
+        const { data: studentProfile } = await supabase
+          .from('profiles')
+          .select('id, full_name, email')
+          .eq('id', gradedSub.student_id)
+          .single();
+
+        const studentEmail = (studentProfile as any)?.email;
+        const studentName = (studentProfile as any)?.full_name || 'Student';
+        if (studentEmail) {
+          const { data: lesson } = await supabase
+            .from('course_lessons')
+            .select('title')
+            .eq('id', gradedSub.lesson_id)
+            .single();
+
+          const courseTitle = (course as any)?.title || 'Course';
+
+          await courseNotifications.notifyAssignmentGraded(
+            {
+              id: (studentProfile as any).id,
+              email: studentEmail,
+              name: studentName,
+            },
+            {
+              courseId,
+              courseTitle,
+              assignmentTitle: lesson?.title || 'Assignment',
+              grade: Number(grade),
+              maxGrade: gradedSub.max_grade || null,
+              feedback: feedback || null,
+              submissionId: gradedSub.id,
+            }
+          );
+        }
+      } catch (notifError) {
+        console.error('⚠️ Failed to send assignment grade notification:', notifError);
       }
 
       // Mark lesson as completed for the student

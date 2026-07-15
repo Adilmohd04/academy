@@ -9,6 +9,7 @@ import {
   Loader2, DollarSign, Sparkles, CheckCircle, AlertCircle, XCircle,
   MoreHorizontal
 } from 'lucide-react';
+import { api } from '@/lib/api';
 
 interface Meeting {
   id: string;
@@ -47,14 +48,8 @@ export default function AllMeetingsPage() {
   const fetchAllMeetings = async () => {
     try {
       const token = await getToken();
-      const response = await fetch('/api/meetings/all', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setMeetings(data || []);
-      }
+      const response = await api.admin.getAllMeetings(token);
+      setMeetings(Array.isArray(response.data) ? response.data : []);
       setLoading(false);
     } catch (error) {
       console.error('Error fetching meetings:', error);

@@ -7,6 +7,7 @@ import {
   ArrowLeft, Search, Filter, Loader2, User, Mail,
   Calendar, Clock, DollarSign, CheckCircle, XCircle, AlertCircle
 } from 'lucide-react';
+import { api } from '@/lib/api';
 
 interface Meeting {
   id: string;
@@ -43,11 +44,8 @@ export default function AllMeetingsPage() {
   const fetchMeetings = async () => {
     try {
       const token = await getToken();
-      const response = await fetch('/api/admin/all-meetings', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json();
-      setMeetings(Array.isArray(data) ? data : []);
+      const response = await api.admin.getLegacyAllMeetings(token);
+      setMeetings(Array.isArray(response.data) ? response.data : []);
       setLoading(false);
     } catch (error) {
       console.error('Error fetching meetings:', error);
@@ -103,8 +101,8 @@ export default function AllMeetingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 p-8">
-      <div className="max-w-7xl mx-auto">
+    <div className="admin-page-wrap space-y-6">
+      <div>
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center space-x-4">

@@ -108,7 +108,7 @@ export default function CreateQuizPage() {
       }
 
       alert("Quiz created successfully!");
-      router.push(`/teacher/courses/${courseId}/edit`);
+      router.push(`/teacher/courses/${courseId}/builder?tab=content`);
     } catch (err) {
       console.error("Failed to create quiz", err);
       alert("Failed to create quiz");

@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useUser } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
@@ -51,6 +51,16 @@ export default function StudentDashboardClient({ user: initialUser, initialData 
   })[0];
 
   const otherUpcoming = upcomingList.filter((m: any) => m.id !== nextSession?.id);
+
+  const uniqueCourses = (initialData?.courses || []).filter((course: any, index: number, arr: any[]) => {
+    const title = String(course?.title || '').trim().toLowerCase();
+    const teacher = String(course?.teacher_name || '').trim().toLowerCase();
+    const firstMatchIndex = arr.findIndex((candidate: any) => {
+      return String(candidate?.title || '').trim().toLowerCase() === title
+        && String(candidate?.teacher_name || '').trim().toLowerCase() === teacher;
+    });
+    return firstMatchIndex === index;
+  });
 
   return (
     <div className="max-w-5xl mx-auto pt-8 px-4">
@@ -170,7 +180,48 @@ export default function StudentDashboardClient({ user: initialUser, initialData 
         )}
       </div>
 
-      {/* Secondary Section: Upcoming */}
+      {/* Secondary Section: Course Combination / Recommended Paths */}
+      {uniqueCourses.length > 0 && (
+        <div className="mb-16">
+          <div className="flex justify-between items-end mb-6">
+            <h2 className="text-sm font-bold text-[#C5A059] uppercase tracking-widest">Course Combinations</h2>
+            <Link href="/student/courses/browse" className="text-sm font-bold text-[#1B365D] hover:text-[#10B981] transition-colors flex items-center gap-1">
+              Browse All <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+          <div className="grid md:grid-cols-2 gap-6">
+            {uniqueCourses.slice(0, 2).map((course: any) => (
+              <Link key={course.id} href={`/student/courses/browse/${course.id}`} className="bg-white border border-[#E2E8F0] rounded-2xl p-6 hover:shadow-lg hover:border-[#10B981]/30 transition-all group flex gap-5 items-center">
+                <div className="w-20 h-20 rounded-xl bg-[#FDFBF7] flex items-center justify-center border border-[#E2E8F0] shrink-0 overflow-hidden relative">
+                  {course.course_image_url || course.thumbnail_url ? (
+                    <img src={course.course_image_url || course.thumbnail_url} alt={course.title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                  ) : (
+                    <BookOpen className="w-10 h-10 text-[#C5A059]/40" />
+                  )}
+                  {course.price === 0 && (
+                    <div className="absolute bottom-0 w-full bg-[#10B981] text-white text-[10px] font-bold text-center py-0.5">FREE</div>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <div className="flex justify-between items-start mb-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-[#10B981] bg-[#F0F7F4] border border-[#D1E7DD] px-2 py-0.5 rounded-md">
+                      {course.level || 'beginner'}
+                    </span>
+                  </div>
+                  <h4 className="font-serif text-lg text-[#1B365D] group-hover:text-[#10B981] transition-colors font-bold line-clamp-1">
+                    {course.title || 'Course'}
+                  </h4>
+                  <p className="text-xs text-[#64748B] line-clamp-1 mt-1 font-medium bg-[#FDFBF7] px-2 py-1 rounded inline-block">
+                    Taught by {course.teacher_name || 'Teacher'}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tertiary Section: Upcoming */}
       {otherUpcoming.length > 0 && (
         <div>
           <h2 className="text-sm font-bold text-[#C5A059] uppercase tracking-widest mb-6">Future Growth</h2>

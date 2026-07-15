@@ -120,13 +120,13 @@ export const startExam = async (req: Request, res: Response) => {
 export const saveAnswer = async (req: Request, res: Response) => {
   try {
     const { submissionId } = req.params;
-    const { question_id, answer_text, selected_options, uploaded_file_url } = req.body;
+    const { question_id, student_answer, selected_option_id, uploaded_file_url } = req.body;
     
     const result = await studentExamService.saveAnswer({
       submission_id: submissionId,
       question_id,
-      answer_text,
-      selected_options,
+      student_answer,
+      selected_option_id,
       uploaded_file_url
     });
     
@@ -182,32 +182,6 @@ export const getSubmissionResults = async (req: Request, res: Response) => {
     res.status(400).json({
       success: false,
       error: error.message || 'Failed to fetch results'
-    });
-  }
-};
-
-/**
- * Get student's exam history
- */
-export const getExamHistory = async (req: Request, res: Response) => {
-  try {
-    const studentId = req.auth?.userId;
-    
-    if (!studentId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-    
-    const history = await studentExamService.getStudentExamHistory(studentId);
-    
-    res.json({
-      success: true,
-      data: history
-    });
-  } catch (error: any) {
-    console.error('Error fetching exam history:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to fetch exam history'
     });
   }
 };

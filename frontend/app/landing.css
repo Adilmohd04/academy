@@ -1,0 +1,200 @@
+/* Base Theme - Premium Soft & Fluid */
+        :root {
+            --color-primary: #14b8a6;
+            /* Teal */
+            --color-secondary: #f59e0b;
+            /* Amber */
+            --color-accent: #ec4899;
+            /* Pink */
+            --color-dark: #1e293b;
+            --glass-border: rgba(255, 255, 255, 0.4);
+            --glass-bg: rgba(255, 255, 255, 0.5);
+            /* Increased transparency */
+            --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.07);
+        }
+
+        body {
+            font-family: 'Nunito', sans-serif;
+            background-color: #fdfbf7;
+            /* Fallback */
+            color: #4b5563;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Global Animated Background */
+        .ambient-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: -1;
+            background: #FDFBF7;
+            /* Premium Cream Base */
+            overflow: hidden;
+        }
+
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(100px);
+            opacity: 0.5;
+            animation: float-orb 25s infinite alternate ease-in-out;
+        }
+
+        .orb-1 {
+            width: 80vw;
+            height: 80vh;
+            background: rgba(197, 160, 89, 0.08); /* Soft Gold */
+            top: -10%;
+            right: -10%;
+            animation-delay: 0s;
+        }
+
+        .orb-2 {
+            width: 60vw;
+            height: 60vh;
+            background: rgba(27, 54, 93, 0.05); /* Soft Navy */
+            bottom: -20%;
+            left: -10%;
+            animation-delay: -5s;
+        }
+
+        .orb-3 {
+            width: 50vw;
+            height: 50vh;
+            background: rgba(15, 118, 110, 0.04); /* Very faint Emerald/Teal */
+            top: 30%;
+            left: 30%;
+            animation-delay: -10s;
+        }
+
+        @keyframes float-orb {
+            0% {
+                transform: translate(0, 0) rotate(0deg);
+            }
+
+            100% {
+                transform: translate(30px, 50px) rotate(10deg);
+            }
+        }
+
+        /* Texture Overlay */
+        .bg-grain {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            opacity: 0.3;
+            pointer-events: none;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='1'/%3E%3C/svg%3E");
+
+        }
+
+        h1,
+        h2,
+        h3,
+        h4 {
+            font-family: 'Fredoka', sans-serif;
+        }
+
+        .font-serif {
+            font-family: 'Cinzel', serif;
+        }
+
+        /* Premium Glass Utility */
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            box-shadow: var(--glass-shadow);
+            border-radius: 1.5rem;
+            /* Modern rounded feel */
+        }
+
+        /* Hero Animation Refinements */
+        @keyframes ken-burns {
+            0% {
+                transform: scale(1);
+            }
+
+            100% {
+                transform: scale(1.1);
+            }
+        }
+
+        @keyframes fade-cycle {
+            0% {
+                opacity: 0;
+            }
+
+            5%,
+            20% {
+                opacity: 1;
+            }
+
+            25%,
+            100% {
+                opacity: 0;
+            }
+        }
+
+        /* Slide Show Logic */
+        .slide-wrapper {
+            position: absolute;
+            inset: 0;
+        }
+
+        .slide-item {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            animation: fade-cycle 25s infinite;
+        }
+
+        /* Staggered Delays (5 images * 5s each = 25s total cycle) */
+        .slide-item:nth-child(1) {
+            animation-delay: 0s;
+        }
+
+        .slide-item:nth-child(2) {
+            animation-delay: 5s;
+        }
+
+        .slide-item:nth-child(3) {
+            animation-delay: 10s;
+        }
+
+        .slide-item:nth-child(4) {
+            animation-delay: 15s;
+        }
+
+        .slide-item:nth-child(5) {
+            animation-delay: 20s;
+        }
+
+        /* Calendar Specifics */
+        .calendar-day {
+            height: 2.5rem;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.875rem;
+            color: #475569;
+            transition: all 0.2s;
+        }
+
+        .calendar-day:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        .calendar-day-active {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: white;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+        }

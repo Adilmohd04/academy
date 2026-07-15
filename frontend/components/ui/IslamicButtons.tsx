@@ -31,7 +31,7 @@ export const IslamicButton: React.FC<ButtonProps> = ({
   className = '',
   type = 'button'
 }) => {
-  const baseClasses = "font-semibold rounded-xl transition-all duration-300 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none";
+  const baseClasses = "font-bold rounded-xl transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed";
 
   const sizeClasses = {
     sm: "px-4 py-2 text-sm",
@@ -40,12 +40,12 @@ export const IslamicButton: React.FC<ButtonProps> = ({
   };
 
   const variantClasses = {
-    primary: "bg-gradient-to-r from-islamic-primary-600 to-islamic-emerald-600 text-white hover:from-islamic-primary-700 hover:to-islamic-emerald-700",
-    secondary: "bg-gradient-to-r from-islamic-midnight-500 to-islamic-primary-700 text-white hover:from-islamic-midnight-600 hover:to-islamic-primary-800",
-    gold: "bg-gradient-to-r from-islamic-gold-500 to-islamic-gold-400 text-islamic-midnight-900 hover:from-islamic-gold-600 hover:to-islamic-gold-500",
-    success: "bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-700 hover:to-emerald-700",
-    danger: "bg-gradient-to-r from-red-600 to-rose-600 text-white hover:from-red-700 hover:to-rose-700",
-    outline: "bg-transparent border-2 border-islamic-primary-600 text-islamic-primary-600 hover:bg-islamic-primary-50"
+    primary: "bg-[#1B365D] text-white hover:bg-[#152C4E] border border-transparent shadow hover:shadow-lg hover:shadow-[#1B365D]/10",
+    secondary: "bg-white text-[#1B365D] hover:bg-[#F0F7F4] border-2 border-[#E2E8F0] hover:border-[#10B981]/30",
+    gold: "bg-[#C5A059] text-white hover:bg-[#B8960F] shadow hover:shadow-lg hover:shadow-[#C5A059]/20",
+    success: "bg-[#10B981] text-white hover:bg-[#059669] shadow hover:shadow-lg hover:shadow-[#10B981]/20",
+    danger: "bg-red-600 text-white hover:bg-red-700 shadow hover:shadow-lg",
+    outline: "bg-transparent border-2 border-[#1B365D] text-[#1B365D] hover:bg-[#FDFBF7]"
   };
 
   return (
@@ -105,9 +105,9 @@ export const IslamicIconButton: React.FC<IconButtonProps> = ({
   };
 
   const variantClasses = {
-    primary: "bg-islamic-primary-600 text-white hover:bg-islamic-primary-700",
-    secondary: "bg-islamic-gold-500 text-islamic-midnight-900 hover:bg-islamic-gold-600",
-    ghost: "bg-transparent text-gray-600 hover:bg-gray-100"
+    primary: "bg-[#1B365D] text-white hover:bg-[#152C4E]",
+    secondary: "bg-[#C5A059] text-white hover:bg-[#B8960F]",
+    ghost: "bg-transparent text-[#64748B] hover:bg-[#F1F5F9] hover:text-[#1B365D]"
   };
 
   return (

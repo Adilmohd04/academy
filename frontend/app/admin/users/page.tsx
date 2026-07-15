@@ -4,19 +4,12 @@ import { useAuth } from '@clerk/nextjs';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Search, Loader2, Edit2, Trash2, UserCog } from 'lucide-react';
-
-interface User {
-  clerk_user_id: string;
-  full_name: string;
-  email: string;
-  role: string;
-  created_at: string;
-}
+import { adminUsersApi, type AdminUserRow } from '@/lib/adminUsersApi';
 
 export default function UsersManagementPage() {
   const { getToken } = useAuth();
-  const [users, setUsers] = useState<User[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
+  const [users, setUsers] = useState<AdminUserRow[]>([]);
+  const [filteredUsers, setFilteredUsers] = useState<AdminUserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
@@ -35,10 +28,7 @@ export default function UsersManagementPage() {
   const fetchUsers = async () => {
     try {
       const token = await getToken();
-      const response = await fetch('/api/users', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json();
+      const data = await adminUsersApi.getUsers(token);
       setUsers(data || []);
       setLoading(false);
     } catch (error) {
@@ -67,20 +57,13 @@ export default function UsersManagementPage() {
     setFilteredUsers(filtered);
   };
 
-  const handleRoleChange = async (userId: string, newRole: string) => {
+  const handleRoleChange = async (user: AdminUserRow, newRole: string) => {
     try {
       const token = await getToken();
-      const response = await fetch('/api/admin/change-role', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ clerk_user_id: userId, role: newRole }),
-      });
+      const success = await adminUsersApi.updateRole(user.id || user.clerk_user_id, newRole, token);
 
-      if (response.ok) {
-        setUsers(users.map(u => u.clerk_user_id === userId ? { ...u, role: newRole } : u));
+      if (success) {
+        setUsers(users.map(u => u.clerk_user_id === user.clerk_user_id ? { ...u, role: newRole } : u));
         setEditingUser(null);
         setEditRole('');
       }
@@ -92,16 +75,9 @@ export default function UsersManagementPage() {
   const handleDeleteUser = async (userId: string) => {
     try {
       const token = await getToken();
-      const response = await fetch(`/api/admin/delete-user`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ clerk_user_id: userId }),
-      });
+      const success = await adminUsersApi.deleteUser(userId, token);
 
-      if (response.ok) {
+      if (success) {
         setUsers(users.filter(u => u.clerk_user_id !== userId));
         setDeleteConfirm(null);
       }
@@ -237,7 +213,7 @@ export default function UsersManagementPage() {
                               <option value="admin">Admin</option>
                             </select>
                             <button
-                              onClick={() => handleRoleChange(user.clerk_user_id, editRole)}
+                              onClick={() => handleRoleChange(user, editRole)}
                               className="px-3 py-1 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors text-sm"
                             >
                               Save
@@ -262,7 +238,7 @@ export default function UsersManagementPage() {
                                 : 'bg-emerald-100 text-emerald-700'
                             }`}
                           >
-                            {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                            {(user.role || 'Unknown').charAt(0).toUpperCase() + (user.role || 'unknown').slice(1)}
                           </span>
                         )}
                       </td>

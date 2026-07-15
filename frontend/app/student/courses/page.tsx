@@ -42,31 +42,48 @@ function safeCourseTitle(title?: string): string {
 }
 
 export default function MyCoursesPage() {
-  const { userId } = useAuth();
+  const { userId, isLoaded, isSignedIn } = useAuth();
   const router = useRouter();
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'active' | 'completed'>('active');
 
   useEffect(() => {
+    // Wait for auth to load
+    if (!isLoaded) return;
+    
+    // Redirect if not signed in
+    if (!isSignedIn) {
+      router.push('/sign-in');
+      return;
+    }
+    
+    // Fetch if userId is available
     if (userId) {
       fetchEnrollments();
     }
-  }, [userId]);
+  }, [userId, isLoaded, isSignedIn, router]);
 
   const fetchEnrollments = async () => {
     try {
+      setError(null);
       const res = await fetch('/api/enrollments/my-courses', {
         headers: {
           'x-clerk-user-id': userId || ''
         }
       });
-      if (res.ok) {
-        const data = await res.json();
-        setEnrollments(data.courses || []);
+      
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || `HTTP ${res.status}: Failed to fetch courses`);
       }
+      
+      const data = await res.json();
+      setEnrollments(data.courses || []);
     } catch (error) {
       console.error('Error fetching enrollments:', error);
+      setError(error instanceof Error ? error.message : 'Failed to load courses. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -84,31 +101,31 @@ export default function MyCoursesPage() {
   const completedCount = enrollments.filter(e => e.completed).length;
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div className="max-w-7xl mx-auto py-8">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-purple-900 mb-2">My Courses</h1>
-        <p className="text-slate-600">Continue your learning journey</p>
+        <h1 className="text-4xl font-serif text-[#1B365D] mb-2 font-bold">My Courses</h1>
+        <p className="text-[#64748B] text-lg">Continue your learning journey</p>
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex gap-4 mb-6">
+      <div className="flex gap-4 mb-8">
         <button
           onClick={() => setFilter('active')}
-          className={`px-6 py-3 rounded-lg font-medium transition-all ${
+          className={`px-6 py-3 rounded-xl font-medium transition-all ${
             filter === 'active'
-              ? 'bg-purple-600 text-white shadow-md'
-              : 'bg-white text-slate-600 hover:bg-purple-50 border border-slate-200'
+              ? 'bg-[#1B365D] text-white shadow-md'
+              : 'bg-white text-[#64748B] hover:bg-[#FDFBF7] border border-[#E2E8F0]'
           }`}
         >
           Active Courses ({activeCount})
         </button>
         <button
           onClick={() => setFilter('completed')}
-          className={`px-6 py-3 rounded-lg font-medium transition-all ${
+          className={`px-6 py-3 rounded-xl font-medium transition-all ${
             filter === 'completed'
-              ? 'bg-purple-600 text-white shadow-md'
-              : 'bg-white text-slate-600 hover:bg-purple-50 border border-slate-200'
+              ? 'bg-[#1B365D] text-white shadow-md'
+              : 'bg-white text-[#64748B] hover:bg-[#FDFBF7] border border-[#E2E8F0]'
           }`}
         >
           Completed ({completedCount})
@@ -116,17 +133,36 @@ export default function MyCoursesPage() {
       </div>
 
       {/* Courses Grid */}
-      {loading ? (
+      {error ? (
+        <IslamicCard className="p-12 text-center border-l-4 border-red-500 bg-red-50">
+          <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+            <span className="text-2xl">⚠️</span>
+          </div>
+          <h3 className="text-xl font-serif text-red-700 mb-2 font-bold">Unable to Load Courses</h3>
+          <p className="text-red-600 mb-6">{error}</p>
+          <IslamicButton
+            variant="primary"
+            onClick={() => {
+              setError(null);
+              setLoading(true);
+              if (userId) fetchEnrollments();
+            }}
+            className="mx-auto"
+          >
+            Try Again
+          </IslamicButton>
+        </IslamicCard>
+      ) : loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
+          <Loader2 className="w-8 h-8 animate-spin text-[#C5A059]" />
         </div>
       ) : filteredEnrollments.length === 0 ? (
         <IslamicCard className="p-12 text-center">
-          <BookOpen className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-          <h3 className="text-xl font-semibold text-slate-700 mb-2">
+          <BookOpen className="w-16 h-16 text-[#E2E8F0] mx-auto mb-4" />
+          <h3 className="text-xl font-serif text-[#1B365D] mb-2 font-bold">
             {filter === 'active' ? 'No active courses' : 'No completed courses yet'}
           </h3>
-          <p className="text-slate-500 mb-6">
+          <p className="text-[#64748B] mb-6">
             {filter === 'active' 
               ? 'Start learning by browsing available courses'
               : 'Complete your active courses to earn certificates'
@@ -136,7 +172,7 @@ export default function MyCoursesPage() {
             <IslamicButton
               variant="primary"
               onClick={() => router.push('/student/courses/browse')}
-              className="bg-purple-600 hover:bg-purple-700"
+              className="mx-auto"
             >
               Browse Courses
             </IslamicButton>
@@ -152,85 +188,90 @@ export default function MyCoursesPage() {
             return (
             <IslamicCard 
               key={enrollment.id} 
-              className="group hover:shadow-2xl transition-all duration-300 overflow-hidden border border-slate-200 bg-white"
+              className="group hover:shadow-xl transition-all duration-300 overflow-hidden border border-[#E2E8F0] bg-white h-full flex flex-col"
             >
               {/* Thumbnail */}
-              <div className="relative h-52 bg-gradient-to-br from-purple-400 to-indigo-600 overflow-hidden">
+              <div className="relative h-48 bg-[#FDFBF7] overflow-hidden border-b border-[#E2E8F0]">
                 {enrollment.course_image_url ? (
                   <img 
                     src={enrollment.course_image_url} 
                     alt={safeCourseTitle(enrollment.title)}
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">
-                    <BookOpen className="w-16 h-16 text-white opacity-50" />
+                    <BookOpen className="w-16 h-16 text-[#E2E8F0]" />
                   </div>
                 )}
 
                 <div className="absolute top-3 left-3 flex gap-2">
-                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-black/45 text-white backdrop-blur-sm">
+                  <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#1B365D]/90 text-white backdrop-blur-sm border border-white/10">
                     {enrollment.completed ? 'Completed' : 'Active'}
                   </span>
                 </div>
 
                 {/* Completed Badge */}
                 {enrollment.completed && (
-                  <div className="absolute top-3 right-3 bg-green-500 text-white px-3 py-1 rounded-full shadow-lg flex items-center gap-1">
+                  <div className="absolute top-3 right-3 bg-[#10B981] text-white px-3 py-1 rounded-full shadow-sm flex items-center gap-1">
                     <CheckCircle className="w-4 h-4" />
-                    <span className="text-xs font-bold">Completed</span>
+                    <span className="text-xs font-bold uppercase tracking-wider">Completed</span>
                   </div>
                 )}
               </div>
 
               {/* Content */}
-              <div className="p-6 space-y-4">
+              <div className="p-6 space-y-4 flex-1 flex flex-col">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-500">Course Progress</span>
-                  <span className="font-semibold text-purple-700">{enrollment.progress}%</span>
+                  <span className="text-[#64748B] font-medium">Course Progress</span>
+                  <span className="font-bold text-[#C5A059]">{enrollment.progress}%</span>
+                </div>
+
+                {/* Progress bar visual */}
+                <div className="w-full bg-[#F0F4F8] rounded-full h-1.5 mb-2">
+                  <div className="bg-[#C5A059] h-1.5 rounded-full" style={{ width: `${enrollment.progress}%` }}></div>
                 </div>
 
                 {/* Title */}
-                <h3 className="text-2xl font-bold text-slate-800 leading-tight line-clamp-2 group-hover:text-purple-700 transition-colors">
+                <h3 className="text-xl font-serif font-bold text-[#1B365D] leading-tight line-clamp-2 group-hover:text-[#C5A059] transition-colors mb-2">
                   {safeCourseTitle(enrollment.title)}
                 </h3>
 
                 {/* Description */}
-                <p className="text-base text-slate-600 line-clamp-3 leading-relaxed min-h-[72px]">
+                <p className="text-sm text-[#64748B] line-clamp-2 leading-relaxed flex-1">
                   {enrollment.description}
                 </p>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700">
-                    <div className="text-slate-500">Teacher</div>
-                    <div className="font-semibold truncate">{safeTeacherName(enrollment.teacher_name)}</div>
+                <div className="grid grid-cols-2 gap-3 mt-auto pt-4 border-t border-[#E2E8F0]">
+                  <div className="px-3 py-2 text-xs text-[#64748B]">
+                    <div className="uppercase tracking-wider opacity-70 mb-1 text-[10px]">Teacher</div>
+                    <div className="font-serif font-bold italic text-[#10B981] truncate">{safeTeacherName(enrollment.teacher_name)}</div>
                   </div>
-                  <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-700">
-                    <div className="text-slate-500">Status</div>
-                    <div className="font-semibold">{enrollment.completed ? 'Completed' : 'In Progress'}</div>
+                  <div className="px-3 py-2 text-xs text-[#64748B]">
+                    <div className="uppercase tracking-wider opacity-70 mb-1 text-[10px]">Status</div>
+                    <div className="font-bold text-[#1B365D]">{enrollment.completed ? 'Completed' : 'In Progress'}</div>
                   </div>
                 </div>
 
                 {spotsLeft !== null && (
-                  <div className="flex items-center gap-2 text-sm rounded-xl bg-purple-50 border border-purple-200 px-3 py-2 text-purple-700">
-                    <Users className="w-4 h-4" />
-                    <span className="font-medium">{spotsLeft} spot{spotsLeft !== 1 ? 's' : ''} left</span>
+                  <div className="flex items-center gap-2 text-sm rounded-xl bg-[#FDFBF7] border border-[#E2E8F0] px-3 py-2 text-[#1B365D] mt-2">
+                    <Users className="w-4 h-4 text-[#C5A059]" />
+                    <span className="font-medium text-xs">{spotsLeft} spot{spotsLeft !== 1 ? 's' : ''} left</span>
                   </div>
                 )}
 
                 {/* Action Button */}
                 {enrollment.completed ? (
-                  <div className="space-y-2">
+                  <div className="space-y-2 mt-4">
                     <IslamicButton
-                      variant="primary"
-                      className="w-full bg-green-600 hover:bg-green-700"
+                      variant="success"
+                      className="w-full"
                       onClick={() => router.push(`/learn/${enrollment.id}`)}
                     >
                       <CheckCircle className="w-4 h-4 mr-2" />
                       Review Course
                     </IslamicButton>
                     <IslamicButton
-                      variant="secondary"
+                      variant="outline"
                       className="w-full"
                       onClick={() => router.push('/student/certificates')}
                     >
@@ -239,14 +280,16 @@ export default function MyCoursesPage() {
                     </IslamicButton>
                   </div>
                 ) : (
-                  <IslamicButton
-                    variant="primary"
-                    className="w-full bg-purple-600 hover:bg-purple-700"
-                    onClick={() => router.push(`/learn/${enrollment.id}`)}
-                  >
-                    <Play className="w-4 h-4 mr-2" />
-                    {enrollment.progress === 0 ? 'Start Learning' : 'Continue Learning'}
-                  </IslamicButton>
+                  <div className="mt-4">
+                    <IslamicButton
+                      variant="primary"
+                      className="w-full"
+                      onClick={() => router.push(`/learn/${enrollment.id}`)}
+                    >
+                      <Play className="w-4 h-4 mr-2" />
+                      {enrollment.progress === 0 ? 'Start Learning' : 'Continue Learning'}
+                    </IslamicButton>
+                  </div>
                 )}
               </div>
             </IslamicCard>

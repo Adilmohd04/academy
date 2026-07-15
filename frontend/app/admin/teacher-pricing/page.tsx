@@ -207,7 +207,7 @@ export default function TeacherPricingPage() {
                 {/* Teacher Info */}
                 <div className="flex items-start space-x-4 flex-1">
                   <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-2xl flex-shrink-0">
-                    {teacher.teacherName.charAt(0)}
+                    {(teacher.teacherName || '?').charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1">
                     <h3 className="text-xl font-semibold text-gray-900">{teacher.teacherName}</h3>

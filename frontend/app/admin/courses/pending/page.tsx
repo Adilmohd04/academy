@@ -123,8 +123,8 @@ export default function PendingCoursesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 p-8">
-      <div className="max-w-7xl mx-auto">
+    <div className="admin-page-wrap space-y-6">
+      <div>
         <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl border border-emerald-100 p-8">
           <h1 className="text-3xl font-bold text-emerald-800 mb-2">
             Pending Course Approvals

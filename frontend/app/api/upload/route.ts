@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { currentUser } from '@clerk/nextjs/server';
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = getSupabaseAdminClient();
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,6 +19,14 @@ export async function POST(request: NextRequest) {
 
     if (!file || !filePath) {
       return NextResponse.json({ error: 'Missing file or filePath' }, { status: 400 });
+    }
+
+    // Validate file path — prevent path traversal attacks
+    if (filePath.includes('..') || filePath.startsWith('/') || filePath.startsWith('\\')) {
+      return NextResponse.json(
+        { error: 'Invalid file path: directory traversal not allowed' },
+        { status: 400 }
+      );
     }
 
     // Convert File to Buffer for upload

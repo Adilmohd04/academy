@@ -1,15 +1,11 @@
 import { UserButton } from '@clerk/nextjs'
 import { currentUser } from '@clerk/nextjs/server'
 import { redirect } from 'next/navigation'
-import { createClient } from '@supabase/supabase-js'
 import dynamic from 'next/dynamic'
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin'
 const IslamicTeacherDashboard = dynamic(() => import('./IslamicTeacherDashboard'), { ssr: false })
 
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-)
+const supabase = getSupabaseAdminClient()
 
 export default async function TeacherDashboard() {
   const user = await currentUser()
@@ -33,11 +29,42 @@ export default async function TeacherDashboard() {
   let meetings = [];
 
   try {
+    // Resolve teacher profile UUID (canonical foreign key used by courses.teacher_id)
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('clerk_user_id', clerkUserId)
+      .maybeSingle()
+
+    const teacherProfileId = profileData?.id || null
+
     // Courses with enrollment count
-    const { data: courseData, error: courseError } = await supabase
-      .from('courses')
-      .select('*, enrollments(count)')
-      .eq('teacher_id', clerkUserId)
+    let courseData: any[] | null = null
+    let courseError: any = null
+
+    if (teacherProfileId) {
+      const profileIdQuery = await supabase
+        .from('courses')
+        .select('*, enrollments(count)')
+        .eq('teacher_id', teacherProfileId)
+
+      courseData = profileIdQuery.data
+      courseError = profileIdQuery.error
+    }
+
+    // Backward-compatibility fallback for legacy rows keyed by clerk_user_id
+    if ((!courseData || courseData.length === 0) && clerkUserId) {
+      const legacyQuery = await supabase
+        .from('courses')
+        .select('*, enrollments(count)')
+        .eq('teacher_id', clerkUserId)
+
+      if (!legacyQuery.error && legacyQuery.data) {
+        courseData = legacyQuery.data
+        courseError = null
+      }
+    }
+
     if (!courseError && courseData) {
       courses = courseData.map((course: any) => ({
         ...course,
