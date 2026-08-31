@@ -81,7 +81,8 @@ export const getCourseSchedules = async (courseId: string): Promise<LiveClassSch
 /**
  * Get upcoming live classes for a teacher
  */
-export const getTeacherUpcomingClasses = async (teacherId: string): Promise<LiveClassSchedule[]> => {
+export const getTeacherUpcomingClasses = async (teacherIds: string | string[]): Promise<LiveClassSchedule[]> => {
+  const identifiers = Array.isArray(teacherIds) ? teacherIds : [teacherIds];
   const { data, error } = await supabase
     .from('live_class_schedules')
     .select(`
@@ -92,7 +93,7 @@ export const getTeacherUpcomingClasses = async (teacherId: string): Promise<Live
         teacher_id
       )
     `)
-    .eq('courses.teacher_id', teacherId)
+    .in('courses.teacher_id', identifiers)
     .in('status', ['scheduled', 'live'])
     .gte('scheduled_date', new Date().toISOString().split('T')[0])
     .order('scheduled_date', { ascending: true })

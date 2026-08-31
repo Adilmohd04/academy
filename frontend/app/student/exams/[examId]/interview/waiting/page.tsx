@@ -35,7 +35,7 @@ interface DeviceStatus {
 }
 
 export default function ExamWaitingRoom({ params }: { params: { examId: string } }) {
-  const { getToken, userId } = useAuth();
+  const { getToken } = useAuth();
   const { examId } = params;
 
   const [examData, setExamData] = useState<ExamWaitingData | null>(null);
@@ -61,7 +61,6 @@ export default function ExamWaitingRoom({ params }: { params: { examId: string }
         const token = await getToken();
         const response = await fetch(`${API_URL}/api/student/exams/${examId}/details`, {
           headers: {
-            'x-clerk-user-id': userId || '',
             'Authorization': `Bearer ${token}`
           }
         });
@@ -162,7 +161,6 @@ export default function ExamWaitingRoom({ params }: { params: { examId: string }
       await fetch(`${API_URL}/api/student/exams/${examId}/mark-started`, {
         method: 'PATCH',
         headers: {
-          'x-clerk-user-id': userId || '',
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }

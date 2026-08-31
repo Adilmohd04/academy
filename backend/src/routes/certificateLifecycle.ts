@@ -18,13 +18,21 @@ import { requireAuth, requireRole } from '../middleware/clerkAuth';
 import { supabase } from '../config/database';
 import {
   issueCertificate,
+  reissueRevokedCertificate,
+  regenerateCertificateVerification,
   resolveTemplate,
 } from '../modules/certificate/services';
+import {
+  findCertificateEnrollment,
+  resolveCertificateStudentIdentity,
+} from '../modules/certificate/services/studentIdentity';
 
 const router = express.Router();
 
 const APPROVAL_PAGE_SIZE = 25;
 const REJECTION_REASON_MAX = 1000;
+
+type CertificateStudentCheck = 'ready' | 'student_not_found' | 'not_enrolled' | 'error';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -46,6 +54,21 @@ function isOwner(
   clerkUserId: string | null | undefined,
 ): boolean {
   return !!ownerTeacherId && (ownerTeacherId === profileId || ownerTeacherId === clerkUserId);
+}
+
+/**
+ * Manual issuance can bypass grade eligibility only after the authenticated
+ * caller has been authorized for the course. It must never turn an arbitrary
+ * identifier into a certificate, so re-check that the target is an existing
+ * profile and is still enrolled immediately before calling the issuer.
+ */
+async function verifyCertificateStudentEnrollment(courseId: string, studentId: string): Promise<CertificateStudentCheck> {
+  const identity = await resolveCertificateStudentIdentity(studentId);
+  if (!identity) return 'student_not_found';
+
+  const enrollment = await findCertificateEnrollment(courseId, identity);
+  if (enrollment.status === 'error') return 'error';
+  return enrollment.status === 'found' ? 'ready' : 'not_enrolled';
 }
 
 async function nextRevisionNumber(templateId: string): Promise<number> {
@@ -418,6 +441,34 @@ router.post(
         return res.status(404).json({ error: 'Template not found' });
       }
 
+      // A teacher must not be able to use the preview endpoint to read another
+      // teacher's certificate design. Global templates are previewable only
+      // once approved; course templates remain scoped to their course owner.
+      const userId = req.auth?.userId as string | undefined;
+      const role = req.auth?.role as string | undefined;
+      if (role === 'teacher') {
+        if (!template.course_id) {
+          if (template.approval_status !== 'approved') {
+            return res.status(403).json({ error: 'forbidden' });
+          }
+        } else {
+          const profileId = await getTeacherProfileId(userId);
+          if (!profileId) {
+            return res.status(403).json({ error: 'forbidden' });
+          }
+
+          const { data: course } = await supabase
+            .from('courses')
+            .select('teacher_id')
+            .eq('id', template.course_id)
+            .maybeSingle();
+
+          if (!course || !isOwner(course.teacher_id, profileId, userId)) {
+            return res.status(403).json({ error: 'forbidden' });
+          }
+        }
+      }
+
       res.json({
         template,
         mockData: {
@@ -475,13 +526,35 @@ router.post(
         return res.status(403).json({ error: 'forbidden' });
       }
 
+      const studentCheck = await verifyCertificateStudentEnrollment(courseId, studentId);
+      if (studentCheck === 'error') {
+        return res.status(500).json({ error: 'student_enrollment_check_failed' });
+      }
+      if (studentCheck === 'student_not_found') {
+        return res.status(404).json({ error: 'student_not_found' });
+      }
+      if (studentCheck === 'not_enrolled') {
+        return res.status(404).json({ error: 'student_not_enrolled' });
+      }
+
+      // Course owners may trigger a normal eligibility-checked issuance, but
+      // they must not bypass that gate by supplying an override reason. A
+      // teacher exception is reviewed through the dedicated request queue;
+      // only an administrator can make a direct manual override here.
+      if (role === 'teacher' && override?.reason) {
+        return res.status(403).json({
+          error: 'manual_override_requires_admin_review',
+          message: 'Submit a certificate exception request for administrator review.',
+        });
+      }
+
       const result = await issueCertificate(courseId, studentId, {
         override: override?.reason
           ? { reason: String(override.reason), by: profileId ?? userId }
           : undefined,
       });
 
-      if (!result.ok) {
+      if (result.ok === false) {
         const status = result.error === 'not_eligible' ? 400 : 400;
         return res.status(status).json({ error: result.error, unmet: result.unmet });
       }
@@ -493,6 +566,105 @@ router.post(
     } catch (err: any) {
       console.error('Error in manual issuance:', err);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+);
+
+/**
+ * POST /api/certificate-lifecycle/certificates/:certificateId/regenerate-verification
+ *
+ * Rotates the QR/verification code for a valid certificate. Administrators can
+ * rotate any certificate; teachers can rotate only certificates for courses
+ * they own. Revoked certificates deliberately cannot be silently reinstated.
+ */
+router.post(
+  '/certificate-lifecycle/certificates/:certificateId/regenerate-verification',
+  requireAuth,
+  requireRole(['teacher', 'admin']),
+  async (req: any, res) => {
+    try {
+      const { certificateId } = req.params;
+      const userId = req.auth?.userId;
+      const role = req.auth?.role;
+      const profileId = await getTeacherProfileId(userId);
+
+      const { data: certificate } = await supabase
+        .from('certificates')
+        .select('id, course_id')
+        .eq('id', certificateId)
+        .maybeSingle();
+      if (!certificate) return res.status(404).json({ error: 'certificate_not_found' });
+
+      if (role !== 'admin') {
+        const { data: course } = await supabase
+          .from('courses')
+          .select('teacher_id')
+          .eq('id', certificate.course_id)
+          .maybeSingle();
+        if (!course || !isOwner(course.teacher_id, profileId, userId)) {
+          return res.status(403).json({ error: 'forbidden' });
+        }
+      }
+
+      const result = await regenerateCertificateVerification(certificateId);
+      if (result.ok === false) {
+        const status = result.error === 'certificate_not_found' ? 404 : 400;
+        return res.status(status).json({ error: result.error });
+      }
+
+      return res.json({ certificate: result.certificate });
+    } catch (err) {
+      console.error('Error regenerating certificate verification:', err);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+);
+
+/**
+ * POST /api/certificate-lifecycle/certificates/:certificateId/reissue
+ * Body: { reason }
+ *
+ * Revocation is permanent for the original credential. Only an administrator
+ * may create a linked replacement, and the replacement always has a new
+ * certificate number and public QR/verification credential.
+ */
+router.post(
+  '/certificate-lifecycle/certificates/:certificateId/reissue',
+  requireAuth,
+  requireRole(['admin']),
+  async (req: any, res) => {
+    try {
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+      if (!reason) {
+        return res.status(400).json({ error: 'reissue_reason_required' });
+      }
+      if (reason.length > REJECTION_REASON_MAX) {
+        return res.status(400).json({ error: 'reissue_reason_too_long' });
+      }
+
+      const userId = req.auth?.userId;
+      const profileId = await getTeacherProfileId(userId);
+      const result = await reissueRevokedCertificate(req.params.certificateId, {
+        reason,
+        by: profileId ?? userId ?? 'system',
+      });
+
+      if (result.ok === false) {
+        const status = result.error === 'certificate_not_found'
+          ? 404
+          : result.error === 'certificate_not_revoked'
+            ? 409
+            : 400;
+        return res.status(status).json({ error: result.error, unmet: result.unmet });
+      }
+
+      return res.status(result.alreadyIssued ? 200 : 201).json({
+        certificate: result.certificate,
+        alreadyIssued: result.alreadyIssued,
+      });
+    } catch (err) {
+      console.error('Error reissuing revoked certificate:', err);
+      return res.status(500).json({ error: 'Internal server error' });
     }
   },
 );

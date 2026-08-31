@@ -45,8 +45,12 @@ export const updateTeacherPrice = async (req: Request, res: Response) => {
     const { teacherId } = req.params;
     const { price, notes } = req.body;
 
-    if (typeof price !== 'number' || price < 0) {
-      return res.status(400).json({ error: 'Invalid price. Must be a positive number or 0 for FREE.' });
+    if (!Number.isFinite(price) || price < 0 || price > 1_000_000) {
+      return res.status(400).json({ error: 'Invalid price. Use a finite amount from 0 to 1,000,000.' });
+    }
+
+    if (notes !== undefined && (typeof notes !== 'string' || notes.length > 1_000)) {
+      return res.status(400).json({ error: 'Notes must be a string of at most 1,000 characters.' });
     }
 
     await teacherPricingService.setTeacherPrice(teacherId, price, notes);
@@ -71,6 +75,10 @@ export const setTeacherFree = async (req: Request, res: Response) => {
   try {
     const { teacherId } = req.params;
     const { notes } = req.body;
+
+    if (notes !== undefined && (typeof notes !== 'string' || notes.length > 1_000)) {
+      return res.status(400).json({ error: 'Notes must be a string of at most 1,000 characters.' });
+    }
 
     await teacherPricingService.setTeacherFree(teacherId, notes);
     

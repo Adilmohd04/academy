@@ -1,5 +1,6 @@
 import express from 'express';
 import * as teacherPricingController from '../modules/teacher/controllers/teacherPricingController';
+import { requireAuth, requireRole } from '../middleware/clerkAuth';
 
 const router = express.Router();
 
@@ -8,6 +9,10 @@ const router = express.Router();
  * GET /api/teacher-pricing/:teacherId
  */
 router.get('/:teacherId', teacherPricingController.getTeacherPrice);
+
+// The collection and mutations expose pricing controls for the entire
+// teaching team. Keep only the per-teacher lookup public for student booking.
+router.use(requireAuth, requireRole(['admin']));
 
 /**
  * Get all teachers with pricing (Admin only)

@@ -2,6 +2,7 @@ import express from 'express';
 import { requireAuth, requireRole } from '../middleware/clerkAuth';
 import { supabase } from '../config/database';
 import * as certificateService from '../services/certificateService';
+import { issueCertificate } from '../modules/certificate/services/issuanceService';
 
 const router = express.Router();
 
@@ -436,15 +437,12 @@ router.get(
     try {
       const { courseId } = req.params;
       const userId = req.auth?.userId;
+      const role = req.auth?.role;
 
       // Get teacher profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const profileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      if (role !== 'admin' && !profileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
@@ -459,7 +457,7 @@ router.get(
         return res.status(404).json({ error: 'Course not found' });
       }
 
-      if (course.teacher_id !== profile.id) {
+      if (role !== 'admin' && !isTeacherOwner(course.teacher_id, profileId, userId)) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
@@ -483,15 +481,12 @@ router.post(
     try {
       const { courseId, studentId } = req.params;
       const userId = req.auth?.userId;
+      const role = req.auth?.role;
 
       // Get teacher profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const profileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      if (role !== 'admin' && !profileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
@@ -506,24 +501,27 @@ router.post(
         return res.status(404).json({ error: 'Course not found' });
       }
 
-      if (course.teacher_id !== profile.id) {
+      if (role !== 'admin' && !isTeacherOwner(course.teacher_id, profileId, userId)) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
-      // Award certificate
-      const result = await certificateService.awardCertificate(
-        courseId,
-        studentId,
-        profile.id
-      );
-
-      if (!result.success) {
-        return res.status(400).json({ error: result.error });
+      // Use the single issuance lifecycle.  This prevents this legacy route
+      // from creating a certificate without a secure verification code/QR.
+      const result = await issueCertificate(courseId, studentId);
+      if (result.ok === false) {
+        return res.status(400).json({ error: result.error, unmet: result.unmet });
       }
 
-      res.status(201).json({
-        message: 'Certificate awarded successfully',
-        certificate: result.certificate
+      if (String(result.certificate?.status || '').toLowerCase() === 'revoked') {
+        return res.status(409).json({
+          error: 'Certificate is revoked. Use the approved reissue workflow instead.',
+        });
+      }
+
+      res.status(result.alreadyIssued ? 200 : 201).json({
+        message: result.alreadyIssued ? 'Certificate already issued' : 'Certificate awarded successfully',
+        alreadyIssued: result.alreadyIssued,
+        certificate: result.certificate,
       });
     } catch (error: any) {
       console.error('Error in awardCertificate:', error);
@@ -542,19 +540,19 @@ router.post(
       const { certificateId } = req.params;
       const { reason } = req.body;
       const userId = req.auth?.userId;
+      const role = req.auth?.role;
 
       if (!reason) {
         return res.status(400).json({ error: 'Revocation reason is required' });
       }
 
       // Get teacher profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const profileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      // Administrators may revoke any certificate and do not need a teacher
+      // profile. A teacher profile is required only for the ownership check
+      // below, otherwise a valid admin could be incorrectly blocked here.
+      if (role !== 'admin' && !profileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
@@ -578,14 +576,17 @@ router.post(
       const courses: any = certificate.courses;
       const teacherId = Array.isArray(courses) ? courses[0]?.teacher_id : courses?.teacher_id;
 
-      if (teacherId !== profile.id) {
+      if (role !== 'admin' && !isTeacherOwner(teacherId, profileId, userId)) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
       // Revoke certificate
       const result = await certificateService.revokeCertificate(
         certificateId,
-        profile.id,
+        // The legacy audit column is a profile UUID. An admin without a local
+        // profile can still revoke, but must not write a Clerk `user_*` value
+        // into that UUID column.
+        profileId,
         reason
       );
 
@@ -610,15 +611,12 @@ router.get(
     try {
       const { courseId, studentId } = req.params;
       const userId = req.auth?.userId;
+      const role = req.auth?.role;
 
       // Get teacher profile
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('clerk_user_id', userId)
-        .single();
+      const profileId = await getTeacherProfileId(userId);
 
-      if (!profile) {
+      if (role !== 'admin' && !profileId) {
         return res.status(404).json({ error: 'Teacher profile not found' });
       }
 
@@ -633,7 +631,7 @@ router.get(
         return res.status(404).json({ error: 'Course not found' });
       }
 
-      if (course.teacher_id !== profile.id) {
+      if (role !== 'admin' && !isTeacherOwner(course.teacher_id, profileId, userId)) {
         return res.status(403).json({ error: 'Access denied' });
       }
 
@@ -680,8 +678,9 @@ router.get(
         return res.status(404).json({ error: 'Student profile not found' });
       }
 
-      // Get all certificates
-      const certificates = await certificateService.getStudentCertificates(profile.id);
+      // Certificates and enrollments use the Clerk ID as their canonical
+      // student identity; the service also resolves legacy profile IDs.
+      const certificates = await certificateService.getStudentCertificates(userId);
 
       res.json({ certificates });
     } catch (error: any) {
@@ -716,7 +715,7 @@ router.get(
         .from('enrollments')
         .select('id')
         .eq('course_id', courseId)
-        .eq('student_id', profile.id)
+        .eq('student_id', userId)
         .single();
 
       if (!enrollment) {
@@ -724,11 +723,11 @@ router.get(
       }
 
       // Get certificate
-      const certificate = await certificateService.getStudentCertificate(courseId, profile.id);
+      const certificate = await certificateService.getStudentCertificate(courseId, userId);
 
       if (!certificate) {
         // Calculate current grade to show progress
-        const scoreData = await certificateService.calculateFinalScore(courseId, profile.id);
+        const scoreData = await certificateService.calculateFinalScore(courseId, userId);
         
         return res.json({
           has_certificate: false,
@@ -772,7 +771,7 @@ router.get(
         .from('enrollments')
         .select('id')
         .eq('course_id', courseId)
-        .eq('student_id', profile.id)
+        .eq('student_id', userId)
         .single();
 
       if (!enrollment) {
@@ -780,14 +779,14 @@ router.get(
       }
 
       // Calculate final score
-      const scoreData = await certificateService.calculateFinalScore(courseId, profile.id);
+      const scoreData = await certificateService.calculateFinalScore(courseId, userId);
 
       if (!scoreData) {
         return res.status(404).json({ error: 'Unable to calculate grade' });
       }
 
       // Check if has certificate
-      const certificate = await certificateService.getStudentCertificate(courseId, profile.id);
+      const certificate = await certificateService.getStudentCertificate(courseId, userId);
 
       res.json({
         ...scoreData,

@@ -25,6 +25,10 @@
 
 import { supabase } from '../../../config/database';
 import { calculateFinalScore } from './certificateService';
+import {
+  findCertificateEnrollment,
+  resolveCertificateStudentIdentity,
+} from './studentIdentity';
 
 export interface EligibilityResult {
   eligible: boolean;
@@ -62,6 +66,10 @@ export async function isEligibleForCertificateDetailed(
   studentId: string,
 ): Promise<EligibilityResult> {
   const unmet: string[] = [];
+  const studentIdentity = await resolveCertificateStudentIdentity(studentId);
+  if (!studentIdentity) {
+    return { eligible: false, unmet: ['student_identity_not_found'] };
+  }
 
   // ── Gate 1: course must enable certificates ────────────────────────────
   const { data: course, error: courseError } = await supabase
@@ -82,17 +90,15 @@ export async function isEligibleForCertificateDetailed(
   // The enrollments table sometimes uses clerk_user_id and sometimes profile.id
   // for student_id (legacy quirk — see other places in this codebase). We
   // accept either by querying twice.
-  const enrollmentResult = await supabase
-    .from('enrollments')
-    .select('id, completed, progress_percentage')
-    .eq('course_id', courseId)
-    .eq('student_id', studentId)
-    .maybeSingle();
-
-  const enrollment = enrollmentResult.data;
-  if (!enrollment) {
+  const enrollmentLookup = await findCertificateEnrollment(courseId, studentIdentity);
+  if (enrollmentLookup.status === 'error') {
+    unmet.push('eligibility_check_error');
+  } else if (enrollmentLookup.status === 'missing') {
     unmet.push('not_enrolled');
-  } else if (enrollment.completed !== true && (enrollment.progress_percentage ?? 0) < 100) {
+  } else if (
+    enrollmentLookup.enrollment.completed !== true &&
+    (enrollmentLookup.enrollment.progress_percentage ?? 0) < 100
+  ) {
     unmet.push('enrollment_not_completed');
   }
 
@@ -100,18 +106,18 @@ export async function isEligibleForCertificateDetailed(
   // The quiz schema in this codebase nests quizzes under course_lessons with
   // content_type = 'quiz'. Each lesson row holds quiz_questions and a
   // passing_score (when configured).
-  await checkQuizGates(courseId, studentId, unmet);
+  await checkQuizGates(courseId, studentIdentity.profileId, unmet);
 
   // ── Gate 5: required assignments ───────────────────────────────────────
-  await checkAssignmentGates(courseId, studentId, unmet);
+  await checkAssignmentGates(courseId, studentIdentity.profileId, unmet);
 
   // ── Gate 6: final exam ─────────────────────────────────────────────────
-  await checkFinalExamGate(courseId, studentId, unmet);
+  await checkFinalExamGate(courseId, studentIdentity.profileId, unmet);
 
   // ── Gate 7: weighted score must pass ───────────────────────────────────
   let scoreBreakdown: EligibilityResult['scoreBreakdown'] | undefined;
   try {
-    const score = await calculateFinalScore(courseId, studentId);
+    const score = await calculateFinalScore(courseId, studentIdentity.profileId);
     if (score) {
       scoreBreakdown = {
         final_score: Number(score.final_score),

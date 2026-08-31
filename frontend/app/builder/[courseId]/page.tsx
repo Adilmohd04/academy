@@ -28,7 +28,7 @@ interface Course {
 
 export default function CourseOverviewPage() {
   const params = useParams();
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   const router = useRouter();
   const courseId = params.courseId as string;
   
@@ -43,7 +43,8 @@ export default function CourseOverviewPage() {
 
   const fetchCourse = async () => {
     try {
-      const response = await api.courses.getByIdForBuilder(courseId, userId);
+      const token = await getToken();
+      const response = await api.courses.getByIdForBuilder(courseId, token);
       setCourse(response.data);
     } catch (error) {
       console.error('Error fetching course:', error);

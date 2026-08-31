@@ -1,4 +1,6 @@
 import { supabase } from '../../../config/database';
+import { resolveCertificateStudentIdentity } from './studentIdentity';
+import { removeCertificatePdfArtifacts } from './certificatePdfService';
 
 /**
  * Certificate Service
@@ -28,9 +30,17 @@ export const calculateFinalScore = async (
   studentId: string
 ): Promise<FinalScoreResult | null> => {
   try {
+    const identity = await resolveCertificateStudentIdentity(studentId);
+    if (!identity) {
+      console.warn('[certificate] cannot calculate a final score without a matching student profile');
+      return null;
+    }
+
     const { data, error } = await supabase.rpc('calculate_student_final_score', {
       p_course_id: courseId,
-      p_student_id: studentId
+      // The grading function is UUID-backed because assessment rows reference
+      // profiles.id, not the Clerk ID stored by enrollments/certificates.
+      p_student_id: identity.profileId
     });
 
     if (error) {
@@ -75,97 +85,45 @@ export const isEligibleForCertificate = async (
 };
 
 /**
- * Award certificate to student
+ * Legacy award adapter.
+ *
+ * Older teacher routes call this service directly.  Keeping a separate insert
+ * implementation here previously let those routes create certificates without
+ * the template snapshot, public verification code, or QR image that the
+ * lifecycle guarantees.  Delegate to the canonical issuance service instead.
+ *
+ * The dynamic import deliberately avoids a static cycle: issuanceService uses
+ * `calculateFinalScore` from this module.
  */
 export const awardCertificate = async (
   courseId: string,
   studentId: string,
-  issuedBy?: string
+  _issuedBy?: string
 ): Promise<{ success: boolean; certificate?: any; error?: string }> => {
   try {
-    // Check if already has certificate
-    const { data: existing } = await supabase
-      .from('certificates')
-      .select('id, status')
-      .eq('course_id', courseId)
-      .eq('student_id', studentId)
-      .single();
+    const { issueCertificate } = await import('./issuanceService.js');
+    const result = await issueCertificate(courseId, studentId);
 
-    if (existing) {
-      if (existing.status === 'awarded') {
-        return { success: false, error: 'Certificate already awarded' };
-      }
-      // If revoked, can re-award by updating
+    if (result.ok === false) {
+      return {
+        success: false,
+        error:
+          result.error === 'not_eligible'
+            ? 'Student has not met all certificate requirements'
+            : result.error,
+      };
     }
 
-    // Calculate final score
-    const scoreData = await calculateFinalScore(courseId, studentId);
-
-    if (!scoreData || !scoreData.passed) {
-      return { success: false, error: 'Student has not passed the course' };
+    // A revoked record must remain revoked.  Reissuing it in place would both
+    // erase the revocation audit trail and leave a prior public QR ambiguous.
+    if (String(result.certificate?.status || '').toLowerCase() === 'revoked') {
+      return {
+        success: false,
+        error: 'Certificate is revoked. Use the lifecycle reissue workflow instead.',
+      };
     }
 
-    // Generate certificate number
-    const { data: certNumber } = await supabase.rpc('generate_certificate_number');
-
-    if (!certNumber) {
-      return { success: false, error: 'Failed to generate certificate number' };
-    }
-
-    const gradeBreakdown: GradeBreakdown = {
-      quiz_average: scoreData.quiz_average,
-      assignment_average: scoreData.assignment_average,
-      final_exam_score: scoreData.final_exam_score
-    };
-
-    // Create or update certificate
-    if (existing) {
-      // Update existing revoked certificate
-      const { data: certificate, error } = await supabase
-        .from('certificates')
-        .update({
-          final_score: scoreData.final_score,
-          grade_breakdown: gradeBreakdown,
-          status: 'awarded',
-          issued_at: new Date().toISOString(),
-          issued_by: issuedBy || null,
-          revoked_at: null,
-          revoked_by: null,
-          revoke_reason: null
-        })
-        .eq('id', existing.id)
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Error updating certificate:', error);
-        return { success: false, error: 'Failed to update certificate' };
-      }
-
-      return { success: true, certificate };
-    } else {
-      // Create new certificate
-      const { data: certificate, error } = await supabase
-        .from('certificates')
-        .insert({
-          course_id: courseId,
-          student_id: studentId,
-          certificate_number: certNumber,
-          final_score: scoreData.final_score,
-          grade_breakdown: gradeBreakdown,
-          status: 'awarded',
-          issued_by: issuedBy || null
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('Error creating certificate:', error);
-        return { success: false, error: 'Failed to create certificate' };
-      }
-
-      return { success: true, certificate };
-    }
+    return { success: true, certificate: result.certificate };
   } catch (error: any) {
     console.error('Error in awardCertificate:', error);
     return { success: false, error: 'Internal server error' };
@@ -177,23 +135,52 @@ export const awardCertificate = async (
  */
 export const revokeCertificate = async (
   certificateId: string,
-  revokedBy: string,
+  revokedBy: string | null,
   reason: string
 ): Promise<{ success: boolean; error?: string }> => {
   try {
+    const { data: existing, error: existingError } = await supabase
+      .from('certificates')
+      .select('id, status, verification_code')
+      .eq('id', certificateId)
+      .maybeSingle();
+
+    if (existingError || !existing) {
+      return { success: false, error: 'Certificate not found' };
+    }
+
+    // Do not overwrite the original revocation timestamp/reason on retries.
+    // The certificate (including its QR credential) remains in place so public
+    // verification immediately reports the revoked state.
+    if (String(existing.status || '').toLowerCase() === 'revoked') {
+      return { success: true };
+    }
+
     const { error } = await supabase
       .from('certificates')
       .update({
         status: 'revoked',
         revoked_at: new Date().toISOString(),
-        revoked_by: revokedBy,
-        revoke_reason: reason
+        revoked_by: revokedBy ?? null,
+        revoke_reason: reason,
+        // A direct PDF must never continue to look like a current credential
+        // after revocation. The QR row remains so the public verifier reports
+        // the durable revoked state rather than an ambiguous missing record.
+        pdf_url: null,
       })
       .eq('id', certificateId);
 
     if (error) {
       console.error('Error revoking certificate:', error);
       return { success: false, error: 'Failed to revoke certificate' };
+    }
+
+    try {
+      await removeCertificatePdfArtifacts(existing.id, existing.verification_code);
+    } catch (storageError) {
+      // Revocation is authoritative in the database. Do not turn a storage
+      // cleanup issue into a failed lifecycle transition.
+      console.warn('[certificate] could not remove revoked PDF artifact:', storageError);
     }
 
     return { success: true };
@@ -211,6 +198,9 @@ export const getStudentCertificate = async (
   studentId: string
 ): Promise<any | null> => {
   try {
+    const identity = await resolveCertificateStudentIdentity(studentId);
+    if (!identity) return null;
+
     const { data: certificate, error } = await supabase
       .from('certificates')
       .select(`
@@ -221,8 +211,15 @@ export const getStudentCertificate = async (
         )
       `)
       .eq('course_id', courseId)
-      .eq('student_id', studentId)
-      .single();
+      .eq('student_id', identity.clerkUserId)
+      // A revoked record is preserved when a corrected certificate is
+      // reissued. The student-facing course view must select the one current
+      // credential rather than failing because the immutable history has two
+      // rows.
+      .in('status', ['active', 'awarded', 'issued'])
+      .order('issued_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (error) {
       if (error.code === 'PGRST116') {
@@ -302,6 +299,9 @@ export const getStudentCertificates = async (
   studentId: string
 ): Promise<any[]> => {
   try {
+    const identity = await resolveCertificateStudentIdentity(studentId);
+    if (!identity) return [];
+
     const { data: certificates, error } = await supabase
       .from('certificates')
       .select(`
@@ -312,8 +312,12 @@ export const getStudentCertificates = async (
           category
         )
       `)
-      .eq('student_id', studentId)
-      .eq('status', 'awarded')
+      .eq('student_id', identity.clerkUserId)
+      // Revoked certificates are included deliberately. Dropping them made a
+      // revoked credential silently disappear from the student's list, which
+      // is worse than showing it as revoked — the portal renders an explicit
+      // "Revoked" state, and the public verification page reports the same.
+      .in('status', ['active', 'awarded', 'issued', 'revoked'])
       .order('issued_at', { ascending: false });
 
     if (error) {

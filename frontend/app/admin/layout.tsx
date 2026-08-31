@@ -24,6 +24,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { label: 'Teacher Management', href: '/admin/teachers', icon: School },
     { label: 'Pending Approvals', href: '/admin/approvals', icon: CheckCircle },
     { label: 'Course Management', href: '/admin/courses/manage', icon: BookOpen },
+    { label: 'Certificate Review', href: '/admin/certificates/requests', icon: Award },
     { label: 'Certificate Design', href: '/admin/certificates/design', icon: Award },
     { label: 'All Meetings', href: '/admin/all-meetings', icon: Calendar },
     { label: 'Announcements', href: '/admin/announcements', icon: Bell },

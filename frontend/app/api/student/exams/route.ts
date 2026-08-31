@@ -1,14 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import studentExamService from '@/backend/src/modules/student/services/studentExamService';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
-    const userId = req.headers.get('x-clerk-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authorization = await requireRole(['student']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
     }
 
-    const exams = await studentExamService.getAvailableExams(userId);
+    const exams = await studentExamService.getAvailableExams(
+      authorization.actor.userId,
+      authorization.actor.profileId,
+    );
     return NextResponse.json(exams);
   } catch (error) {
     console.error('Error fetching exams:', error);

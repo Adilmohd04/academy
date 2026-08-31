@@ -5,6 +5,8 @@ import { useState, useEffect } from 'react';
 import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 import { Calendar, CheckCircle, Clock } from 'lucide-react';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface AttendanceRecord {
   id: string;
   date: string;
@@ -28,25 +30,44 @@ export default function TeacherAttendance() {
   const fetchAttendance = async () => {
     try {
       const token = await getToken();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/meetings/teacher/assigned`, {
+      const response = await fetch(`${API}/api/meetings/teacher/assigned`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!response.ok) {
+        throw new Error('Unable to load attendance records');
+      }
       const data = await response.json();
-      
-      if (data.meetings) {
-        const attendanceRecords = data.meetings.map((meeting: any) => ({
+      // The protected endpoint returns `{ data: [...] }`; tolerate the old
+      // response shape during rollout so teachers do not see an empty screen.
+      const meetings = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.meetings)
+            ? data.meetings
+            : [];
+
+      const attendanceRecords = meetings.map((meeting: any) => {
+        const timeSlot = Array.isArray(meeting.time_slots)
+          ? meeting.time_slots[0]
+          : meeting.time_slots;
+        const startTime = timeSlot?.start_time || meeting.meeting_time || '';
+        const endTime = timeSlot?.end_time || '';
+
+        return {
           id: meeting.id,
           date: meeting.meeting_date,
-          time: meeting.meeting_time || 'Time not set',
-          studentName: meeting.student_name,
-          studentEmail: meeting.student_email,
-          status: meeting.attendance,
+          time: startTime && endTime ? `${startTime} – ${endTime}` : startTime || 'Time not set',
+          studentName: meeting.student_name || 'Student',
+          studentEmail: meeting.student_email || '',
+          status: meeting.attendance || 'pending',
           meetingLink: meeting.meeting_link,
-        }));
-        setAttendance(attendanceRecords);
-      }
+        };
+      });
+      setAttendance(attendanceRecords);
     } catch (error) {
       console.error('Error fetching attendance:', error);
+      setAttendance([]);
     } finally {
       setLoading(false);
     }

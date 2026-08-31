@@ -14,7 +14,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@clerk/nextjs';
 import toast from 'react-hot-toast';
-import { Award, Plus, Star, Trash2, ClipboardCheck } from 'lucide-react';
+import { Award, Plus, Star, Trash2, ClipboardCheck, ShieldCheck } from 'lucide-react';
 import type { TemplateRecord } from '@/features/certificates/api/templateApi';
 
 const API = process.env.NEXT_PUBLIC_API_URL || '';
@@ -82,6 +82,13 @@ export default function AdminCertificateLibraryPage() {
           <p className="text-slate-500 text-sm mt-1">Manage global and course-specific certificate designs.</p>
         </div>
         <div className="flex gap-2">
+          <Link
+            href="/admin/certificates/requests"
+            className="px-3 py-2 rounded-lg bg-emerald-700 text-white text-sm font-medium hover:bg-emerald-800 flex items-center gap-1.5"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            Review exceptions
+          </Link>
           <Link
             href="/admin/certificates/approvals"
             className="px-3 py-2 rounded-lg bg-white border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 flex items-center gap-1.5"

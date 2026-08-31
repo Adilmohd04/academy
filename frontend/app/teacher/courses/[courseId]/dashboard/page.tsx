@@ -1,18 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { useAuth } from '@clerk/nextjs';
 import { Users, TrendingUp, Award, BookOpen, ChevronRight, Clock, CheckCircle } from 'lucide-react';
 import IslamicLoader from '@/components/shared/IslamicLoader';
 
 interface Student {
   student_id: string;
-  first_name: string;
-  last_name: string;
+  student_name?: string;
+  first_name?: string;
+  last_name?: string;
   email: string;
   enrolled_at: string;
   progress_percentage: number;
-  last_accessed_at?: string;
+  last_accessed?: string;
   completed_lessons: number;
   total_lessons: number;
   quiz_average?: number;
@@ -31,40 +33,61 @@ interface CourseStats {
 export default function TeacherCourseDashboard() {
   const params = useParams();
   const router = useRouter();
+  const { getToken } = useAuth();
   const courseId = params.courseId as string;
 
   const [students, setStudents] = useState<Student[]>([]);
   const [stats, setStats] = useState<CourseStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchEnrollments();
-  }, [courseId]);
-
-  const fetchEnrollments = async () => {
+  const fetchEnrollments = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
+      const token = await getToken();
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}/enrollments`,
+        `${process.env.NEXT_PUBLIC_API_URL || ''}/api/courses/${courseId}/enrollments`,
         {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           }
         }
       );
 
-      if (!response.ok) throw new Error('Failed to fetch enrollments');
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || body.message || 'Failed to fetch enrollments');
+      }
 
       const data = await response.json();
-      setStudents(data.students);
-      setStats(data.stats);
+      setStudents(data.students || []);
+      setStats(data.stats || null);
     } catch (error) {
       console.error('Error fetching enrollments:', error);
+      setError(error instanceof Error ? error.message : 'Could not load the course dashboard.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [courseId, getToken]);
+
+  useEffect(() => {
+    if (courseId) void fetchEnrollments();
+  }, [courseId, fetchEnrollments]);
 
   if (loading) return <IslamicLoader />;
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-teal-50 via-white to-emerald-50 p-6">
+        <div className="mx-auto max-w-xl rounded-2xl border border-rose-200 bg-white p-8 text-center shadow-lg">
+          <h1 className="text-xl font-bold text-slate-900">Course dashboard unavailable</h1>
+          <p className="mt-2 text-sm text-slate-600">{error}</p>
+          <button onClick={() => void fetchEnrollments()} className="mt-5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700">Try again</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-teal-50 via-white to-emerald-50 p-6">
@@ -167,7 +190,7 @@ export default function TeacherCourseDashboard() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div>
                           <div className="text-sm font-medium text-gray-900">
-                            {student.first_name} {student.last_name}
+                            {student.student_name || [student.first_name, student.last_name].filter(Boolean).join(' ') || 'Student'}
                           </div>
                           <div className="text-sm text-gray-500">{student.email}</div>
                         </div>
@@ -208,8 +231,8 @@ export default function TeacherCourseDashboard() {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center gap-1 text-sm text-gray-500">
                           <Clock className="w-4 h-4" />
-                          {student.last_accessed_at
-                            ? new Date(student.last_accessed_at).toLocaleDateString()
+                          {student.last_accessed
+                            ? new Date(student.last_accessed).toLocaleDateString()
                             : 'Never'}
                         </div>
                       </td>

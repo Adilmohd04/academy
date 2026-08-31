@@ -104,7 +104,7 @@ export default function FinalExamInterview({
       } else if (userId) {
         const token = await getToken();
         try {
-          const detailsResponse = await api.student.getExamInterviewDetails(exam.id, token, userId);
+          const detailsResponse = await api.student.getExamInterviewDetails(exam.id, token);
           setMyInterview(mapInterview(detailsResponse.data));
         } catch {
           setMyInterview(null);
@@ -152,8 +152,7 @@ export default function FinalExamInterview({
           duration_minutes: durationMinutes,
           meeting_link: slot.meetingUrl || null
         },
-        token,
-        userId
+        token
       );
 
       setSelectedSlot(null);
@@ -194,8 +193,7 @@ export default function FinalExamInterview({
             duration_minutes: durationMinutes,
             meeting_link: slot.meetingUrl || myInterview.meetingUrl || null
         },
-        token,
-        userId
+        token
       );
 
       setSelectedSlot(null);
@@ -220,7 +218,7 @@ export default function FinalExamInterview({
 
       setActionError(null);
       const token = await getToken();
-      await api.student.confirmFinalExamInterview(exam.id, myInterview.id, token, userId);
+      await api.student.confirmFinalExamInterview(exam.id, myInterview.id, token);
 
       await fetchInterviewData();
     } catch (error: unknown) {

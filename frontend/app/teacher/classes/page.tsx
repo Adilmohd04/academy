@@ -14,6 +14,8 @@ import { IslamicPatternBackground } from '@/components/ui/IslamicPatterns';
 import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 import toast from 'react-hot-toast';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface Resource {
   name: string;
   url: string;
@@ -60,7 +62,7 @@ export default function TeacherClasses() {
   const fetchClasses = async () => {
     try {
       const token = await getToken();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/meetings/teacher/assigned`, {
+      const response = await fetch(`${API}/api/meetings/teacher/assigned`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const result = await response.json();
@@ -196,7 +198,7 @@ export default function TeacherClasses() {
       
       // Update ALL bookings in this group
       const updatePromises = classSession.students.map(student => 
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/meetings/${student.bookingId}/resources`, {
+        fetch(`${API}/api/meetings/${student.bookingId}/resources`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -229,7 +231,7 @@ export default function TeacherClasses() {
   const markAttendance = async (bookingId: string, status: string) => {
     try {
       const token = await getToken();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/meetings/${bookingId}/attendance`, {
+      const response = await fetch(`${API}/api/meetings/${bookingId}/attendance`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

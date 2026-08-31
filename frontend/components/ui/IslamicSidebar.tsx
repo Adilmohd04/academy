@@ -11,6 +11,7 @@ import { usePathname } from 'next/navigation';
 import { LucideIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import { UserButton } from '@clerk/nextjs';
 import { BrandLogo } from '@/components/ui/BrandLogo';
+import { SidebarTooltip, useSidebarTooltip } from '@/components/ui/SidebarTooltip';
 
 interface NavItem {
   label: string;
@@ -39,6 +40,7 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
+  const { tooltip, show: showTooltip, hide: hideTooltip } = useSidebarTooltip(collapsed);
 
   const toggleExpand = (label: string) => {
     setExpandedItems(prev =>
@@ -174,7 +176,11 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
                     }
                     ${collapsed ? 'justify-center' : ''}
                   `}
-                  title={collapsed ? item.label : ''}
+                  aria-label={item.label}
+                  onMouseEnter={showTooltip(item.label)}
+                  onMouseLeave={hideTooltip}
+                  onFocus={showTooltip(item.label)}
+                  onBlur={hideTooltip}
                 >
                   <item.icon className={`w-5 h-5 ${isActive ? 'scale-105' : 'group-hover:scale-105'} transition-transform`} />
                   
@@ -249,6 +255,8 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
         )}
       </div>
     </div>
+
+    <SidebarTooltip tooltip={tooltip} />
     </>
   );
 };

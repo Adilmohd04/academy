@@ -135,29 +135,68 @@ export const getCourseDetails = async (req: any, res: Response) => {
   try {
     const { courseId } = req.params;
     const userId = req.auth?.userId;
+    const role = req.auth?.role;
 
-    // Get teacher profile
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Resolve both canonical identities. Courses created through the current
+    // `/api/courses` flow store the Clerk id, while older courses store the
+    // profile UUID.
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('id, full_name, email')
       .eq('clerk_user_id', userId)
-      .single();
+      .maybeSingle();
 
-    if (profileError || !profile) {
+    if (profileError || (!profile && role !== 'admin')) {
       return res.status(404).json({ error: 'Teacher profile not found' });
     }
 
-    // Get course details
+    // Load the course first, then grant access to the owner, a co-teacher, or
+    // an administrator. Filtering the initial query by profile.id locked a
+    // teacher out of every newly-created (Clerk-id keyed) course.
     const { data: course, error: courseError } = await supabase
       .from('courses')
       .select('*')
       .eq('id', courseId)
-      .eq('teacher_id', profile.id)
-      .single();
+      .maybeSingle();
 
     if (courseError || !course) {
       return res.status(404).json({ error: 'Course not found' });
     }
+
+    const isOwner = course.teacher_id === userId || course.teacher_id === profile?.id;
+    let isCoTeacher = false;
+    if (!isOwner && role !== 'admin' && profile?.id) {
+      const { data: coTeacher } = await supabase
+        .from('course_teachers')
+        .select('id')
+        .eq('course_id', courseId)
+        .in('teacher_id', [profile.id, userId])
+        .limit(1)
+        .maybeSingle();
+      isCoTeacher = Boolean(coTeacher);
+    }
+
+    if (role !== 'admin' && !isOwner && !isCoTeacher) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const [ownerByProfileId, ownerByClerkId] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .eq('id', course.teacher_id)
+        .maybeSingle(),
+      supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .eq('clerk_user_id', course.teacher_id)
+        .maybeSingle(),
+    ]);
+    const courseOwner = ownerByProfileId.data || ownerByClerkId.data || profile;
 
     // Get weeks with lessons, live sessions, co-teachers, and teacher profile in parallel
     const [weeksResult, sessionsResult, gradingResult, accessResult, coTeachersResult] = await Promise.all([
@@ -215,8 +254,10 @@ export const getCourseDetails = async (req: any, res: Response) => {
     res.json({
       course: {
         ...course,
-        teacher: { id: profile.id, full_name: profile.full_name, email: profile.email },
-        teacher_name: profile.full_name || profile.email,
+        teacher: courseOwner
+          ? { id: courseOwner.id, full_name: courseOwner.full_name, email: courseOwner.email }
+          : null,
+        teacher_name: courseOwner?.full_name || courseOwner?.email || 'Instructor',
         co_teachers: coTeachers
       },
       weeks: weeksResult.data || [],

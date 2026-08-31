@@ -5,7 +5,6 @@
 
 import { Request, Response } from 'express';
 import * as paymentService from '../services/paymentService';
-import * as sharedPaymentController from '../../shared/controllers/paymentController';
 
 /**
  * Create a payment order for course enrollment
@@ -28,7 +27,8 @@ export const createPaymentOrder = async (req: Request, res: Response) => {
     res.status(200).json(result);
   } catch (error: any) {
     console.error('Error creating payment order:', error);
-    res.status(500).json({ 
+    const statusCode = error instanceof paymentService.StudentPaymentError ? error.statusCode : 500;
+    res.status(statusCode).json({
       success: false, 
       message: error.message || 'Failed to create payment order' 
     });
@@ -39,8 +39,45 @@ export const createPaymentOrder = async (req: Request, res: Response) => {
  * Verify and confirm Razorpay payment
  */
 export const verifyPayment = async (req: Request, res: Response) => {
-  // Delegate to shared payment controller which contains enrollment and booking logic
-  return sharedPaymentController.verifyRazorpayPayment(req as any, res as any);
+  try {
+    const studentId = req.auth?.userId;
+    const {
+      razorpay_order_id: razorpayOrderId,
+      razorpay_payment_id: razorpayPaymentId,
+      razorpay_signature: razorpaySignature,
+    } = req.body || {};
+
+    if (!studentId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    if (
+      typeof razorpayOrderId !== 'string' ||
+      typeof razorpayPaymentId !== 'string' ||
+      typeof razorpaySignature !== 'string'
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment verification details are required',
+      });
+    }
+
+    const result = await paymentService.confirmPayment(
+      studentId,
+      razorpayOrderId,
+      razorpayPaymentId,
+      razorpaySignature,
+    );
+
+    return res.json(result);
+  } catch (error: any) {
+    console.error('Error verifying student payment:', error);
+    const statusCode = error instanceof paymentService.StudentPaymentError ? error.statusCode : 500;
+    return res.status(statusCode).json({
+      success: false,
+      message: error.message || 'Failed to verify payment',
+    });
+  }
 };
 
 /**

@@ -9,7 +9,6 @@ import {
   Loader2, DollarSign, Sparkles, CheckCircle, AlertCircle, XCircle,
   MoreHorizontal
 } from 'lucide-react';
-import { api } from '@/lib/api';
 
 interface Meeting {
   id: string;
@@ -48,8 +47,19 @@ export default function AllMeetingsPage() {
   const fetchAllMeetings = async () => {
     try {
       const token = await getToken();
-      const response = await api.admin.getAllMeetings(token);
-      setMeetings(Array.isArray(response.data) ? response.data : []);
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      // Keep this on the protected same-origin route. It has the admin
+      // authorization check and returns the display shape used below.
+      const response = await fetch('/api/meetings/all', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to load meetings.');
+      }
+
+      setMeetings(Array.isArray(data) ? data : []);
       setLoading(false);
     } catch (error) {
       console.error('Error fetching meetings:', error);

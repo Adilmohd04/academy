@@ -1,103 +1,316 @@
 import { Request, Response } from 'express';
 import { supabase } from '../../../config/database';
 
+const RESOURCE_TYPES = new Set([
+  'pdf',
+  'document',
+  'image',
+  'video',
+  'audio',
+  'link',
+  'other',
+  // Kept for compatibility with the existing teacher resource UI.
+  'folder',
+  'book',
+]);
+
+const RESOURCE_STATUSES = new Set(['pending', 'approved', 'rejected']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_TITLE_LENGTH = 255;
+const MAX_DESCRIPTION_LENGTH = 10_000;
+const MAX_CATEGORY_LENGTH = 100;
+
+type ResourceInput = {
+  title: string;
+  description: string;
+  type: string;
+  url: string;
+  category: string;
+  parentId: string | null;
+};
+
+const isUuid = (value: unknown): value is string =>
+  typeof value === 'string' && UUID_PATTERN.test(value);
+
+const isSafeResourceUrl = (value: string): boolean => {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:';
+  } catch {
+    return false;
+  }
+};
+
+const parseResourceInput = (body: unknown): { value: ResourceInput } | { error: string } => {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { error: 'A resource payload is required' };
+  }
+
+  const input = body as Record<string, unknown>;
+  const title = typeof input.title === 'string' ? input.title.trim() : '';
+  const description = typeof input.description === 'string' ? input.description.trim() : '';
+  const type = typeof input.type === 'string' ? input.type.trim().toLowerCase() : '';
+  const url = typeof input.url === 'string' ? input.url.trim() : '';
+  const category = typeof input.category === 'string' && input.category.trim()
+    ? input.category.trim()
+    : 'General';
+  const rawParentId = input.parent_id;
+  const parentId = rawParentId === undefined || rawParentId === null || rawParentId === ''
+    ? null
+    : typeof rawParentId === 'string' ? rawParentId.trim() : undefined;
+
+  if (!title || title.length > MAX_TITLE_LENGTH) {
+    return { error: `Title must be between 1 and ${MAX_TITLE_LENGTH} characters` };
+  }
+
+  if (description.length > MAX_DESCRIPTION_LENGTH) {
+    return { error: `Description must be at most ${MAX_DESCRIPTION_LENGTH} characters` };
+  }
+
+  if (!RESOURCE_TYPES.has(type)) {
+    return { error: 'Invalid resource type' };
+  }
+
+  if (category.length > MAX_CATEGORY_LENGTH) {
+    return { error: `Category must be at most ${MAX_CATEGORY_LENGTH} characters` };
+  }
+
+  if (parentId !== null && (!parentId || !isUuid(parentId))) {
+    return { error: 'Invalid parent resource' };
+  }
+
+  if (type === 'folder') {
+    if (url !== '#folder') {
+      return { error: 'Folders must use the folder placeholder URL' };
+    }
+  } else if (!isSafeResourceUrl(url)) {
+    return { error: 'Resource URL must be an http or https URL' };
+  }
+
+  return {
+    value: { title, description, type, url, category, parentId },
+  };
+};
+
+const getAuthenticatedActor = (req: Request) => {
+  const userId = req.auth?.userId;
+  const role = req.auth?.role;
+
+  if (!userId || !role) {
+    return null;
+  }
+
+  return { userId, role };
+};
+
+const isPgrstNoRows = (error: unknown) =>
+  Boolean(error && typeof error === 'object' && (error as { code?: string }).code === 'PGRST116');
+
+/**
+ * Return only the resources that the authenticated role may see.  The old
+ * implementation trusted `?role=student`, which let any signed-in user make
+ * a different role's query.  Roles now come exclusively from requireAuth.
+ */
 export const getResources = async (req: Request, res: Response) => {
   try {
-    const { role } = req.query;
-    
+    const actor = getAuthenticatedActor(req);
+    if (!actor) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     let query = supabase
       .from('resources')
-      .select('*, profiles(full_name)')
-      .eq('is_active', true)
+      .select('*')
       .order('created_at', { ascending: false });
 
-    // If student, only show approved
-    if (role === 'student') {
+    if (actor.role === 'teacher') {
+      query = query.eq('created_by', actor.userId);
+    } else if (actor.role === 'student') {
       query = query.eq('status', 'approved');
+    } else if (actor.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden' });
     }
 
     const { data, error } = await query;
-
-    if (error) throw error;
-    res.json(data);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-export const createResource = async (req: Request, res: Response) => {
-  try {
-    const { title, description, type, url } = req.body;
-    const userId = (req as any).auth?.userId;
-    const userRole = (req as any).auth?.sessionClaims?.metadata?.role || 'student';
-
-    // Get profile id
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('clerk_user_id', userId)
-      .single();
-
-    if (!profile) {
-      return res.status(404).json({ error: 'Profile not found' });
+    if (error) {
+      console.error('Unable to fetch resources:', error);
+      return res.status(500).json({ error: 'Failed to fetch resources' });
     }
 
-    const status = userRole === 'admin' ? 'approved' : 'pending';
-
-    const { data, error } = await supabase
-      .from('resources')
-      .insert([
-        {
-          title,
-          description,
-          type,
-          url,
-          created_by: userId,
-          status,
-          is_active: true
-        }
-      ])
-      .select()
-      .single();
-
-    if (error) throw error;
-    res.status(201).json(data);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    return res.json(data || []);
+  } catch (error) {
+    console.error('Unable to fetch resources:', error);
+    return res.status(500).json({ error: 'Failed to fetch resources' });
   }
 };
 
+/**
+ * Create a resource without accepting ownership, approval state, or a parent
+ * folder from another teacher.  Storage paths are generated by the upload
+ * route; this endpoint accepts only a completed, http(s) resource URL.
+ */
+export const createResource = async (req: Request, res: Response) => {
+  try {
+    const actor = getAuthenticatedActor(req);
+    if (!actor) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (actor.role !== 'admin' && actor.role !== 'teacher') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const parsed = parseResourceInput(req.body);
+    if ('error' in parsed) {
+      return res.status(400).json({ error: parsed.error });
+    }
+
+    const { title, description, type, url, category, parentId } = parsed.value;
+
+    if (parentId) {
+      const { data: parent, error: parentError } = await supabase
+        .from('resources')
+        .select('id, type, created_by')
+        .eq('id', parentId)
+        .maybeSingle();
+
+      if (parentError) {
+        console.error('Unable to verify resource parent:', parentError);
+        return res.status(500).json({ error: 'Unable to create resource' });
+      }
+
+      if (!parent || parent.type !== 'folder') {
+        return res.status(400).json({ error: 'Parent folder not found' });
+      }
+
+      if (actor.role !== 'admin' && parent.created_by !== actor.userId) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+    }
+
+    const { data, error } = await supabase
+      .from('resources')
+      .insert({
+        title,
+        description,
+        type,
+        url,
+        category,
+        parent_id: parentId,
+        // Never trust a creator or status supplied by the browser.
+        created_by: actor.userId,
+        status: actor.role === 'admin' ? 'approved' : 'pending',
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Unable to create resource:', error);
+      return res.status(500).json({ error: 'Failed to create resource' });
+    }
+
+    return res.status(201).json(data);
+  } catch (error) {
+    console.error('Unable to create resource:', error);
+    return res.status(500).json({ error: 'Failed to create resource' });
+  }
+};
+
+/**
+ * Admins alone may approve/reject uploads.  The same check lives here and in
+ * the route so future route composition cannot accidentally expose it.
+ */
 export const updateResourceStatus = async (req: Request, res: Response) => {
   try {
+    const actor = getAuthenticatedActor(req);
+    if (!actor) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (actor.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
     const { id } = req.params;
-    const { status } = req.body; // 'approved' or 'rejected'
+    const status = typeof req.body?.status === 'string' ? req.body.status.trim().toLowerCase() : '';
+
+    if (!isUuid(id)) {
+      return res.status(400).json({ error: 'Invalid resource ID' });
+    }
+
+    if (!RESOURCE_STATUSES.has(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
 
     const { data, error } = await supabase
       .from('resources')
-      .update({ status, updated_at: new Date().toISOString() })
+      .update({ status })
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
 
-    if (error) throw error;
-    res.json(data);
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    if (error) {
+      console.error('Unable to update resource status:', error);
+      return res.status(500).json({ error: 'Failed to update resource status' });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Resource not found' });
+    }
+
+    return res.json(data);
+  } catch (error) {
+    console.error('Unable to update resource status:', error);
+    return res.status(500).json({ error: 'Failed to update resource status' });
   }
 };
 
+/**
+ * Teachers may remove only resources they created; admins retain moderation
+ * authority.  The ownership predicate is included in the delete itself to
+ * make the authorization atomic.
+ */
 export const deleteResource = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const actor = getAuthenticatedActor(req);
+    if (!actor) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
-    const { error } = await supabase
+    if (actor.role !== 'admin' && actor.role !== 'teacher') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const { id } = req.params;
+    if (!isUuid(id)) {
+      return res.status(400).json({ error: 'Invalid resource ID' });
+    }
+
+    let query = supabase
       .from('resources')
-      .update({ is_active: false, updated_at: new Date().toISOString() }) // Soft delete
+      .delete()
       .eq('id', id);
 
-    if (error) throw error;
-    res.json({ success: true });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    if (actor.role === 'teacher') {
+      query = query.eq('created_by', actor.userId);
+    }
+
+    const { data, error } = await query
+      .select('id')
+      .maybeSingle();
+
+    if (error && !isPgrstNoRows(error)) {
+      console.error('Unable to delete resource:', error);
+      return res.status(500).json({ error: 'Failed to delete resource' });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Resource not found' });
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    console.error('Unable to delete resource:', error);
+    return res.status(500).json({ error: 'Failed to delete resource' });
   }
 };

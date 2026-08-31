@@ -1,12 +1,9 @@
 'use client';
 
-import { useAuth } from '@clerk/nextjs';
 import { Layers3, Sparkles } from 'lucide-react';
 import { CertificateTemplateDesigner } from '@/features/certificates';
 
 export default function AdminCertificateDesignPage() {
-  const { userId } = useAuth();
-
   return (
     <div className="admin-page-wrap space-y-6">
       <section className="relative overflow-hidden rounded-[28px] border border-[rgba(230,225,213,0.95)] bg-[#20342d] p-8 text-white shadow-[0_20px_55px_rgba(18,30,24,0.18)]">
@@ -25,7 +22,7 @@ export default function AdminCertificateDesignPage() {
       </section>
 
       <div className="admin-panel p-4 md:p-6">
-        <CertificateTemplateDesigner mode="admin" userId={userId} />
+        <CertificateTemplateDesigner mode="admin" />
       </div>
     </div>
   );

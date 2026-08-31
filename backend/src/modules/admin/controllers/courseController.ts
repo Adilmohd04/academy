@@ -89,10 +89,11 @@ export const removeCoTeacher = async (req: Request, res: Response) => {
 export const updateCoursePrice = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { price } = req.body;
+    const rawPrice = req.body?.price;
+    const price = typeof rawPrice === 'number' ? rawPrice : Number.NaN;
     
-    if (price === undefined || price === null) {
-      return res.status(400).json({ error: 'Price is required' });
+    if (!Number.isFinite(price) || price < 0 || price > 1_000_000) {
+      return res.status(400).json({ error: 'Price must be a finite amount between 0 and 1,000,000' });
     }
     
     const result = await courseService.updateCoursePrice(id, price);

@@ -23,6 +23,21 @@ interface CourseStats {
   total_lessons: number;
 }
 
+// Older rows may use either a Clerk user ID or a profiles.id UUID in
+// courses.teacher_id. Resolve both forms before checking ownership so valid
+// teachers are not locked out, while still denying other teachers.
+const getTeacherIdCandidates = async (clerkUserId: string): Promise<string[]> => {
+  const candidates = [clerkUserId];
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('clerk_user_id', clerkUserId)
+    .maybeSingle();
+
+  if (profile?.id) candidates.push(profile.id);
+  return candidates;
+};
+
 export const getCourseEnrollments = async (
   courseId: string,
   teacherId: string
@@ -32,7 +47,7 @@ export const getCourseEnrollments = async (
     .from('courses')
     .select('id')
     .eq('id', courseId)
-    .eq('teacher_id', teacherId)
+    .in('teacher_id', await getTeacherIdCandidates(teacherId))
     .single();
 
   if (courseCheckError || !courseCheck) {
@@ -127,7 +142,7 @@ export const getStudentCourseDetails = async (
     .from('courses')
     .select('id')
     .eq('id', courseId)
-    .eq('teacher_id', teacherId)
+    .in('teacher_id', await getTeacherIdCandidates(teacherId))
     .single();
 
   if (courseCheckError || !courseCheck) {

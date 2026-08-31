@@ -1,4 +1,5 @@
 import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 import { NextRequest, NextResponse } from 'next/server';
 
 
@@ -6,6 +7,11 @@ const supabase = getSupabaseAdminClient();
 
 export async function GET(request: NextRequest) {
   try {
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
+    }
+
     // Fetch all meeting bookings with teacher slot details
     const { data: requests, error } = await supabase
       .from('meeting_bookings')

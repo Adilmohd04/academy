@@ -81,10 +81,14 @@ export class TeacherAvailabilityService {
       }
 
       // Get teacher pricing to check if they are a FREE teacher
+      // `teacher_pricing.teacher_id` is the Clerk identifier (the same value
+      // stored on new availability rows), not the profiles UUID. Looking it
+      // up by `profile.id` meant admin-configured free teachers were treated
+      // as paid whenever they created a new slot.
       const { data: pricingData } = await supabase
         .from('teacher_pricing')
         .select('is_free')
-        .eq('teacher_id', profile.id)
+        .eq('teacher_id', teacherId)
         .single();
 
       const isTeacherFree = pricingData?.is_free || false;

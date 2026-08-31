@@ -6,6 +6,7 @@
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { supabase } from '../../../config/database';
+import { checkPrerequisites } from './prerequisiteService';
 
 // Initialize Razorpay instance
 const razorpay = new Razorpay({
@@ -13,36 +14,169 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET || '',
 });
 
+export class StudentPaymentError extends Error {
+  constructor(message: string, public readonly statusCode: number) {
+    super(message);
+    this.name = 'StudentPaymentError';
+  }
+}
+
+const paymentSignatureMatches = (
+  razorpayOrderId: string,
+  razorpayPaymentId: string,
+  razorpaySignature: string,
+): boolean => {
+  const secret = process.env.RAZORPAY_KEY_SECRET || '';
+  if (!secret || !razorpaySignature) return false;
+
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(`${razorpayOrderId}|${razorpayPaymentId}`)
+    .digest('hex');
+
+  const supplied = Buffer.from(razorpaySignature, 'utf8');
+  const expectedBuffer = Buffer.from(expected, 'utf8');
+  return supplied.length === expectedBuffer.length && crypto.timingSafeEqual(supplied, expectedBuffer);
+};
+
+const ensurePaidCourseEnrollment = async (studentId: string, payment: any) => {
+  const { data: existingEnrollment, error: lookupError } = await supabase
+    .from('enrollments')
+    .select('*')
+    .eq('student_id', studentId)
+    .eq('course_id', payment.course_id)
+    .limit(1);
+
+  if (lookupError) {
+    throw new StudentPaymentError('Unable to confirm course enrollment', 500);
+  }
+
+  if (existingEnrollment?.[0]) {
+    return existingEnrollment[0];
+  }
+
+  const { data: enrollment, error: enrollmentError } = await supabase
+    .from('enrollments')
+    .insert({
+      student_id: studentId,
+      course_id: payment.course_id,
+      status: 'active',
+      payment_status: 'completed',
+      enrolled_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
+
+  if (!enrollmentError) {
+    return enrollment;
+  }
+
+  // A repeated payment callback can race with the first successful callback.
+  // Resolve the unique enrollment rather than issuing a second course access.
+  const { data: racedEnrollment } = await supabase
+    .from('enrollments')
+    .select('*')
+    .eq('student_id', studentId)
+    .eq('course_id', payment.course_id)
+    .limit(1);
+
+  if (racedEnrollment?.[0]) {
+    return racedEnrollment[0];
+  }
+
+  console.error('Error creating course enrollment after payment:', enrollmentError);
+  throw new StudentPaymentError('Payment completed, but enrollment could not be finalized', 500);
+};
+
 /**
  * Create a Razorpay order for course enrollment
  */
 export async function createPaymentOrder(studentId: string, courseId: string) {
   try {
+    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+      throw new StudentPaymentError('Payments are temporarily unavailable', 503);
+    }
+
     // Get course details
     const { data: course, error: courseError } = await supabase
       .from('courses')
-      .select('id, title, price')
+      .select('id, title, price, approval_status, status, is_published, enrollment_limit')
       .eq('id', courseId)
       .single();
 
     if (courseError || !course) {
-      throw new Error('Course not found');
+      throw new StudentPaymentError('Course not found', 404);
     }
 
-    if (!course.price || course.price <= 0) {
-      throw new Error('Invalid course price');
+    if (
+      course.approval_status !== 'approved' ||
+      (course.status !== 'published' && course.is_published !== true)
+    ) {
+      throw new StudentPaymentError('This course is not available for enrollment', 403);
+    }
+
+    const courseAmount = Number(course.price);
+    if (!Number.isFinite(courseAmount) || courseAmount <= 0) {
+      throw new StudentPaymentError('This course does not require a payment order', 400);
     }
 
     // Get student profile
     const { data: profile } = await supabase
       .from('profiles')
-      .select('full_name, email')
+      .select('id, full_name, email')
       .eq('clerk_user_id', studentId)
-      .single();
+      .maybeSingle();
+
+    const enrollmentIdentityAliases = [studentId, profile?.id].filter(Boolean);
+    const { data: existingEnrollment, error: existingEnrollmentError } = await supabase
+      .from('enrollments')
+      .select('id')
+      .eq('course_id', courseId)
+      .in('student_id', enrollmentIdentityAliases)
+      .limit(1);
+
+    if (existingEnrollmentError) {
+      throw new StudentPaymentError('Unable to validate course enrollment', 500);
+    }
+
+    if ((existingEnrollment ?? []).length > 0) {
+      throw new StudentPaymentError('You are already enrolled in this course', 409);
+    }
+
+    // Gate prerequisites here, before any money is taken. Deliberately not
+    // repeated after payment: a student who has already paid must not be left
+    // holding a charge with no enrollment, and reaching the post-payment path
+    // at all requires a valid Razorpay signature.
+    const prerequisites = await checkPrerequisites(courseId, studentId);
+    if (!prerequisites.satisfied) {
+      throw new StudentPaymentError(
+        `You must complete the following course(s) before enrolling: ${prerequisites.missing
+          .map((course) => course.title)
+          .join(', ')}`,
+        403,
+      );
+    }
+
+    const enrollmentLimit = Number(course.enrollment_limit || 0);
+    if (Number.isFinite(enrollmentLimit) && enrollmentLimit > 0) {
+      const { count, error: capacityError } = await supabase
+        .from('enrollments')
+        .select('id', { count: 'exact', head: true })
+        .eq('course_id', courseId)
+        .eq('status', 'active');
+
+      if (capacityError) {
+        throw new StudentPaymentError('Unable to validate course capacity', 500);
+      }
+
+      if ((count || 0) >= enrollmentLimit) {
+        throw new StudentPaymentError('This course is full', 409);
+      }
+    }
 
     // Create Razorpay order
     const order = await razorpay.orders.create({
-      amount: Math.round(course.price * 100), // Convert to paise
+      amount: Math.round(courseAmount * 100), // Convert to paise
       currency: 'INR',
       receipt: `course_${courseId.substring(0, 8)}_${Date.now()}`,
       notes: {
@@ -61,7 +195,7 @@ export async function createPaymentOrder(studentId: string, courseId: string) {
       .insert({
         student_id: studentId,
         course_id: courseId,
-        amount: course.price,
+        amount: courseAmount,
         currency: 'INR',
         razorpay_order_id: order.id,
         status: 'pending'
@@ -78,7 +212,7 @@ export async function createPaymentOrder(studentId: string, courseId: string) {
       success: true,
       order_id: order.id,
       payment_id: payment.id,
-      amount: course.price,
+      amount: courseAmount,
       currency: 'INR',
       key: process.env.RAZORPAY_KEY_ID
     };
@@ -91,19 +225,44 @@ export async function createPaymentOrder(studentId: string, courseId: string) {
 /**
  * Verify and confirm Razorpay payment
  */
-export async function confirmPayment(razorpayOrderId: string, razorpayPaymentId: string, razorpaySignature: string) {
+export async function confirmPayment(
+  studentId: string,
+  razorpayOrderId: string,
+  razorpayPaymentId: string,
+  razorpaySignature: string,
+) {
   try {
-    // Verify signature
-    const generatedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET || '')
-      .update(`${razorpayOrderId}|${razorpayPaymentId}`)
-      .digest('hex');
+    const { data: existingPayment, error: existingPaymentError } = await supabase
+      .from('student_payments')
+      .select('*')
+      .eq('razorpay_order_id', razorpayOrderId)
+      .eq('student_id', studentId)
+      .maybeSingle();
 
-    if (generatedSignature !== razorpaySignature) {
-      throw new Error('Invalid payment signature');
+    if (existingPaymentError || !existingPayment) {
+      // Do not reveal whether another student owns the order.
+      throw new StudentPaymentError('Payment order not found', 404);
     }
 
-    // Update payment record
+    if (!paymentSignatureMatches(razorpayOrderId, razorpayPaymentId, razorpaySignature)) {
+      throw new StudentPaymentError('Invalid payment signature', 400);
+    }
+
+    if (existingPayment.status === 'completed') {
+      if (existingPayment.razorpay_payment_id !== razorpayPaymentId) {
+        throw new StudentPaymentError('This payment order was already verified with a different payment', 409);
+      }
+
+      const enrollment = await ensurePaidCourseEnrollment(studentId, existingPayment);
+      return { success: true, payment: existingPayment, enrollment };
+    }
+
+    if (!['pending'].includes(existingPayment.status)) {
+      throw new StudentPaymentError('This payment order can no longer be verified', 409);
+    }
+
+    // Update only the authenticated owner's pending record. This makes a
+    // valid signature insufficient to mutate another student's order.
     const { data: payment, error: updateError } = await supabase
       .from('student_payments')
       .update({
@@ -114,17 +273,35 @@ export async function confirmPayment(razorpayOrderId: string, razorpayPaymentId:
         payment_method: 'razorpay'
       })
       .eq('razorpay_order_id', razorpayOrderId)
+      .eq('student_id', studentId)
+      .eq('status', 'pending')
       .select()
       .single();
 
     if (updateError) {
       console.error('Error updating payment:', updateError);
-      throw new Error('Failed to update payment status');
+      // A retry may have completed the order immediately before this update.
+      const { data: racedPayment } = await supabase
+        .from('student_payments')
+        .select('*')
+        .eq('razorpay_order_id', razorpayOrderId)
+        .eq('student_id', studentId)
+        .maybeSingle();
+
+      if (racedPayment?.status === 'completed' && racedPayment.razorpay_payment_id === razorpayPaymentId) {
+        const enrollment = await ensurePaidCourseEnrollment(studentId, racedPayment);
+        return { success: true, payment: racedPayment, enrollment };
+      }
+
+      throw new StudentPaymentError('Failed to update payment status', 500);
     }
+
+    const enrollment = await ensurePaidCourseEnrollment(studentId, payment);
 
     return {
       success: true,
-      payment
+      payment,
+      enrollment,
     };
   } catch (error) {
     console.error('Error confirming payment:', error);

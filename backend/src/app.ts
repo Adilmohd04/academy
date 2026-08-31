@@ -47,6 +47,7 @@ import resourceRoutes from './routes/resources';
 import discussionRoutes from './routes/discussions';
 import adminRoutes from './routes/admin';
 import adminCourseRoutes from './routes/adminCourses';
+import courseEquivalenceRoutes from './routes/courseEquivalences';
 import teacherCourseManagementRoutes from './routes/teacherCourseManagement';
 import teacherCoursesRoutes from './routes/teacherCourses';
 import courseSectionsRoutes from './routes/courseSections';
@@ -58,6 +59,7 @@ import finalExamRoutes from './routes/finalExams';
 import teacherInterviewsRoutes from './routes/teacherInterviewsRoutes';
 import certificateRoutes from './routes/certificates';
 import certificateLifecycleRoutes from './routes/certificateLifecycle';
+import certificateExceptionRequestRoutes from './routes/certificateExceptionRequests';
 import certificateVerificationRoutes from './routes/certificateVerification';
 import examMarksRoutes from './modules/shared/routes/examMarks';
 import weekDraftRoutes from './modules/shared/routes/weekDraft';
@@ -96,8 +98,10 @@ class App {
    * Initialize all middlewares
    */
   private initializeMiddlewares(): void {
-    // Trust reverse proxies (required for accurate IP/rate-limit in production)
-    this.app.set('trust proxy', 1);
+    // Trust only the explicitly configured proxy chain. A blanket/default
+    // `trust proxy` setting lets directly connected browsers spoof
+    // X-Forwarded-For and bypass IP-based public verification rate limits.
+    this.app.set('trust proxy', config.trustProxy);
 
     // Remove identifying header
     this.app.disable('x-powered-by');
@@ -228,7 +232,6 @@ class App {
     this.app.use('/api/health', healthRoutes);
     this.app.use('/api/users', userRoutes);
     this.app.use('/api', courseRoutes);
-    this.app.use('/api', courseContentRoutes);
     this.app.use('/api', courseProgressRoutes);
     this.app.use('/api', enrollmentRoutes);
     this.app.use('/api', meetingRoutes);
@@ -243,6 +246,7 @@ class App {
     this.app.use('/api', discussionRoutes);
     this.app.use('/api/admin', adminRoutes);
     this.app.use('/api/admin', adminCourseRoutes);
+    this.app.use('/api/admin', courseEquivalenceRoutes);
     this.app.use('/api/teacher', teacherCourseManagementRoutes);
     this.app.use('/api/teacher', teacherCoursesRoutes);
     this.app.use('/api', leaderboardRoutes);
@@ -253,6 +257,7 @@ class App {
     this.app.use('/api', teacherInterviewsRoutes);
     this.app.use('/api', certificateRoutes);
     this.app.use('/api', certificateLifecycleRoutes);
+    this.app.use('/api', certificateExceptionRequestRoutes);
     this.app.use('/api', certificateVerificationRoutes);
     this.app.use('/api/exam-marks', examMarksRoutes);
     this.app.use('/api/drafts', weekDraftRoutes);
@@ -261,6 +266,9 @@ class App {
     this.app.use('/api/teacher', teacherAutosaveRoutes);
     this.app.use('/api/teacher', teacherAnalyticsRoutes);
     this.app.use('/api', courseWeeksRoutes);
+    // Register the locked-down legacy content routes after the canonical
+    // course-scoped curriculum API so they cannot shadow it.
+    this.app.use('/api', courseContentRoutes);
     this.app.use('/api', languageRoutes);
     this.app.use('/api/user', userPreferenceRoutes);
     this.app.use('/api/student', studentExamRoutes);

@@ -11,9 +11,10 @@
 
 /// <reference path="../types/express.d.ts" />
 
-import express, { Request, Response } from 'express';
+import express, { NextFunction, Request, Response } from 'express';
 import '../types/express'; // Ensure type augmentation is loaded
 import { requireAuth, requireRole } from '../middleware/clerkAuth';
+import { supabase } from '../config/database';
 import * as courseApprovalService from '../modules/admin/services/courseApprovalService';
 import * as liveClassController from '../modules/teacher/controllers/liveClassController';
 import * as enhancedQuizController from '../modules/teacher/controllers/enhancedQuizController';
@@ -24,12 +25,152 @@ import * as teacherResourceController from '../modules/teacher/controllers/teach
 import * as courseArchivalController from '../modules/admin/controllers/courseArchivalController';
 import { TeacherCourseManagementController } from '../modules/teacher/controllers/courseManagementController';
 import * as teacherCourseController from '../modules/teacher/controllers/teacherCourseController';
+import { issueCertificate } from '../modules/certificate/services/issuanceService';
 
 const router = express.Router();
 const courseManagementController = new TeacherCourseManagementController();
 
 // All routes require teacher role
 const teacherAuth = [requireAuth, requireRole(['teacher', 'admin'])];
+
+/**
+ * Resolve ownership once and reuse it for every course-scoped teacher action.
+ * A course may use either the Clerk user id or the legacy profile UUID for
+ * `teacher_id`; co-teacher rows use the profile UUID. Administrators retain
+ * their cross-course oversight access.
+ */
+const canAccessTeacherCourse = async (
+  req: Request,
+  res: Response,
+  courseId: string,
+): Promise<boolean> => {
+  try {
+    const userId = req.auth?.userId;
+    if (!userId) {
+      res.status(401).json({ error: 'Authentication required' });
+      return false;
+    }
+
+    if (req.auth?.role === 'admin') {
+      return true;
+    }
+
+    const [{ data: course, error: courseError }, { data: profile, error: profileError }] = await Promise.all([
+      supabase
+        .from('courses')
+        .select('id, teacher_id')
+        .eq('id', courseId)
+        .maybeSingle(),
+      supabase
+        .from('profiles')
+        .select('id')
+        .eq('clerk_user_id', userId)
+        .maybeSingle(),
+    ]);
+
+    if (courseError || !course) {
+      res.status(404).json({ error: 'Course not found' });
+      return false;
+    }
+
+    if (profileError || !profile) {
+      res.status(403).json({ error: 'Teacher profile not found' });
+      return false;
+    }
+
+    const isOwner = course.teacher_id === userId || course.teacher_id === profile.id;
+    if (isOwner) {
+      return true;
+    }
+
+    const { data: coTeacher, error: coTeacherError } = await supabase
+      .from('course_teachers')
+      .select('id')
+      .eq('course_id', courseId)
+      .eq('teacher_id', profile.id)
+      .maybeSingle();
+
+    if (coTeacherError || !coTeacher) {
+      res.status(403).json({ error: 'You do not have access to this course' });
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Teacher course access check failed:', error);
+    res.status(500).json({ error: 'Unable to verify course access' });
+    return false;
+  }
+};
+
+/**
+ * Course-id middleware for actions whose route already includes :courseId.
+ */
+const requireTeacherCourseAccess = async (req: Request, res: Response, next: NextFunction) => {
+  const courseId = req.params.courseId as string | undefined;
+  if (!courseId) {
+    return res.status(400).json({ error: 'Course id is required' });
+  }
+
+  if (await canAccessTeacherCourse(req, res, courseId)) {
+    return next();
+  }
+};
+
+/**
+ * Final-exam controller methods work with an exam or question identifier, so
+ * role checks alone are not sufficient: resolve the parent course and use the
+ * same course-access gate as other teacher operations.
+ */
+const requireFinalExamCourseAccess = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    let courseId = req.params.courseId as string | undefined;
+    let examId = req.params.examId as string | undefined;
+
+    if (!courseId && !examId && req.params.questionId) {
+      const { data: question, error: questionError } = await supabase
+        .from('final_exam_questions')
+        .select('exam_id')
+        .eq('id', req.params.questionId)
+        .maybeSingle();
+
+      if (questionError || !question?.exam_id) {
+        return res.status(404).json({ error: 'Final exam question not found' });
+      }
+
+      examId = question.exam_id;
+    }
+
+    if (!courseId && examId) {
+      const { data: exam, error: examError } = await supabase
+        .from('final_exams')
+        .select('course_id')
+        .eq('id', examId)
+        .maybeSingle();
+
+      if (examError || !exam?.course_id) {
+        return res.status(404).json({ error: 'Final exam not found' });
+      }
+
+      courseId = exam.course_id;
+    }
+
+    if (!courseId) {
+      return res.status(400).json({ error: 'A final exam course could not be resolved' });
+    }
+
+    if (await canAccessTeacherCourse(req, res, courseId)) {
+      return next();
+    }
+  } catch (error) {
+    console.error('Final-exam course access check failed:', error);
+    return res.status(500).json({ error: 'Unable to verify final-exam access' });
+  }
+};
 
 // ==========================================
 // COMPREHENSIVE COURSE CRUD
@@ -221,28 +362,28 @@ router.get('/lessons/:lessonId/quizzes', ...teacherAuth, enhancedQuizController.
 // ==========================================
 
 // Create or update final exam for a course
-router.post('/courses/:courseId/final-exam', ...teacherAuth, finalExamController.createOrUpdateExam);
+router.post('/courses/:courseId/final-exam', ...teacherAuth, requireFinalExamCourseAccess, finalExamController.createOrUpdateExam);
 
 // Get final exam for a course
-router.get('/courses/:courseId/final-exam', ...teacherAuth, finalExamController.getExam);
+router.get('/courses/:courseId/final-exam', ...teacherAuth, requireFinalExamCourseAccess, finalExamController.getExam);
 
 // Add question to final exam
-router.post('/final-exams/:examId/questions', ...teacherAuth, finalExamController.addQuestion);
+router.post('/final-exams/:examId/questions', ...teacherAuth, requireFinalExamCourseAccess, finalExamController.addQuestion);
 
 // Update final exam question
-router.put('/final-exam-questions/:questionId', ...teacherAuth, finalExamController.updateQuestion);
+router.put('/final-exam-questions/:questionId', ...teacherAuth, requireFinalExamCourseAccess, finalExamController.updateQuestion);
 
 // Delete final exam question
-router.delete('/final-exam-questions/:questionId', ...teacherAuth, finalExamController.deleteQuestion);
+router.delete('/final-exam-questions/:questionId', ...teacherAuth, requireFinalExamCourseAccess, finalExamController.deleteQuestion);
 
 // Toggle publish status
-router.post('/final-exams/:examId/toggle-publish', ...teacherAuth, finalExamController.togglePublish);
+router.post('/final-exams/:examId/toggle-publish', ...teacherAuth, requireFinalExamCourseAccess, finalExamController.togglePublish);
 
 // Get marks summary (for progress bar display)
-router.get('/final-exams/:examId/marks-summary', ...teacherAuth, finalExamController.getMarksSummary);
+router.get('/final-exams/:examId/marks-summary', ...teacherAuth, requireFinalExamCourseAccess, finalExamController.getMarksSummary);
 
 // Get all exam attempts for a course
-router.get('/courses/:courseId/final-exam-attempts', ...teacherAuth, finalExamController.getAttempts);
+router.get('/courses/:courseId/final-exam-attempts', ...teacherAuth, requireFinalExamCourseAccess, finalExamController.getAttempts);
 
 // ==========================================
 // GRADE DASHBOARD (Phase 5)
@@ -265,19 +406,19 @@ router.get('/courses/:courseId/grading-policy', ...teacherAuth, gradeDashboardCo
 // ==========================================
 
 // Get all resources for a course (hierarchical view)
-router.get('/courses/:courseId/resources', ...teacherAuth, teacherResourceController.getCourseResources);
+router.get('/courses/:courseId/resources', ...teacherAuth, requireTeacherCourseAccess, teacherResourceController.getCourseResources);
 
 // Get resource statistics
-router.get('/courses/:courseId/resources/stats', ...teacherAuth, teacherResourceController.getResourceStats);
+router.get('/courses/:courseId/resources/stats', ...teacherAuth, requireTeacherCourseAccess, teacherResourceController.getResourceStats);
 
 // Create a new resource
-router.post('/courses/:courseId/resources', ...teacherAuth, teacherResourceController.createResource);
+router.post('/courses/:courseId/resources', ...teacherAuth, requireTeacherCourseAccess, teacherResourceController.createResource);
 
 // Bulk create resources
-router.post('/courses/:courseId/resources/bulk', ...teacherAuth, teacherResourceController.bulkCreateResources);
+router.post('/courses/:courseId/resources/bulk', ...teacherAuth, requireTeacherCourseAccess, teacherResourceController.bulkCreateResources);
 
 // Reorder resources
-router.post('/courses/:courseId/resources/reorder', ...teacherAuth, teacherResourceController.reorderResources);
+router.post('/courses/:courseId/resources/reorder', ...teacherAuth, requireTeacherCourseAccess, teacherResourceController.reorderResources);
 
 // Update a resource
 router.put('/resources/:resourceId', ...teacherAuth, teacherResourceController.updateResource);
@@ -307,7 +448,7 @@ router.get('/courses/:courseId/grades', ...teacherAuth, async (req, res) => {
 });
 
 // Recalculate grade for a specific student
-router.post('/courses/:courseId/students/:studentId/calculate-grade', ...teacherAuth, async (req, res) => {
+router.post('/courses/:courseId/students/:studentId/calculate-grade', ...teacherAuth, requireTeacherCourseAccess, async (req, res) => {
   try {
     const { courseId, studentId } = req.params;
 
@@ -323,7 +464,7 @@ router.post('/courses/:courseId/students/:studentId/calculate-grade', ...teacher
 });
 
 // Check certificate eligibility
-router.get('/courses/:courseId/students/:studentId/certificate-eligibility', ...teacherAuth, async (req, res) => {
+router.get('/courses/:courseId/students/:studentId/certificate-eligibility', ...teacherAuth, requireTeacherCourseAccess, async (req, res) => {
   try {
     const { courseId, studentId } = req.params;
 
@@ -339,7 +480,7 @@ router.get('/courses/:courseId/students/:studentId/certificate-eligibility', ...
 });
 
 // Issue certificate (for passed students)
-router.post('/courses/:courseId/students/:studentId/issue-certificate', ...teacherAuth, async (req, res) => {
+router.post('/courses/:courseId/students/:studentId/issue-certificate', ...teacherAuth, requireTeacherCourseAccess, async (req, res) => {
   try {
     const { courseId, studentId } = req.params;
 
@@ -353,12 +494,27 @@ router.post('/courses/:courseId/students/:studentId/issue-certificate', ...teach
       });
     }
 
-    const certificate = await gradeCalculationService.issueCertificate(courseId, studentId);
+    // The grade screen remains a compatibility endpoint, but certificate
+    // creation itself must use the QR-backed lifecycle.
+    const issuance = await issueCertificate(courseId, studentId);
+    if (issuance.ok === false) {
+      return res.status(400).json({
+        error: issuance.error,
+        unmet: issuance.unmet,
+      });
+    }
 
-    res.status(201).json({
+    if (String(issuance.certificate?.status || '').toLowerCase() === 'revoked') {
+      return res.status(409).json({
+        error: 'Certificate is revoked. Use the approved reissue workflow instead.',
+      });
+    }
+
+    res.status(issuance.alreadyIssued ? 200 : 201).json({
       success: true,
-      message: 'Certificate issued successfully',
-      data: certificate
+      alreadyIssued: issuance.alreadyIssued,
+      message: issuance.alreadyIssued ? 'Certificate already issued' : 'Certificate issued successfully',
+      data: issuance.certificate,
     });
   } catch (error: any) {
     res.status(400).json({ error: error.message });

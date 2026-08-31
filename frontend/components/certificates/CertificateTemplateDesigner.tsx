@@ -258,7 +258,6 @@ export default function CertificateTemplateDesigner({ mode, courseId, userId }: 
       const response = await fetch(`${apiBase}/api/certificate-templates${query}`, {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(userId ? { 'x-clerk-user-id': userId } : {}),
         },
       });
 
@@ -283,7 +282,6 @@ export default function CertificateTemplateDesigner({ mode, courseId, userId }: 
       const response = await fetch(`${apiBase}/api/courses?approval_status=approved`, {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(userId ? { 'x-clerk-user-id': userId } : {}),
         },
       });
 
@@ -490,7 +488,6 @@ export default function CertificateTemplateDesigner({ mode, courseId, userId }: 
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          'x-clerk-user-id': userId,
         },
         body: JSON.stringify(payload),
       });
@@ -528,7 +525,6 @@ export default function CertificateTemplateDesigner({ mode, courseId, userId }: 
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          'x-clerk-user-id': userId,
         },
         body: JSON.stringify({ isDefault: setAsDefault }),
       });
@@ -566,7 +562,6 @@ export default function CertificateTemplateDesigner({ mode, courseId, userId }: 
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          'x-clerk-user-id': userId,
         },
         body: JSON.stringify({ isDefault: false }),
       });

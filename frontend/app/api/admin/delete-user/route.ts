@@ -1,10 +1,16 @@
 import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 import { NextRequest, NextResponse } from 'next/server';
 
 
 
 export async function DELETE(request: NextRequest) {
   try {
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
+    }
+
     const body = await request.json();
     const userId = body.user_id || body.clerk_user_id || body.userId;
 

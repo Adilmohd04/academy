@@ -6,6 +6,8 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, CheckCircle, XCircle, Clock, Award, User } from 'lucide-react';
 import Link from 'next/link';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface Quiz {
   id: string;
   title: string;
@@ -43,7 +45,7 @@ interface Attempt {
 
 export default function QuizViewPage() {
   const params = useParams();
-  const { userId } = useAuth();
+  const { getToken } = useAuth();
   const courseId = params.courseId as string;
   const quizId = params.quizId as string;
   
@@ -52,38 +54,102 @@ export default function QuizViewPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (userId && courseId && quizId) {
-      fetchData();
+    if (courseId && quizId) {
+      void fetchData();
     }
-  }, [userId, courseId, quizId]);
+  }, [courseId, quizId]);
 
   const fetchData = async () => {
     try {
-      // Fetch quiz details
-      const quizRes = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/lessons/${quizId}`,
-        {
-          headers: { 'x-clerk-user-id': userId || '' }
-        }
-      );
-      
-      if (quizRes.ok) {
-        const data = await quizRes.json();
-        setQuiz(data.lesson);
+      setLoading(true);
+      const token = await getToken();
+      if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
+      const headers = { Authorization: `Bearer ${token}` };
+
+      // Quiz activities are course lessons, not records addressable through
+      // `/teacher/lessons/:id`.  Load the course outline and canonical
+      // teacher submissions feed, then select the requested lesson.  This
+      // keeps existing builder links working without relying on the retired
+      // quiz-attempt endpoint.
+      const [weeksRes, submissionsRes] = await Promise.all([
+        fetch(`${API}/api/courses/${courseId}/weeks`, { headers }),
+        fetch(`${API}/api/teacher/courses/${courseId}/submissions`, { headers }),
+      ]);
+
+      if (!weeksRes.ok || !submissionsRes.ok) {
+        throw new Error('Unable to load quiz results.');
       }
 
-      // Fetch attempts
-      const attemptsRes = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/quizzes/${quizId}/attempts`,
-        {
-          headers: { 'x-clerk-user-id': userId || '' }
-        }
-      );
-      
-      if (attemptsRes.ok) {
-        const data = await attemptsRes.json();
-        setAttempts(data.attempts || []);
+      const weeksPayload = await weeksRes.json();
+      const weeks = Array.isArray(weeksPayload)
+        ? weeksPayload
+        : weeksPayload.data || [];
+      const lesson = weeks
+        .flatMap((week: any) => week.lessons || week.course_lessons || [])
+        .find((item: any) => item.id === quizId && item.content_type === 'quiz');
+
+      if (!lesson) {
+        setQuiz(null);
+        setAttempts([]);
+        return;
       }
+
+      const questions: QuizQuestion[] = Array.isArray(lesson.quiz_questions)
+        ? lesson.quiz_questions.map((question: any, index: number) => ({
+            id: question.id || `${lesson.id}-question-${index + 1}`,
+            question: question.question || question.text || '',
+            type: question.type === 'fill' || question.type === 'fill-in-blank'
+              ? 'fill'
+              : 'mcq',
+            options: Array.isArray(question.options) ? question.options : [],
+            correct_answer: question.correct_answer || question.correctAnswer || '',
+            marks: Number(question.marks || question.points || 1),
+          }))
+        : [];
+
+      setQuiz({
+        id: lesson.id,
+        title: lesson.title || 'Quiz',
+        quiz_questions: questions,
+        is_published: lesson.is_published !== false,
+        release_date: lesson.release_date || undefined,
+        deadline: lesson.deadline || undefined,
+        time_limit_minutes: lesson.time_limit_minutes || undefined,
+        max_attempts: lesson.max_attempts || undefined,
+        show_answers_after_deadline: lesson.show_answers_after_deadline,
+        show_correct_answers: lesson.show_correct_answers,
+      });
+
+      const submissionsPayload = await submissionsRes.json();
+      const attemptNumbers = new Map<string, number>();
+      const mappedAttempts: Attempt[] = (submissionsPayload.data || submissionsPayload || [])
+        .filter((submission: any) =>
+          submission.type === 'quiz' && submission.lesson_id === quizId
+        )
+        .map((submission: any) => {
+          const currentAttempt = (attemptNumbers.get(submission.student_id) || 0) + 1;
+          attemptNumbers.set(submission.student_id, currentAttempt);
+          const pointsEarned = Number(submission.score || 0);
+          const totalPoints = Number(submission.total_points || 0);
+          const percentage = totalPoints > 0
+            ? Math.round((pointsEarned / totalPoints) * 100)
+            : Number(submission.grade || 0);
+
+          return {
+            id: submission.id,
+            student_id: submission.student_id,
+            student_name: submission.student_name || 'Student',
+            attempt_number: currentAttempt,
+            started_at: submission.started_at || submission.submitted_at,
+            submitted_at: submission.submitted_at,
+            score: percentage,
+            points_earned: pointsEarned,
+            total_points: totalPoints,
+            is_passed: percentage >= 70,
+          };
+        });
+
+      setAttempts(mappedAttempts);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {

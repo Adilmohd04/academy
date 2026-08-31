@@ -17,6 +17,7 @@
     "check:secrets": "node scripts/check-secrets.js",
     "check-env": "node src/scripts/check-env.js",
     "audit:unused": "node scripts/audit-unused-files.mjs",
+    "backfill:certificate-verification": "ts-node scripts/backfill-cert-verification-codes.ts",
     "load:smoke": "k6 run load/k6-smoke.js",
     "load:10k": "k6 run load/k6-10k-ramp.js",
     "load:10k:mixed": "k6 run load/k6-10k-mixed-activity.js"

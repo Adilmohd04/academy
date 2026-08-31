@@ -21,8 +21,7 @@ export default function StudentExamPage() {
       const token = await getToken()
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/student/exams/upcoming`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'x-clerk-user-id': userId || ''
+          'Authorization': `Bearer ${token}`
         }
       })
       if (res.ok) {

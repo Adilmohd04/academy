@@ -92,7 +92,7 @@ function getStatusStyle(status: CourseDisplayStatus): { label: string; className
 }
 
 export default function CourseManagementPage() {
-  const { userId } = useAuth();
+  const { getToken, isLoaded } = useAuth();
   const [courses, setCourses] = useState<Course[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(true);
@@ -126,15 +126,18 @@ export default function CourseManagementPage() {
   };
 
   useEffect(() => {
-    if (userId) {
-      fetchCourses();
-      fetchTeachers();
+    if (isLoaded) {
+      void fetchCourses();
+      void fetchTeachers();
     }
-  }, [userId]);
+  }, [isLoaded]);
 
   const fetchCourses = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses`);
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/admin/courses`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
       if (res.ok) {
         const response = await res.json();
         const coursesData = Array.isArray(response) ? response : (response.data || []);
@@ -176,9 +179,10 @@ export default function CourseManagementPage() {
 
   const fetchTeachers = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/teachers`, {
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/admin/teachers`, {
         headers: {
-          'x-clerk-user-id': userId || ''
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         }
       });
       if (res.ok) {
@@ -204,10 +208,11 @@ export default function CourseManagementPage() {
 
     setIsDeleting(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses/${courseToDelete.id}`, {
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/admin/courses/${courseToDelete.id}`, {
         method: 'DELETE',
         headers: {
-          'x-clerk-user-id': userId || ''
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         }
       });
 
@@ -273,11 +278,12 @@ export default function CourseManagementPage() {
     if (!selectedCourse) return;
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses/${selectedCourse.id}/co-teachers`, {
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/admin/courses/${selectedCourse.id}/co-teachers`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ teacherId })
       });
@@ -300,10 +306,11 @@ export default function CourseManagementPage() {
     if (!confirm('Are you sure you want to remove this co-teacher?')) return;
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses/${selectedCourse.id}/co-teachers/${teacherClerkId}`, {
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/admin/courses/${selectedCourse.id}/co-teachers/${teacherClerkId}`, {
         method: 'DELETE',
         headers: {
-          'x-clerk-user-id': userId || ''
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         }
       });
 

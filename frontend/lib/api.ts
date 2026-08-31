@@ -118,10 +118,6 @@ interface RescheduleFinalExamInterviewPayload {
   meeting_link?: string | null;
 }
 
-const clerkHeaders = (clerkUserId?: string | null) => (
-  clerkUserId ? { 'x-clerk-user-id': clerkUserId } : {}
-);
-
 const bearerHeaders = (token?: string | null) => (
   token ? { Authorization: `Bearer ${token}` } : {}
 );
@@ -165,9 +161,9 @@ const api = {
       apiClient.get(`/api/courses/${courseId}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       }),
-    getByIdForBuilder: (courseId: string, clerkUserId?: string | null) =>
+    getByIdForBuilder: (courseId: string, token?: string | null) =>
       apiClient.get(`/api/courses/${courseId}`, {
-        headers: clerkHeaders(clerkUserId),
+        headers: bearerHeaders(token),
       }),
     create: (data: {
       title: string;
@@ -249,17 +245,13 @@ const api = {
       apiClient.get('/api/courses', {
         headers: bearerHeaders(token),
       }),
-    updateCourse: (courseId: string, data: CourseUpdatePayload, clerkUserId?: string | null) =>
+    updateCourse: (courseId: string, data: CourseUpdatePayload, token?: string | null) =>
       apiClient.put(`/api/courses/${courseId}`, data, {
-        headers: {
-          ...clerkHeaders(clerkUserId),
-        },
+        headers: bearerHeaders(token),
       }),
-    deleteCourse: (courseId: string, clerkUserId?: string | null) =>
+    deleteCourse: (courseId: string, token?: string | null) =>
       apiClient.delete(`/api/courses/${courseId}`, {
-        headers: {
-          ...clerkHeaders(clerkUserId),
-        },
+        headers: bearerHeaders(token),
       }),
     getResources: (token?: string | null) =>
       apiClient.get('/api/resources', {
@@ -634,26 +626,19 @@ const api = {
       }),
 
     // Get student final exam interview details
-    getExamInterviewDetails: (examId: string, token?: string | null, clerkUserId?: string | null) =>
+    getExamInterviewDetails: (examId: string, token?: string | null) =>
       apiClient.get(`/api/student/exams/${examId}/details`, {
-        headers: {
-          ...bearerHeaders(token),
-          ...clerkHeaders(clerkUserId),
-        },
+        headers: bearerHeaders(token),
       }),
 
     // Book a final exam interview slot
     bookFinalExamInterview: (
       examId: string,
       payload: BookFinalExamInterviewPayload,
-      token?: string | null,
-      clerkUserId?: string | null
+      token?: string | null
     ) =>
       apiClient.post(`/api/student/final-exams/${examId}/interviews/book`, payload, {
-        headers: {
-          ...bearerHeaders(token),
-          ...clerkHeaders(clerkUserId),
-        },
+        headers: bearerHeaders(token),
       }),
 
     // Reschedule a booked final exam interview
@@ -661,28 +646,20 @@ const api = {
       examId: string,
       interviewId: string,
       payload: RescheduleFinalExamInterviewPayload,
-      token?: string | null,
-      clerkUserId?: string | null
+      token?: string | null
     ) =>
       apiClient.patch(`/api/student/final-exams/${examId}/interviews/${interviewId}/reschedule`, payload, {
-        headers: {
-          ...bearerHeaders(token),
-          ...clerkHeaders(clerkUserId),
-        },
+        headers: bearerHeaders(token),
       }),
 
     // Confirm a scheduled final exam interview
     confirmFinalExamInterview: (
       examId: string,
       interviewId: string,
-      token?: string | null,
-      clerkUserId?: string | null
+      token?: string | null
     ) =>
       apiClient.post(`/api/student/final-exams/${examId}/interviews/${interviewId}/confirm`, undefined, {
-        headers: {
-          ...bearerHeaders(token),
-          ...clerkHeaders(clerkUserId),
-        },
+        headers: bearerHeaders(token),
       }),
   },
 

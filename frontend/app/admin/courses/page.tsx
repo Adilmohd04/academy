@@ -38,7 +38,7 @@ function getDisplayStatus(course: Course): 'published' | 'pending' | 'approved' 
 }
 
 export default function AdminCoursesPage() {
-  const { userId } = useAuth();
+  const { getToken, isLoaded } = useAuth();
   const router = useRouter();
   const [courses, setCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,16 +46,17 @@ export default function AdminCoursesPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'published' | 'rejected'>('all');
 
   useEffect(() => {
-    if (userId) {
-      fetchCourses();
+    if (isLoaded) {
+      void fetchCourses();
     }
-  }, [userId]);
+  }, [isLoaded]);
 
   const fetchCourses = async () => {
     try {
+      const token = await getToken();
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000'}/api/admin/courses`, {
         headers: {
-          ...(userId ? { 'x-clerk-user-id': userId } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
       if (response.ok) {
@@ -78,11 +79,12 @@ export default function AdminCoursesPage() {
     if (!confirm('Approve this course?')) return;
     
     try {
+      const token = await getToken();
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000'}/api/admin/courses/${courseId}/approve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(userId ? { 'x-clerk-user-id': userId } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
 
@@ -104,11 +106,12 @@ export default function AdminCoursesPage() {
     if (!reason) return;
 
     try {
+      const token = await getToken();
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000'}/api/admin/courses/${courseId}/reject`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(userId ? { 'x-clerk-user-id': userId } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ reason }),
       });
@@ -130,10 +133,11 @@ export default function AdminCoursesPage() {
     if (!confirm('Are you sure you want to delete this course? This action cannot be undone.')) return;
 
     try {
+      const token = await getToken();
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000'}/api/admin/courses/${courseId}`, {
         method: 'DELETE',
         headers: {
-          ...(userId ? { 'x-clerk-user-id': userId } : {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
       });
 
@@ -333,7 +337,7 @@ export default function AdminCoursesPage() {
                   )}
                   <div className="flex gap-2">
                     <button
-                      onClick={() => router.push(`/admin/courses/${course.id}`)}
+                      onClick={() => router.push('/admin/courses/manage')}
                       className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
                     >
                       <Eye className="w-4 h-4" />

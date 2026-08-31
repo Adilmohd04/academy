@@ -1,4 +1,5 @@
 import { supabase } from '../../../config/database';
+import { checkPrerequisites } from './prerequisiteService';
 
 interface Course {
   id: string;
@@ -78,6 +79,17 @@ export const enrollInCourse = async (
 
   if (courseError || !course) {
     throw new Error('Course not found or not available');
+  }
+
+  // This path previously selected prerequisite_courses without ever checking
+  // it. Defer to the shared gate rather than reimplementing the rule here.
+  const prerequisites = await checkPrerequisites(courseId, studentId);
+  if (!prerequisites.satisfied) {
+    throw new Error(
+      `You must complete the following course(s) before enrolling: ${prerequisites.missing
+        .map((course) => course.title)
+        .join(', ')}`,
+    );
   }
 
   // Check enrollment capacity if set

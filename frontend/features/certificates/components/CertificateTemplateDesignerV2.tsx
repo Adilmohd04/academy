@@ -45,7 +45,6 @@ import {
 export interface CertificateTemplateDesignerV2Props {
   mode: 'admin' | 'teacher';
   courseId?: string;
-  userId?: string | null;
 }
 
 const MOCK_PREVIEW_DATA: CertificateRenderData = {
@@ -65,7 +64,6 @@ const MOCK_PREVIEW_DATA: CertificateRenderData = {
 export default function CertificateTemplateDesignerV2({
   mode,
   courseId,
-  userId,
 }: CertificateTemplateDesignerV2Props) {
   const { getToken } = useAuth();
   const template = useDesignerStore((s) => s.template);
@@ -94,7 +92,7 @@ export default function CertificateTemplateDesignerV2({
       setLoading(true);
       try {
         const token = getToken ? await getToken() : null;
-        const records = await listTemplates({ token, clerkUserId: userId, courseId });
+        const records = await listTemplates({ token, courseId });
         if (cancelled) return;
 
         // Prefer a course-scoped template (teacher) or the default global (admin).
@@ -123,7 +121,7 @@ export default function CertificateTemplateDesignerV2({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [courseId, userId]);
+  }, [courseId]);
 
   const readOnly =
     mode === 'teacher' && template?.approval.allow_teacher_editing === false;
@@ -137,7 +135,6 @@ export default function CertificateTemplateDesignerV2({
     if (persistedId) {
       const updated = await updateTemplate({
         token,
-        clerkUserId: userId,
         templateId: persistedId,
         templateName: current.name,
         templateData,
@@ -147,7 +144,6 @@ export default function CertificateTemplateDesignerV2({
 
     const created = await createTemplate({
       token,
-      clerkUserId: userId,
       courseId: courseId ?? null,
       templateName: current.name,
       templateData,
@@ -180,7 +176,6 @@ export default function CertificateTemplateDesignerV2({
         const token = getToken ? await getToken() : null;
         await submitForApproval({
           token,
-          clerkUserId: userId,
           templateId: id,
           templateData: toTemplateData(current),
         });

@@ -1,10 +1,16 @@
 import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 import { NextRequest, NextResponse } from 'next/server';
 
 
 
 export async function GET(request: NextRequest) {
   try {
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
+    }
+
     const supabase = getSupabaseAdminClient();
 
     // Fetch pending meeting bookings with teacher slot details
@@ -90,12 +96,17 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
+    }
+
     const body = await request.json();
     const { id, status, notes } = body;
 
-    if (!id || !status) {
+    if (typeof id !== 'string' || !id || !['approved', 'rejected'].includes(status)) {
       return NextResponse.json(
-        { error: 'Missing required fields: id and status' },
+        { error: 'A meeting ID and an approved or rejected status are required' },
         { status: 400 }
       );
     }
@@ -106,7 +117,7 @@ export async function PATCH(request: NextRequest) {
       .from('meeting_bookings')
       .update({ 
         approval_status: status,
-        rejection_reason: notes || null,
+        rejection_reason: typeof notes === 'string' ? notes : null,
         approval_date: status === 'approved' ? new Date().toISOString() : null,
         updated_at: new Date().toISOString(),
       })

@@ -7,6 +7,8 @@ import {
   Calendar, TrendingUp, Award, BookOpen
 } from 'lucide-react';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface QuizAttempt {
   id: string;
   attempted_at: string;
@@ -85,25 +87,27 @@ export default function StudentDetailModal({
   courseId,
   studentName
 }: StudentDetailModalProps) {
-  const { userId } = useAuth();
+  const { getToken } = useAuth();
   const [trackingData, setTrackingData] = useState<TrackingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'quizzes' | 'assignments' | 'summary'>('summary');
 
   useEffect(() => {
-    if (isOpen && userId) {
-      fetchTrackingData();
+    if (isOpen && studentId && courseId) {
+      void fetchTrackingData();
     }
-  }, [isOpen, studentId, courseId, userId]);
+  }, [isOpen, studentId, courseId]);
 
   const fetchTrackingData = async () => {
     try {
       setLoading(true);
+      const token = await getToken();
+      if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/students/${studentId}/tracking`,
+        `${API}/api/teacher/courses/${courseId}/students/${studentId}/tracking`,
         {
           headers: {
-            'x-clerk-user-id': userId || '',
+            Authorization: `Bearer ${token}`,
           },
         }
       );

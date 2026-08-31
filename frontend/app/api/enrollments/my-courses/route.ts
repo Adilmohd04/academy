@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 
 export const dynamic = 'force-dynamic';
@@ -65,7 +65,7 @@ const fetchFromBackend = async (
   }
 };
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const { userId, getToken } = await auth();
     const backendUrl = resolveBackendUrl();
@@ -73,14 +73,23 @@ export async function GET(request: NextRequest) {
     const bypassSecret = getProtectionBypassSecret();
     const token = await getToken();
 
-    const resolvedUserId = userId || request.headers.get('x-clerk-user-id') || '';
-    const resolvedAuthorization = request.headers.get('authorization') || (token ? `Bearer ${token}` : '');
+    if (!userId) {
+      return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+    }
+
+    const internalAuthSecret = process.env.INTERNAL_AUTH_SHARED_SECRET || '';
+    const resolvedAuthorization = token ? `Bearer ${token}` : '';
 
     const proxyHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(resolvedUserId ? { 'x-clerk-user-id': resolvedUserId } : {}),
       ...(resolvedAuthorization
         ? { Authorization: resolvedAuthorization }
+        : {}),
+      ...(internalAuthSecret
+        ? {
+            'x-internal-auth-user-id': userId,
+            'x-internal-auth-secret': internalAuthSecret,
+          }
         : {}),
       ...(bypassSecret
         ? {

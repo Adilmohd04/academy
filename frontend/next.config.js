@@ -19,39 +19,6 @@ const nextConfig = {
     outputFileTracingRoot: path.join(__dirname, '../'),
   },
 
-  // Development optimizations
-  ...(process.env.NODE_ENV === 'development' && {
-    onDemandEntries: {
-      maxInactiveAge: 25 * 1000,
-      pagesBufferLength: 2,
-    },
-  }),
-
-  // Disable caching in development to prevent chunk loading errors
-  async headers() {
-    return [
-      {
-        source: '/:path*',
-        headers: [
-          {
-            key: 'Cache-Control',
-            value: 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
-          },
-        ],
-      },
-    ];
-  },
-
-  // Increase webpack timeout
-  webpack: (config, { dev }) => {
-    if (dev) {
-      config.watchOptions = {
-        poll: 1000,
-        aggregateTimeout: 300,
-      };
-    }
-    return config;
-  },
 };
 
 module.exports = nextConfig;

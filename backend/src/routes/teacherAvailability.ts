@@ -58,7 +58,7 @@ router.get(
 );
 
 router.get(
-  's/with-availability',
+  '/teachers/with-availability',
   teacherAvailabilityController.getTeachersWithAvailability.bind(teacherAvailabilityController)
 );
 

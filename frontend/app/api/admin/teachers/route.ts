@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { currentUser } from '@clerk/nextjs/server'
 import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin'
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization'
 
 const supabase = getSupabaseAdminClient()
 
 export async function GET(request: NextRequest) {
   try {
-    const user = await currentUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const requesterRole = (user.publicMetadata?.role as string) || 'student'
-    if (requesterRole !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const authorization = await requireRole(['admin'])
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response
     }
 
     const { data: teachers, error } = await supabase

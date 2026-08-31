@@ -6,6 +6,54 @@
 import { Request, Response } from 'express';
 import { supabase } from '../../../config/database';
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const profileForIdentifier = async (identifier: unknown) => {
+  if (typeof identifier !== 'string' || !identifier) return null;
+
+  const byClerk = await supabase
+    .from('profiles')
+    .select('id, clerk_user_id, full_name, email')
+    .eq('clerk_user_id', identifier)
+    .maybeSingle();
+  if (byClerk.data) return byClerk.data;
+
+  if (!UUID_PATTERN.test(identifier)) return null;
+  const byId = await supabase
+    .from('profiles')
+    .select('id, clerk_user_id, full_name, email')
+    .eq('id', identifier)
+    .maybeSingle();
+  return byId.data ?? null;
+};
+
+const profilesForIdentifiers = async (identifiers: unknown[]) => {
+  const values = [...new Set(identifiers.filter((value): value is string => typeof value === 'string' && value.length > 0))];
+  if (values.length === 0) return new Map<string, any>();
+
+  const uuidValues = values.filter((value) => UUID_PATTERN.test(value));
+  const [byClerk, byId] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, clerk_user_id, full_name, email')
+      .in('clerk_user_id', values),
+    uuidValues.length > 0
+      ? supabase
+          .from('profiles')
+          .select('id, clerk_user_id, full_name, email')
+          .in('id', uuidValues)
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
+
+  const profiles = [...(byClerk.data ?? []), ...(byId.data ?? [])];
+  const map = new Map<string, any>();
+  for (const profile of profiles) {
+    if (profile.id) map.set(profile.id, profile);
+    if (profile.clerk_user_id) map.set(profile.clerk_user_id, profile);
+  }
+  return map;
+};
+
 /**
  * Get all payments with filters
  * GET /api/admin/payments
@@ -75,26 +123,13 @@ export const getAllPayments = async (req: Request, res: Response) => {
         .filter(Boolean)
     )];
 
-    let profilesMap: Record<string, any> = {};
-    if (clerkUserIds.length > 0) {
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, clerk_user_id, full_name, email')
-        .in('clerk_user_id', clerkUserIds);
-      
-      if (profiles) {
-        profilesMap = profiles.reduce((acc: Record<string, any>, p: any) => {
-          acc[p.clerk_user_id] = p;
-          return acc;
-        }, {});
-      }
-    }
+    const profilesMap = await profilesForIdentifiers(clerkUserIds);
 
     // Step 3: Attach profile data to enrollments
     const paymentsWithProfiles = (payments || []).map((payment: any) => {
       const enrollmentsWithProfiles = (payment.enrollments || []).map((enrollment: any) => ({
         ...enrollment,
-        profiles: profilesMap[enrollment.student_id] || null
+        profiles: profilesMap.get(enrollment.student_id) || null
       }));
       return {
         ...payment,
@@ -171,35 +206,14 @@ export const getPaymentById = async (req: Request, res: Response) => {
     }
 
     // Step 2: Get teacher profile for course
-    let teacherProfile = null;
-    if (payment.courses?.teacher_id) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name, email')
-        .eq('id', payment.courses.teacher_id)
-        .single();
-      teacherProfile = profile;
-    }
+    const teacherProfile = await profileForIdentifier(payment.courses?.teacher_id);
 
     // Step 3: Get student profiles for enrollments
     const studentIds = (payment.enrollments || [])
       .map((e: any) => e.student_id)
       .filter(Boolean);
 
-    let studentProfilesMap: Record<string, any> = {};
-    if (studentIds.length > 0) {
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, clerk_id')
-        .in('id', studentIds);
-      
-      if (profiles) {
-        studentProfilesMap = profiles.reduce((acc: Record<string, any>, p: any) => {
-          acc[p.id] = p;
-          return acc;
-        }, {});
-      }
-    }
+    const studentProfilesMap = await profilesForIdentifiers(studentIds);
 
     // Step 4: Build response with profiles attached
     const paymentWithProfiles = {
@@ -210,7 +224,7 @@ export const getPaymentById = async (req: Request, res: Response) => {
       } : null,
       enrollments: (payment.enrollments || []).map((enrollment: any) => ({
         ...enrollment,
-        profiles: studentProfilesMap[enrollment.student_id] || null
+        profiles: studentProfilesMap.get(enrollment.student_id) || null
       }))
     };
 
@@ -234,8 +248,8 @@ export const verifyPayment = async (req: Request, res: Response) => {
     const { data: adminProfile } = await supabase
       .from('profiles')
       .select('id')
-      .eq('clerk_id', adminClerkId)
-      .single();
+      .eq('clerk_user_id', adminClerkId)
+      .maybeSingle();
 
     if (!adminProfile) {
       return res.status(403).json({ error: 'Admin profile not found' });

@@ -4,7 +4,7 @@ import { useUser } from '@clerk/nextjs';
 import { usePathname } from 'next/navigation';
 import { 
   Activity, GraduationCap, BookOpen,
-  Calendar, TrendingUp, FileText, Bell, Users, Video, CheckCircle
+  Calendar, TrendingUp, FileText, Bell, Users, Video, CheckCircle, Award
 } from 'lucide-react';
 import { IslamicSidebar } from '@/components/ui/IslamicSidebar';
 
@@ -24,6 +24,7 @@ export default function TeacherLayout({ children }: { children: React.ReactNode 
     { label: 'Meetings', href: '/teacher/meetings', icon: Video },
     { label: 'Interviews', href: '/teacher/interviews', icon: Video },
     { label: 'Attendance', href: '/teacher/attendance', icon: CheckCircle },
+    { label: 'Certificates', href: '/teacher/certificates', icon: Award },
     { label: 'Resources', href: '/teacher/resources', icon: FileText },
     { label: 'Availability', href: '/teacher/availability', icon: Calendar },
     { label: 'Analytics', href: '/teacher/analytics', icon: TrendingUp },

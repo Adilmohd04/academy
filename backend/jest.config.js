@@ -16,6 +16,13 @@ module.exports = {
     '^.+\\.ts$': 'ts-jest',
   },
   moduleFileExtensions: ['ts', 'js', 'json'],
+  // Source written in ESM style imports siblings as './x.js', which resolves
+  // at runtime but not under this CommonJS ts-jest setup — a whole suite was
+  // failing to load for that reason alone. Strip the extension for relative
+  // paths so both spellings resolve.
+  moduleNameMapper: {
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
   collectCoverage: true,
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],

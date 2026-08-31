@@ -1,4 +1,5 @@
 import { supabase } from '../../../config/database';
+import { checkPrerequisites } from './prerequisiteService';
 
 export interface CourseEnrollment {
   id: string;
@@ -258,43 +259,12 @@ export async function checkEligibility(studentId: string, courseId: string) {
       };
     }
 
-    // Get prerequisites for this course
-    const { data: prerequisites, error: prereqError } = await supabase
-      .from('course_prerequisites')
-      .select(`
-        prerequisite_course_id,
-        prerequisite_course:courses!course_prerequisites_prerequisite_course_id_fkey (
-          id,
-          title
-        )
-      `)
-      .eq('course_id', courseId);
-
-    if (prereqError) {
-      console.error('Error fetching prerequisites:', prereqError);
-    }
-
-    const missingPrerequisites: any[] = [];
-
-    // Check if student has completed each prerequisite
-    if (prerequisites && prerequisites.length > 0) {
-      for (const prereq of prerequisites) {
-        const { data: completion } = await supabase
-          .from('enrollments')
-          .select('id, progress')
-          .eq('student_id', studentId)
-          .eq('course_id', prereq.prerequisite_course_id)
-          .eq('status', 'completed')
-          .maybeSingle();
-
-        if (!completion) {
-          missingPrerequisites.push({
-            id: prereq.prerequisite_course_id,
-            title: (prereq.prerequisite_course as any)?.title || 'Unknown Course'
-          });
-        }
-      }
-    }
+    // Ask the same gate that enrollment enforces. This previously read the
+    // `course_prerequisites` join table, which nothing writes — so it always
+    // came back empty and told the student they were eligible, right up until
+    // enrollment refused them. It also ignored equivalent course offerings.
+    const prerequisites = await checkPrerequisites(courseId, studentId);
+    const missingPrerequisites = prerequisites.missing;
 
     // Check course capacity
     const { count: enrolledCount } = await supabase

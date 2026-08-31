@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { currentUser } from '@clerk/nextjs/server';
 import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,15 +12,8 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    const user = await currentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const userRole = user.publicMetadata?.role as string;
-    if (userRole !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) return authorization.response;
 
     const { id } = params;
     const body = await request.json();
@@ -38,6 +31,9 @@ export async function PUT(
       .single();
 
     if (error) {
+      if (error.code === 'PGRST116') {
+        return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
+      }
       console.error('Error updating resource status:', error);
       return NextResponse.json({ error: 'Failed to update status' }, { status: 500 });
     }

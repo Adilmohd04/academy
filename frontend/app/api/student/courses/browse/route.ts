@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 
 export const dynamic = 'force-dynamic';
@@ -60,17 +60,31 @@ const fetchFromBackend = async (
   return { response, text, contentType };
 };
 
-export async function GET(request: NextRequest) {
-  try {
-    const { userId } = await auth();
-    const backendUrl = resolveBackendUrl();
-    const bypassSecret = getProtectionBypassSecret();
+const BACKEND_PATH = '/api/student/courses/browse';
 
-    const resolvedUserId = userId || request.headers.get('x-clerk-user-id') || '';
+export async function GET() {
+  try {
+    // The backend route serving this path is behind requireAuth, and the browse
+    // page needs `is_enrolled` to hide courses the student already has. Without
+    // a forwarded token every request came back 401. Resolved server-side, the
+    // same way the sibling my-courses proxy does it.
+    const { userId, getToken } = await auth();
+    const token = await getToken();
+
+    const backendUrl = resolveBackendUrl();
+    const fallbackBackendUrl = resolveFallbackBackendUrl();
+    const bypassSecret = getProtectionBypassSecret();
+    const internalAuthSecret = process.env.INTERNAL_AUTH_SHARED_SECRET || '';
 
     const proxyHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(resolvedUserId ? { 'x-clerk-user-id': resolvedUserId } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(internalAuthSecret && userId
+        ? {
+            'x-internal-auth-user-id': userId,
+            'x-internal-auth-secret': internalAuthSecret,
+          }
+        : {}),
       ...(bypassSecret
         ? {
             'x-vercel-protection-bypass': bypassSecret,
@@ -79,19 +93,30 @@ export async function GET(request: NextRequest) {
         : {}),
     };
 
-    const targetUrl = new URL(`${backendUrl}/api/student/courses/browse`);
-    if (bypassSecret) {
-      targetUrl.searchParams.set('x-vercel-protection-bypass', bypassSecret);
+    let { response, text, contentType } = await fetchFromBackend(
+      backendUrl,
+      BACKEND_PATH,
+      proxyHeaders,
+      bypassSecret
+    );
+
+    const shouldRetryWithFallback =
+      !!fallbackBackendUrl &&
+      fallbackBackendUrl !== backendUrl &&
+      isLikelyVercelProtectionBlock(response.status, contentType, text);
+
+    if (shouldRetryWithFallback) {
+      console.warn('[Proxy] Primary backend blocked by Vercel protection, retrying fallback backend.');
+      const fallbackResult = await fetchFromBackend(
+        fallbackBackendUrl,
+        BACKEND_PATH,
+        proxyHeaders,
+        bypassSecret
+      );
+      response = fallbackResult.response;
+      text = fallbackResult.text;
+      contentType = fallbackResult.contentType;
     }
-
-    const response = await fetch(targetUrl.toString(), {
-      method: 'GET',
-      headers: proxyHeaders,
-      cache: 'no-store',
-    });
-
-    const text = await response.text();
-    const contentType = response.headers.get('content-type') || 'application/json';
 
     return new NextResponse(text, {
       status: response.status,

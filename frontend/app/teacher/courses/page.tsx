@@ -8,6 +8,8 @@ import { IslamicCard } from '@/components/ui/IslamicCards';
 import { IslamicButton } from '@/components/ui/IslamicButtons';
 import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface Course {
   id: string;
   title: string;
@@ -103,7 +105,7 @@ export default function TeacherCoursesPage() {
     
     try {
       const token = getToken ? await getToken() : null;
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses`, {
+      const res = await fetch(`${API}/api/teacher/courses`, {
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         }
@@ -128,7 +130,7 @@ export default function TeacherCoursesPage() {
 
     try {
       const token = getToken ? await getToken() : null;
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
+      const res = await fetch(`${API}/api/courses/${courseId}`, {
         method: 'DELETE',
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : {}),

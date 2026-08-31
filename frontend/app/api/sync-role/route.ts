@@ -45,17 +45,10 @@ export async function POST(req: Request) {
 
     console.log(`✅ Synced role for user ${userId}: ${profile.role}`)
 
-    const response = NextResponse.json({
+    return NextResponse.json({
       success: true,
       role: profile.role,
     })
-    
-    response.cookies.set('_academy_role', profile.role, {
-      path: '/',
-      maxAge: 60 * 60 * 24 * 7 // 1 week
-    });
-
-    return response;
   } catch (error: any) {
     console.error('Error syncing role:', error)
     return NextResponse.json(

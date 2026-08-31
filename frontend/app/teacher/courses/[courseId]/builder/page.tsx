@@ -2,7 +2,7 @@
 
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
-import { useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { 
   Plus, GripVertical, Video, FileText, Link as LinkIcon, 
   Calendar, Trash2, Edit2, BookOpen, Loader2, ChevronDown, ChevronRight,
@@ -163,6 +163,20 @@ interface ScheduledClass {
 
 const LANGUAGES = ['English', 'Tamil', 'Arabic', 'Urdu', 'Hindi', 'Other'];
 
+type BuilderApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+const BuilderApiFetchContext = createContext<BuilderApiFetch | null>(null);
+
+function useBuilderApiFetch(): BuilderApiFetch {
+  const apiFetch = useContext(BuilderApiFetchContext);
+
+  if (!apiFetch) {
+    throw new Error('The course builder authentication context is unavailable.');
+  }
+
+  return apiFetch;
+}
+
 export default function CourseBuilderPage() {
   const params = useParams();
   const searchParams = useSearchParams();
@@ -184,6 +198,25 @@ export default function CourseBuilderPage() {
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
+
+  // Keep all builder API calls on the verified Clerk session. The backend no
+  // longer accepts a client-controlled user id header as proof of identity.
+  const authenticatedFetch = useCallback<BuilderApiFetch>(async (input, init = {}) => {
+    const token = await getToken();
+    if (!token) {
+      throw new Error('Your session has expired. Please sign in again.');
+    }
+
+    const headers = new Headers(init.headers);
+    headers.delete('x-clerk-user-id');
+    headers.set('Authorization', `Bearer ${token}`);
+
+    return globalThis.fetch(input, { ...init, headers });
+  }, [getToken]);
+
+  // This binding ensures that every existing request in this top-level builder
+  // component is authenticated, including requests triggered from button handlers.
+  const fetch = authenticatedFetch;
 
   // Grading policy state - text inputs
   const [gradingPolicy, setGradingPolicy] = useState({
@@ -209,18 +242,15 @@ export default function CourseBuilderPage() {
     
     setIsFetching(true);
     try {
-      const token = getToken ? await getToken() : null;
-      const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      
       const [courseRes, weeksRes, coursesListRes] = await Promise.all([
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
-          headers
+          headers: {}
         }).catch(() => null),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}/weeks`, {
-          headers
+          headers: {}
         }).catch(() => null),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses?status=published`, {
-          headers
+          headers: {}
         }).catch(() => null)
       ]);
 
@@ -269,7 +299,7 @@ export default function CourseBuilderPage() {
 
       // Fetch enrolled students
       const studentsRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/students`, {
-        headers
+        headers: {}
       }).catch(() => null);
       
       if (studentsRes?.ok) {
@@ -349,8 +379,7 @@ export default function CourseBuilderPage() {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(courseData)
       });
@@ -410,7 +439,8 @@ export default function CourseBuilderPage() {
   ];
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <BuilderApiFetchContext.Provider value={authenticatedFetch}>
+      <div className="flex h-screen bg-gray-50">
       {/* Sidebar */}
       <div className="w-64 bg-white border-r border-gray-200 flex flex-col shadow-sm">
         {/* Sidebar Header */}
@@ -446,8 +476,7 @@ export default function CourseBuilderPage() {
                             fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/lessons/${lesson.id}`, {
                               method: 'PUT',
                               headers: {
-                                'Content-Type': 'application/json',
-                                'x-clerk-user-id': userId || ''
+                                'Content-Type': 'application/json'
                               },
                               body: JSON.stringify({
                                 title: lesson.title,
@@ -598,12 +627,15 @@ export default function CourseBuilderPage() {
           {activeTab === 'settings' && <SettingsTab course={course} setCourse={setCourse} gradingPolicy={gradingPolicy} setGradingPolicy={setGradingPolicy} setHasUnsavedChanges={setHasUnsavedChanges} userId={userId} courseId={courseId} />}
         </div>
       </div>
-    </div>
+      </div>
+    </BuilderApiFetchContext.Provider>
   );
 }
 
 // Final Exams Tab Component
 function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string | null }) {
+  const fetch = useBuilderApiFetch();
+
   type FinalExamQuizQuestion = {
     type?: 'mcq' | 'fill';
     question: string;
@@ -669,9 +701,7 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
     try {
       setLoading(true);
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/final-exams`, {
-        headers: {
-          'x-clerk-user-id': userId || ''
-        }
+        headers: {}
       });
 
       if (!response.ok) {
@@ -696,7 +726,7 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
     if (courseId && userId) {
       fetchFinalExams();
     }
-  }, [courseId, userId]);
+  }, [courseId, userId, fetch]);
 
   const fetchInterviewSchedule = async (examId: string) => {
     if (!examId || !userId) return;
@@ -704,9 +734,7 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
     try {
       setInterviewsLoading(true);
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/final-exams/${examId}/interviews`, {
-        headers: {
-          'x-clerk-user-id': userId || ''
-        }
+        headers: {}
       });
 
       if (!response.ok) {
@@ -854,8 +882,7 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
       const response = await fetch(endpoint, {
         method: isEdit ? 'PUT' : 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       });
@@ -1182,8 +1209,7 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/final-exams/${selectedExamId}/interviews/auto-schedule`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       });
@@ -1213,8 +1239,7 @@ function FinalExamsTab({ courseId, userId }: { courseId: string; userId?: string
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/final-exams/${selectedExamId}/interviews/${interviewId}`, {
         method: 'PATCH',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           scheduled_date: edit.scheduled_date ? new Date(edit.scheduled_date).toISOString() : null,
@@ -2474,6 +2499,8 @@ function AboutCourseTab({ course, setCourse, setHasUnsavedChanges, availableCour
 
 // Content Tab Component
 function ContentTab({ weeks, setWeeks, courseId, userId, setHasUnsavedChanges }: any) {
+  const fetch = useBuilderApiFetch();
+
   const [editingWeek, setEditingWeek] = useState<string | null>(null);
   const [editingLesson, setEditingLesson] = useState<any>(null);
   const [editingWeekModal, setEditingWeekModal] = useState<Week | null>(null);
@@ -2491,8 +2518,7 @@ function ContentTab({ weeks, setWeeks, courseId, userId, setHasUnsavedChanges }:
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/weeks`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(newWeek)
       });
@@ -2566,8 +2592,7 @@ function ContentTab({ weeks, setWeeks, courseId, userId, setHasUnsavedChanges }:
       const res = await fetch(endpoint, {
         method,
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(lessonData)
       });
@@ -2610,7 +2635,7 @@ function ContentTab({ weeks, setWeeks, courseId, userId, setHasUnsavedChanges }:
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/weeks/${weekId}`, {
         method: 'DELETE',
-        headers: { 'x-clerk-user-id': userId || '' }
+        headers: {}
       });
 
       if (res.ok) {
@@ -2626,7 +2651,7 @@ function ContentTab({ weeks, setWeeks, courseId, userId, setHasUnsavedChanges }:
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/lessons/${lessonId}`, {
         method: 'DELETE',
-        headers: { 'x-clerk-user-id': userId || '' }
+        headers: {}
       });
 
       if (res.ok) {
@@ -2711,8 +2736,7 @@ function ContentTab({ weeks, setWeeks, courseId, userId, setHasUnsavedChanges }:
                     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/weeks/${week.id}`, {
                       method: 'PUT',
                       headers: {
-                        'Content-Type': 'application/json',
-                        'x-clerk-user-id': userId || ''
+                        'Content-Type': 'application/json'
                       },
                       body: JSON.stringify({ is_published: !week.is_published })
                     });
@@ -2806,8 +2830,7 @@ function ContentTab({ weeks, setWeeks, courseId, userId, setHasUnsavedChanges }:
                               const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/lessons/${lesson.id}`, {
                                 method: 'PUT',
                                 headers: {
-                                  'Content-Type': 'application/json',
-                                  'x-clerk-user-id': userId || ''
+                                  'Content-Type': 'application/json'
                                 },
                                 body: JSON.stringify({ is_published: !lesson.is_published })
                               });
@@ -2971,8 +2994,7 @@ function ContentTab({ weeks, setWeeks, courseId, userId, setHasUnsavedChanges }:
                 {
                   method: 'PUT',
                   headers: {
-                    'Content-Type': 'application/json',
-                    'x-clerk-user-id': userId || ''
+                    'Content-Type': 'application/json'
                   },
                   body: JSON.stringify({
                     title: updatedWeek.title,
@@ -3599,25 +3621,18 @@ function LessonEditorModal({ lesson, setLesson, onSave, onClose }: any) {
 
 // Students Tab Component with Modern List Design
 function StudentsTab({ students, submissions, courseId, userId, weeks }: any) {
+  const fetch = useBuilderApiFetch();
+
   const [searchTerm, setSearchTerm] = useState('');
   const [studentsTracking, setStudentsTracking] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
-  const { getToken } = useAuth();
 
   // Fetch comprehensive tracking data
   useEffect(() => {
     const fetchTracking = async () => {
       try {
-        const token = getToken ? await getToken() : null;
-        const res = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/students/tracking`,
-          {
-            headers: {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            }
-          }
-        );
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/students/tracking`);
         
         if (res.ok) {
           const data = await res.json();
@@ -3633,7 +3648,7 @@ function StudentsTab({ students, submissions, courseId, userId, weeks }: any) {
     if (courseId && userId) {
       fetchTracking();
     }
-  }, [courseId, userId]);
+  }, [courseId, userId, fetch]);
 
   const filteredStudents = studentsTracking.filter((student: any) =>
     student.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -3812,6 +3827,8 @@ function StudentsTab({ students, submissions, courseId, userId, weeks }: any) {
 
 // Student Detail Modal with Submissions
 function StudentDetailModal({ student, courseId, userId, weeks, onClose }: { student: any; courseId: string; userId: string; weeks: Week[]; onClose: () => void }) {
+  const fetch = useBuilderApiFetch();
+
   const [studentSubmissions, setStudentSubmissions] = useState<any[]>([]);
   const [loadingSubs, setLoadingSubs] = useState(true);
   const [gradingSubmission, setGradingSubmission] = useState<any>(null);
@@ -3824,7 +3841,7 @@ function StudentDetailModal({ student, courseId, userId, weeks, onClose }: { stu
       try {
         // Fetch all submissions (assignments + quizzes) then filter by this student
         const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/submissions`, {
-          headers: { 'x-clerk-user-id': userId || '' }
+          headers: {}
         });
         if (res.ok) {
           const data = await res.json();
@@ -3905,7 +3922,7 @@ function StudentDetailModal({ student, courseId, userId, weeks, onClose }: { stu
       }
     };
     fetchStudentSubmissions();
-  }, [student.student_id, courseId, userId, weeks]);
+  }, [student.student_id, courseId, userId, weeks, fetch]);
 
   const gradeSubmission = async () => {
     if (!gradingSubmission) return;
@@ -3913,8 +3930,7 @@ function StudentDetailModal({ student, courseId, userId, weeks, onClose }: { stu
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/submissions/${gradingSubmission.id}/grade`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ grade: gradeValue, feedback: feedbackValue })
       });
@@ -4201,6 +4217,8 @@ function StudentDetailModal({ student, courseId, userId, weeks, onClose }: { stu
 
 // Submissions Tab Component
 function SubmissionsTab({ submissions, setSubmissions, userId, courseId, students }: any) {
+  const fetch = useBuilderApiFetch();
+
   const [assignments, setAssignments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedWeeks, setExpandedWeeks] = useState<Record<number, boolean>>({});
@@ -4216,7 +4234,7 @@ function SubmissionsTab({ submissions, setSubmissions, userId, courseId, student
     const fetchSubmissions = async () => {
       try {
         const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/assignment-submissions`, {
-          headers: { 'x-clerk-user-id': userId || '' }
+          headers: {}
         });
         if (res.ok) {
           const data = await res.json();
@@ -4242,7 +4260,7 @@ function SubmissionsTab({ submissions, setSubmissions, userId, courseId, student
     } else {
       setLoading(false);
     }
-  }, [courseId, userId]);
+  }, [courseId, userId, fetch]);
 
   // Group assignments by week
   const weekMap: Record<number, { week_title: string; assignments: any[] }> = {};
@@ -4305,8 +4323,7 @@ function SubmissionsTab({ submissions, setSubmissions, userId, courseId, student
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/submissions/${sub.id}/grade`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ grade, feedback })
       });
@@ -4753,6 +4770,8 @@ function SubmissionsTab({ submissions, setSubmissions, userId, courseId, student
 
 // Discussion Tab Component
 function DiscussionTab({ courseId, userId }: any) {
+  const fetch = useBuilderApiFetch();
+
   const [discussions, setDiscussions] = useState<any[]>([]);
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
@@ -4782,7 +4801,7 @@ function DiscussionTab({ courseId, userId }: any) {
   const fetchUserRole = async () => {
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/users/profile`, {
-        headers: { 'x-clerk-user-id': userId || '' }
+        headers: {}
       });
       if (res.ok) {
         const data = await res.json();
@@ -4796,7 +4815,7 @@ function DiscussionTab({ courseId, userId }: any) {
   const fetchDiscussions = async (silent = false) => {
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}/discussions`, {
-        headers: { 'x-clerk-user-id': userId || '' }
+        headers: {}
       });
       if (res.ok) {
         const { data } = await res.json();
@@ -4816,8 +4835,7 @@ function DiscussionTab({ courseId, userId }: any) {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}/discussions`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ title: newTitle, content: newContent })
       });
@@ -4842,8 +4860,7 @@ function DiscussionTab({ courseId, userId }: any) {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/discussions/${discussionId}/replies`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ content })
       });
@@ -4863,8 +4880,7 @@ function DiscussionTab({ courseId, userId }: any) {
       await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/discussions/${postId}/vote`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ type: voteType })
       });
@@ -4881,8 +4897,7 @@ function DiscussionTab({ courseId, userId }: any) {
       await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/discussions/${postId}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ content: editContent })
       });
@@ -4902,8 +4917,7 @@ function DiscussionTab({ courseId, userId }: any) {
       await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/discussions/${replyId}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ content: editReplyContent })
       });
@@ -4929,7 +4943,7 @@ function DiscussionTab({ courseId, userId }: any) {
     try {
       await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/discussions/${postId}`, {
         method: 'DELETE',
-        headers: { 'x-clerk-user-id': userId || '' }
+        headers: {}
       });
       fetchDiscussions();
     } catch (error) {
@@ -4942,7 +4956,7 @@ function DiscussionTab({ courseId, userId }: any) {
     try {
       await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/discussions/${discussionId}/pin`, {
         method: 'POST',
-        headers: { 'x-clerk-user-id': userId || '' }
+        headers: {}
       });
       fetchDiscussions();
     } catch (error) {
@@ -5328,6 +5342,8 @@ function DiscussionTab({ courseId, userId }: any) {
 
 // Announcements Tab Component
 function AnnouncementsTab({ announcements, setAnnouncements, courseId, userId }: any) {
+  const fetch = useBuilderApiFetch();
+
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -5337,7 +5353,7 @@ function AnnouncementsTab({ announcements, setAnnouncements, courseId, userId }:
     const fetchAnnouncements = async () => {
       try {
         const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/announcements`, {
-          headers: { 'x-clerk-user-id': userId || '' }
+          headers: {}
         });
         if (res.ok) {
           const { data } = await res.json();
@@ -5348,7 +5364,7 @@ function AnnouncementsTab({ announcements, setAnnouncements, courseId, userId }:
       }
     };
     fetchAnnouncements();
-  }, [courseId, userId]);
+  }, [courseId, userId, fetch]);
 
   const addAnnouncement = async () => {
     if (!newTitle || !newContent) return;
@@ -5357,8 +5373,7 @@ function AnnouncementsTab({ announcements, setAnnouncements, courseId, userId }:
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/announcements`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ title: newTitle, content: newContent, is_pinned: false })
       });
@@ -5382,8 +5397,7 @@ function AnnouncementsTab({ announcements, setAnnouncements, courseId, userId }:
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/announcements/${id}`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ is_pinned: !currentPinned })
       });
@@ -5404,7 +5418,7 @@ function AnnouncementsTab({ announcements, setAnnouncements, courseId, userId }:
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/announcements/${id}`, {
         method: 'DELETE',
-        headers: { 'x-clerk-user-id': userId || '' }
+        headers: {}
       });
 
       if (res.ok) {
@@ -5510,6 +5524,8 @@ function AnnouncementsTab({ announcements, setAnnouncements, courseId, userId }:
 
 // Schedule Classes Tab Component
 function ScheduleTab({ scheduledClasses, setScheduledClasses, courseId, userId }: any) {
+  const fetch = useBuilderApiFetch();
+
   const [newClass, setNewClass] = useState({
     topic: '',
     date: '',
@@ -5524,7 +5540,7 @@ function ScheduleTab({ scheduledClasses, setScheduledClasses, courseId, userId }
     const fetchSchedules = async () => {
       try {
         const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/schedules`, {
-          headers: { 'x-clerk-user-id': userId || '' }
+          headers: {}
         });
         
         if (res.ok) {
@@ -5539,7 +5555,7 @@ function ScheduleTab({ scheduledClasses, setScheduledClasses, courseId, userId }
     if (courseId && userId) {
       fetchSchedules();
     }
-  }, [courseId, userId]);
+  }, [courseId, userId, fetch]);
 
   // Categorize schedules by status and time
   const categorizeSchedules = () => {
@@ -5597,8 +5613,7 @@ function ScheduleTab({ scheduledClasses, setScheduledClasses, courseId, userId }
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/schedules`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           title: newClass.topic,
@@ -5637,8 +5652,7 @@ function ScheduleTab({ scheduledClasses, setScheduledClasses, courseId, userId }
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/schedules/${classId}/status`, {
         method: 'PATCH',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(updateData)
       });
@@ -5666,7 +5680,7 @@ function ScheduleTab({ scheduledClasses, setScheduledClasses, courseId, userId }
     try {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/schedules/${classId}`, {
         method: 'DELETE',
-        headers: { 'x-clerk-user-id': userId || '' }
+        headers: {}
       });
 
       if (res.ok) {
@@ -5943,6 +5957,8 @@ function ScheduleTab({ scheduledClasses, setScheduledClasses, courseId, userId }
 
 // Settings Tab Component
 function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHasUnsavedChanges, userId, courseId }: any) {
+  const fetch = useBuilderApiFetch();
+
   const [publishing, setPublishing] = useState(false);
   const [completionText, setCompletionText] = useState('');
   const [markingComplete, setMarkingComplete] = useState(false);
@@ -5970,8 +5986,7 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/complete`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         }
       });
 
@@ -6009,8 +6024,7 @@ function SettingsTab({ course, setCourse, gradingPolicy, setGradingPolicy, setHa
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/publish`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           is_published: newStatus,

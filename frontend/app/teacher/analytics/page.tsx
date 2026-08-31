@@ -11,6 +11,8 @@ import {
   CheckCircle, Calendar, TrendingUp, DollarSign, Award, Target
 } from 'lucide-react';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface TeacherProfile {
   full_name: string;
   email: string;
@@ -52,8 +54,10 @@ export default function TeacherAnalytics() {
     try {
       const token = await getToken();
       
-      // Fetch teacher data from the correct endpoint
-      const response = await fetch('/api/teacher/profile', {
+      // The backend exposes the teacher-scoped analytics aggregate. The old
+      // `/api/teacher/profile` BFF route no longer exists, which left this
+      // screen permanently empty despite a valid teacher session.
+      const response = await fetch(`${API}/api/teacher/analytics`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       

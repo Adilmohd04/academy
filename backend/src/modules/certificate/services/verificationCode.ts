@@ -13,6 +13,7 @@
  */
 
 import { randomBytes } from 'crypto';
+import config from '../../../config/env';
 
 // 32 unambiguous characters (no I, O, 0, 1) — log2(32) = 5 bits per char.
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -49,6 +50,68 @@ export function generateVerificationCode(): string {
     groups.push(chars.slice(i, i + GROUP_SIZE).join(''));
   }
   return groups.join('-');
+}
+
+/**
+ * Build the one public URL that QR codes and certificate PDFs point to.
+ *
+ * `VERIFICATION_PORTAL_URL` may be configured either as the application
+ * origin (`https://academy.example`) or as the verification root
+ * (`https://academy.example/verify`). In production it is required and must
+ * be a public HTTPS URL. Keeping this here prevents individual issuance paths
+ * from silently producing QR codes for different domains or localhost.
+ */
+export function verificationUrlForCode(code: string): string {
+  if (!VERIFICATION_CODE_FORMAT_REGEX.test(code)) {
+    throw new Error('Cannot create a verification URL for an invalid verification code');
+  }
+
+  // Read the explicit environment variable at call time so scripts/tests can
+  // set it before issuance. The config value is the process-start fallback.
+  const configuredBase = process.env.VERIFICATION_PORTAL_URL?.trim() || config.verificationPortalUrl;
+  const isProduction = process.env.NODE_ENV === 'production' || config.nodeEnv === 'production';
+
+  if (!configuredBase) {
+    if (isProduction) {
+      throw new Error('VERIFICATION_PORTAL_URL must be configured in production before issuing certificates');
+    }
+
+    const developmentBase = process.env.APP_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
+    return verificationUrlFromBase(developmentBase, code, false);
+  }
+
+  return verificationUrlFromBase(configuredBase, code, isProduction);
+}
+
+function verificationUrlFromBase(base: string, code: string, requireHttps: boolean): string {
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch {
+    throw new Error('VERIFICATION_PORTAL_URL must be an absolute http(s) URL');
+  }
+
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error('VERIFICATION_PORTAL_URL must use http or https');
+  }
+  if (requireHttps && url.protocol !== 'https:') {
+    throw new Error('VERIFICATION_PORTAL_URL must use HTTPS in production');
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error('VERIFICATION_PORTAL_URL must not contain credentials, a query string, or a fragment');
+  }
+
+  const existingPath = url.pathname.replace(/\/+$/, '');
+  url.pathname = !existingPath || existingPath === '/'
+    ? '/verify'
+    : existingPath.toLowerCase().endsWith('/verify')
+      ? existingPath
+      : `${existingPath}/verify`;
+  url.search = '';
+  url.hash = '';
+  const verificationRoot = url.toString().replace(/\/$/, '');
+
+  return `${verificationRoot}/${encodeURIComponent(code)}`;
 }
 
 export const VERIFICATION_CODE_BITS = CODE_LENGTH * Math.log2(ALPHABET.length); // 60

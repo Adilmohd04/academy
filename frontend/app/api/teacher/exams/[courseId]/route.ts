@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { examManagementService } from '@/backend/src/modules/teacher/services/examManagementService';
+import examManagementService from '@/backend/src/modules/teacher/services/examManagementService';
+import { hasAccessResponse, requireTeacherCourseAccess } from '@/lib/server/examAccess';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 
 export async function GET(
-  req: NextRequest,
+  _request: NextRequest,
   { params }: { params: { courseId: string } }
 ) {
   try {
-    const userId = req.headers.get('x-clerk-user-id');
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authorization = await requireRole(['teacher', 'admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
+    }
+
+    const courseAccess = await requireTeacherCourseAccess(
+      authorization.actor,
+      params.courseId,
+    );
+    if (hasAccessResponse(courseAccess)) {
+      return courseAccess.response;
     }
 
     const exam = await examManagementService.getFinalExamByCourseId(params.courseId);

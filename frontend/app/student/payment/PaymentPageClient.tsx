@@ -60,9 +60,11 @@ export default function PaymentPageClient() {
   };
 
   const handlePayment = async () => {
-    if (amount === 0) {
-      // Handle free booking
-      router.push('/student/payment/success');
+    if (!Number.isFinite(amount) || amount <= 0) {
+      // A free meeting is booked by the scheduling endpoint after its price is
+      // verified on the server. Never let a URL query parameter manufacture a
+      // payment-success screen.
+      setError('This payment link is invalid or no longer requires payment. Please return to your booking.');
       return;
     }
 

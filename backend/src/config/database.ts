@@ -11,7 +11,7 @@
  * - Consistent API across the codebase
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
 
@@ -25,30 +25,45 @@ if (process.env.NODE_ENV === 'development' && process.env.ALLOW_SELF_SIGNED_CERT
   console.warn('⚠️  Development TLS verification is disabled (NODE_TLS_REJECT_UNAUTHORIZED=0)');
 }
 
-// Debug: Log database connection info
-console.log('🔍 Database Configuration:');
-console.log('  SUPABASE_URL present:', !!process.env.SUPABASE_URL);
-console.log('  Service role key present:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-
-// Validate required environment variables
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('❌ Missing required Supabase environment variables');
-  console.error('   Required: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY');
-}
+let cachedClient: SupabaseClient | null = null;
 
 /**
- * Supabase client - PRIMARY database interface
- * Uses service role key for full access (bypasses RLS for admin operations)
- * 
- * For user-scoped operations, create a new client with the user's JWT token
- * 
- * Type safety: Supabase client provides automatic type inference from the database schema.
- * For enhanced type safety, generate types with: npx supabase gen types typescript
+ * Several Next.js route handlers in ../../frontend import services from this
+ * package, so this module is evaluated by `next build` while it collects page
+ * data. The Next environment publishes the project URL under the public name,
+ * so accept either spelling rather than reporting a configured project as
+ * missing.
  */
-export const supabase = createClient(
-  process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-  {
+const resolveCredentials = () => ({
+  url: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+});
+
+/**
+ * Created on first use, not at import time.
+ *
+ * `createClient` throws when handed an empty URL, so building the client at
+ * module scope meant merely importing this file crashed anywhere the
+ * environment was not fully configured — which failed the entire production
+ * build of the frontend rather than the one request that needed a database.
+ */
+const resolveSupabaseClient = (): SupabaseClient => {
+  if (cachedClient) return cachedClient;
+
+  const { url, serviceRoleKey } = resolveCredentials();
+
+  console.log('🔍 Database Configuration:');
+  console.log('  SUPABASE_URL present:', !!url);
+  console.log('  Service role key present:', !!serviceRoleKey);
+
+  if (!url || !serviceRoleKey) {
+    console.error('❌ Missing required Supabase environment variables');
+    throw new Error(
+      'Supabase is not configured. Set SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY.',
+    );
+  }
+
+  cachedClient = createClient(url, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false
@@ -56,8 +71,27 @@ export const supabase = createClient(
     db: {
       schema: 'public'
     }
-  }
-);
+  });
+
+  return cachedClient;
+};
+
+/**
+ * Supabase client - PRIMARY database interface
+ * Uses service role key for full access (bypasses RLS for admin operations)
+ *
+ * For user-scoped operations, create a new client with the user's JWT token
+ *
+ * Exposed as a proxy so every existing `import { supabase }` call site keeps
+ * working unchanged while construction stays deferred to first property access.
+ */
+export const supabase = new Proxy({} as SupabaseClient, {
+  get: (_target, property) => {
+    const client = resolveSupabaseClient() as any;
+    const value = client[property];
+    return typeof value === 'function' ? value.bind(client) : value;
+  },
+});
 
 /**
  * Test database connection using Supabase client

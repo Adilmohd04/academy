@@ -82,9 +82,7 @@ const StudentExamPage = () => {
   const fetchExam = async () => {
     try {
       const response = await fetch(`/api/student/exams/${examId}`, {
-        headers: {
-          'x-clerk-user-id': userId || ''
-        }
+        cache: 'no-store'
       });
       if (response.ok) {
         const data = await response.json();
@@ -102,12 +100,10 @@ const StudentExamPage = () => {
       const response = await fetch('/api/student/exams/start', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          exam_id: examId,
-          student_id: userId
+          exam_id: examId
         })
       });
 
@@ -131,8 +127,7 @@ const StudentExamPage = () => {
         await fetch('/api/student/exams/save-answer', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            'x-clerk-user-id': userId || ''
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
             submission_id: submissionId,
@@ -154,8 +149,7 @@ const StudentExamPage = () => {
       const response = await fetch('/api/student/exams/submit', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           submission_id: submissionId

@@ -1,33 +1,36 @@
 /**
- * Public certificate verification endpoint.
+ * Public certificate verification routes.
  *
- * Spec: .kiro/specs/certificate-designer-studio/, design §9, Property 12.
- *
- * GET /api/verify/:code
- *   - No authentication.
- *   - Rate-limited to 60 requests / IP / minute (Req 11.8).
- *   - Sets `Cache-Control: no-store` (Req 14.5).
- *   - Returns ONLY the public whitelist of fields (Req 11.7): student name,
- *     course title, completion date, certificate id, instructor name,
- *     organization name, status. NEVER the score, email, or internal IDs.
- *   - Logs every attempt to `certificate_verification_log` (Req 11.3, 11.4).
- *   - On a valid lookup, bumps `verification_count` + `last_verified_at`.
- *
- * Mounted at `/api` in app.ts (so the path is `/api/verify/:code`).
+ * GET /api/verify/:code scans the opaque verification code stored in a QR
+ * image. GET /api/verify?certificateId=CERT-... supports a manual check of
+ * the printed certificate number. Both paths are deliberately unauthenticated
+ * and return only a small public whitelist.
  */
 
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { supabase } from '../config/database';
+import config from '../config/env';
+import { VERIFICATION_CODE_FORMAT_REGEX } from '../modules/certificate/services/verificationCode';
 
 const router = express.Router();
 
+/**
+ * `req.ip` is safe here because Express only reads a forwarded address when
+ * `TRUST_PROXY` has been explicitly configured in app.ts. With the default
+ * (`false`), it is the socket peer and an arbitrary browser X-Forwarded-For
+ * header cannot change this rate-limit or audit key.
+ */
+function publicRequestIp(req: express.Request): string {
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
 const verifyLimiter = rateLimit({
-  windowMs: 60_000, // 1 minute
-  max: 60, // 60 requests / IP / minute
+  windowMs: config.verificationRateLimitWindowMs,
+  max: config.verificationRateLimitMaxRequests,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.ip || req.socket.remoteAddress || 'unknown',
+  keyGenerator: (req) => `certificate-verification:${publicRequestIp(req)}`,
   message: { status: 'rate_limited', message: 'Too many verification requests. Try again shortly.' },
 });
 
@@ -37,17 +40,22 @@ interface PublicCertificateView {
   student_name: string;
   course_title: string;
   completion_date: string | null;
+  issued_at: string | null;
   certificate_id: string;
   instructor_name: string;
   organization_name: string;
+  verification_timestamp: string;
   status: VerifyStatus;
   revoked_at?: string | null;
-  revoke_reason?: string | null;
 }
+
+type CertificateLookup =
+  | { column: 'verification_code'; value: string }
+  | { column: 'certificate_number'; value: string };
 
 async function logVerification(params: {
   certificateId: string | null;
-  code: string;
+  lookupValue: string;
   ip?: string;
   userAgent?: string;
   result: VerifyStatus;
@@ -55,60 +63,76 @@ async function logVerification(params: {
   try {
     await supabase.from('certificate_verification_log').insert({
       certificate_id: params.certificateId,
-      verification_code: params.code,
+      verification_code: params.lookupValue,
       verified_by_ip: params.ip ?? null,
       verified_by_user_agent: params.userAgent ?? null,
       verification_result: params.result,
     });
   } catch (err) {
-    // Logging must never break verification — swallow and continue.
+    // Verification must stay available even if analytics logging is down.
     console.error('[verify] failed to write verification log:', err);
   }
 }
 
-router.get('/verify/:code', verifyLimiter, async (req, res) => {
-  // Never cache verification responses (Req 14.5).
+async function verifyCertificate(
+  req: express.Request,
+  res: express.Response,
+  lookup: CertificateLookup,
+): Promise<express.Response> {
   res.setHeader('Cache-Control', 'no-store');
 
-  const { code } = req.params;
-  const ip = req.ip || req.socket.remoteAddress || undefined;
+  const ip = publicRequestIp(req);
   const userAgent = req.headers['user-agent'] || undefined;
+  const verificationTimestamp = new Date().toISOString();
 
   try {
-    // Look up the certificate by its public verification code.
+    // The response below is a strict public whitelist. Selecting the row here
+    // makes this compatible with the repository's older, inconsistent schema
+    // migrations without leaking additional fields to the caller.
     const { data: cert, error } = await supabase
       .from('certificates')
-      .select('id, course_id, student_id, certificate_number, status, completion_date, revoked_at, revoked_reason, template_snapshot')
-      .eq('verification_code', code)
+      .select('*')
+      .eq(lookup.column, lookup.value)
       .maybeSingle();
 
     if (error || !cert) {
-      await logVerification({ certificateId: null, code, ip, userAgent, result: 'invalid' });
+      await logVerification({
+        certificateId: null,
+        lookupValue: lookup.value,
+        ip,
+        userAgent,
+        result: 'invalid',
+      });
       return res.status(200).json({
         status: 'invalid',
-        message: 'No certificate matches this verification code.',
+        message: 'No certificate matches this verification value.',
       });
     }
 
-    // Determine status. (No expires_at column today, so 'expired' is unused
-    // unless added later — Property 12 tolerates this.)
-    let status: VerifyStatus = 'valid';
-    if (cert.status === 'revoked') status = 'revoked';
-
-    // The live certificates table caches student_name and course_name_cached
-    // directly on the row (they survive course deletion — Req 10.5). Prefer
-    // those, falling back to live lookups. student_id is a TEXT clerk id, so
-    // we look up profiles by clerk_user_id (and id as a fallback).
     const certRow = cert as any;
-    let studentName: string = certRow.student_name || '';
-    let courseTitle: string = certRow.course_name_cached || '';
+    const storedStatus = String(certRow.status || '').toLowerCase();
+    let status: VerifyStatus = 'valid';
+    const expiresAt = certRow.expires_at ? Date.parse(String(certRow.expires_at)) : Number.NaN;
+    if (storedStatus === 'revoked') {
+      status = 'revoked';
+    } else if (storedStatus === 'expired' || (Number.isFinite(expiresAt) && expiresAt <= Date.now())) {
+      status = 'expired';
+    } else if (!['active', 'awarded', 'issued'].includes(storedStatus)) {
+      // Pending and placeholder rows must never be presented as authentic.
+      status = 'invalid';
+    }
+
+    // Prefer immutable display values captured at issuance, then fall back to
+    // live records for older certificates.
+    let studentName = certRow.student_name || '';
+    let courseTitle = certRow.course_name_cached || '';
     let teacherId: string | null = null;
 
-    if (cert.course_id) {
+    if (certRow.course_id) {
       const { data: course } = await supabase
         .from('courses')
         .select('title, teacher_id')
-        .eq('id', cert.course_id)
+        .eq('id', certRow.course_id)
         .maybeSingle();
       if (course) {
         courseTitle = courseTitle || course.title || '';
@@ -116,26 +140,25 @@ router.get('/verify/:code', verifyLimiter, async (req, res) => {
       }
     }
 
-    if (!studentName && cert.student_id) {
+    if (!studentName && certRow.student_id) {
       const [{ data: byClerk }, { data: byId }] = await Promise.all([
-        supabase.from('profiles').select('full_name').eq('clerk_user_id', cert.student_id).maybeSingle(),
-        supabase.from('profiles').select('full_name').eq('id', cert.student_id).maybeSingle(),
+        supabase.from('profiles').select('full_name').eq('clerk_user_id', certRow.student_id).maybeSingle(),
+        supabase.from('profiles').select('full_name').eq('id', certRow.student_id).maybeSingle(),
       ]);
       studentName = byClerk?.full_name || byId?.full_name || '';
     }
 
     let instructorName = '';
-    let organizationName = 'Academy';
     if (teacherId) {
-      const [{ data: tById }, { data: tByClerk }] = await Promise.all([
+      const [{ data: byProfileId }, { data: byClerkId }] = await Promise.all([
         supabase.from('profiles').select('full_name').eq('id', teacherId).maybeSingle(),
         supabase.from('profiles').select('full_name').eq('clerk_user_id', teacherId).maybeSingle(),
       ]);
-      instructorName = tById?.full_name || tByClerk?.full_name || '';
+      instructorName = byProfileId?.full_name || byClerkId?.full_name || '';
     }
 
-    // Organization name can be pulled from the template snapshot if present.
-    const snapshot: any = cert.template_snapshot;
+    let organizationName = 'Academy';
+    const snapshot: any = certRow.template_snapshot;
     if (snapshot && typeof snapshot === 'object') {
       organizationName = snapshot.organization_name || snapshot.organizationName || organizationName;
     }
@@ -143,42 +166,85 @@ router.get('/verify/:code', verifyLimiter, async (req, res) => {
     const view: PublicCertificateView = {
       student_name: studentName || 'Student',
       course_title: courseTitle || 'Course',
-      completion_date: cert.completion_date ?? null,
-      certificate_id: cert.certificate_number || certRow.verification_code || cert.id,
+      completion_date: certRow.completion_date ?? certRow.issued_at ?? null,
+      issued_at: certRow.issued_at ?? certRow.completion_date ?? null,
+      certificate_id: certRow.certificate_number || certRow.verification_code || lookup.value,
       instructor_name: instructorName,
       organization_name: organizationName,
+      verification_timestamp: verificationTimestamp,
       status,
-      revoked_at: status === 'revoked' ? cert.revoked_at ?? null : undefined,
-      revoke_reason: status === 'revoked' ? cert.revoked_reason ?? null : undefined,
+      revoked_at: status === 'revoked' ? certRow.revoked_at ?? null : undefined,
     };
 
-    await logVerification({ certificateId: cert.id, code, ip, userAgent, result: status });
+    await logVerification({
+      certificateId: certRow.id,
+      lookupValue: lookup.value,
+      ip,
+      userAgent,
+      result: status,
+    });
 
-    // Bump verification telemetry only on a valid lookup.
     if (status === 'valid') {
-      // Read-then-write is fine here; concurrent verifications are rare and
-      // an occasional lost increment is acceptable for a vanity counter.
       const { data: current } = await supabase
         .from('certificates')
         .select('verification_count')
-        .eq('id', cert.id)
+        .eq('id', certRow.id)
         .maybeSingle();
       await supabase
         .from('certificates')
         .update({
           verification_count: (current?.verification_count ?? 0) + 1,
-          last_verified_at: new Date().toISOString(),
+          last_verified_at: verificationTimestamp,
         })
-        .eq('id', cert.id);
+        .eq('id', certRow.id);
     }
 
-    return res.status(200).json({ status, data: view });
-  } catch (err: any) {
+    return res.status(200).json({
+      status,
+      data: view,
+      message: status === 'invalid' ? 'This certificate is not currently valid.' : undefined,
+    });
+  } catch (err) {
     console.error('[verify] error:', err);
-    // Even on error, don't leak internals.
-    await logVerification({ certificateId: null, code, ip, userAgent, result: 'invalid' });
+    await logVerification({
+      certificateId: null,
+      lookupValue: lookup.value,
+      ip,
+      userAgent,
+      result: 'invalid',
+    });
     return res.status(200).json({ status: 'invalid', message: 'Verification failed.' });
   }
+}
+
+/** Manual verification by the printed certificate number. */
+router.get('/verify', verifyLimiter, async (req, res) => {
+  const rawCertificateId = req.query.certificateId;
+  const certificateId = typeof rawCertificateId === 'string' ? rawCertificateId.trim().toUpperCase() : '';
+
+  if (!certificateId || certificateId.length > 100) {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json({
+      status: 'invalid',
+      message: 'Enter a valid certificate ID to verify it.',
+    });
+  }
+
+  return verifyCertificate(req, res, { column: 'certificate_number', value: certificateId });
+});
+
+/** QR / direct-link verification by opaque code. */
+router.get('/verify/:code', verifyLimiter, async (req, res) => {
+  const code = String(req.params.code || '').trim().toUpperCase();
+  // QR links always carry a canonical 60-bit code. Refusing arbitrary values
+  // avoids turning the public endpoint into a general certificate-table probe
+  // and keeps audit logs free of attacker-controlled oversized identifiers.
+  if (!VERIFICATION_CODE_FORMAT_REGEX.test(code)) {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json({ status: 'invalid', message: 'Enter a valid verification code.' });
+  }
+
+  return verifyCertificate(req, res, { column: 'verification_code', value: code });
 });
 
 export default router;

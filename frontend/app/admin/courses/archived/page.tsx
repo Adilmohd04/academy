@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth } from '@clerk/nextjs';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { 
   Archive, 
   RefreshCw, 
@@ -23,36 +23,53 @@ interface ArchivedCourse {
   total_revenue: number;
 }
 
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000').replace('localhost', '127.0.0.1');
+
 export default function ArchivedCoursesPage() {
-  const { getToken } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const [courses, setCourses] = useState<ArchivedCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [converting, setConverting] = useState<string | null>(null);
   const [restoring, setRestoring] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const fetchArchivedCourses = async () => {
+  const fetchArchivedCourses = useCallback(async () => {
     try {
+      setErrorMessage(null);
       const token = await getToken();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses/archived`, {
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      const response = await fetch(`${API_URL}/api/admin/courses/archived`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
 
-      if (!response.ok) throw new Error('Failed to fetch archived courses');
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || result.message || 'Failed to fetch archived courses');
+      }
 
       const data = await response.json();
-      setCourses(data.courses || []);
-    } catch (error) {
+      setCourses(Array.isArray(data.courses) ? data.courses : []);
+    } catch (error: any) {
       console.error('Error fetching archived courses:', error);
+      setCourses([]);
+      setErrorMessage(error?.message || 'Unable to load archived courses.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [getToken]);
 
   useEffect(() => {
-    fetchArchivedCourses();
-  }, []);
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      setLoading(false);
+      setErrorMessage('Please sign in again to manage archived courses.');
+      return;
+    }
+    void fetchArchivedCourses();
+  }, [fetchArchivedCourses, isLoaded, isSignedIn]);
 
   const handleConvertToPreRecorded = async (courseId: string, title: string) => {
     if (!confirm(`Convert "${title}" to pre-recorded course?\n\nThis will:\n- Remove the course from archive\n- Change type to pre-recorded\n- Set status to draft (requires re-approval)\n- Remove end date`)) {
@@ -62,7 +79,9 @@ export default function ArchivedCoursesPage() {
     setConverting(courseId);
     try {
       const token = await getToken();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses/${courseId}/convert-to-prerecorded`, {
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      const response = await fetch(`${API_URL}/api/admin/courses/${courseId}/convert-to-prerecorded`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -94,7 +113,9 @@ export default function ArchivedCoursesPage() {
     setRestoring(courseId);
     try {
       const token = await getToken();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses/${courseId}/restore`, {
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      const response = await fetch(`${API_URL}/api/admin/courses/${courseId}/restore`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -133,6 +154,24 @@ export default function ArchivedCoursesPage() {
             Manage archived courses - restore them or convert to pre-recorded
           </p>
         </div>
+
+        {errorMessage && (
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            <span>{errorMessage}</span>
+            {isSignedIn && (
+              <button
+                type="button"
+                onClick={() => {
+                  setLoading(true);
+                  void fetchArchivedCourses();
+                }}
+                className="rounded-lg bg-white px-3 py-1.5 font-semibold text-rose-700 shadow-sm hover:bg-rose-100"
+              >
+                Try again
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Statistics */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">

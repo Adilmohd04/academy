@@ -286,6 +286,7 @@ export const downloadCertificatePDF = async (req: Request, res: Response) => {
     // Generate PDF
     const pdfBuffer = await pdfService.generateCertificatePDF({
       id: certificate.id,
+      certificate_number: certificate.certificate_number,
       student_name,
       course_title,
       teacher_name: teacher_name || 'Islamic Academy',

@@ -1,34 +1,16 @@
 import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
-import { auth } from '@clerk/nextjs/server';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
 const supabase = getSupabaseAdminClient();
 
-type AdminProfile = {
-  id?: string;
-  role: string | null;
-};
-
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Verify admin role
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('role, id')
-      .eq('clerk_user_id', userId)
-      .single();
-
-    const profile = profileData as AdminProfile | null;
-
-    if (!profile || profile.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
     }
 
     const body = await request.json();
@@ -45,7 +27,7 @@ export async function POST(request: NextRequest) {
           content,
           link,
           link_text,
-          created_by: profile.id,
+          created_by: authorization.actor.profileId,
           is_active: true,
         },
       ])
@@ -66,22 +48,9 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Verify admin role
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('clerk_user_id', userId)
-      .single();
-
-    const profile = profileData as AdminProfile | null;
-
-    if (!profile || profile.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
     }
 
     const { searchParams } = new URL(request.url);

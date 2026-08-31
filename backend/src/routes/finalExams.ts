@@ -3,8 +3,7 @@ import { requireAuth, requireRole } from '../middleware/clerkAuth';
 import { supabase } from '../config/database';
 import { notifyTeacherInterviewAssignment } from '../services/courseNotificationService';
 import * as courseNotifications from '../services/courseNotificationService';
-import { calculateFinalScore } from '../services/certificateService';
-import { issueCertificate as issueQrCertificate } from '../modules/shared/services/certificateService';
+import { checkAndAwardCertificate } from '../modules/certificate/services/issuanceService';
 
 const router = express.Router();
 
@@ -1266,18 +1265,21 @@ router.post(
           const progressPercentage = enrollment?.progress_percentage || 0;
 
           if (course?.enable_certificates && progressPercentage >= 100) {
-            const scoreData = await calculateFinalScore(courseId, gradedSubmission.student_id);
+            // The legacy shared certificate service used to insert a partial
+            // row here.  Keep the final-exam trigger, but let the canonical
+            // lifecycle re-check every eligibility gate and mint the QR-backed
+            // certificate atomically.
+            const issuance = await checkAndAwardCertificate(
+              courseId,
+              gradedSubmission.student_id,
+            );
 
-            if (scoreData?.passed) {
-              certificate = await issueQrCertificate(
-                courseId,
-                gradedSubmission.student_id,
-                scoreData.final_score,
-                {
-                  isManualOverride: false,
-                  overrideBy: teacherProfileId,
-                  overrideReason: 'Auto-issued after final exam completion'
-                }
+            if (issuance.ok) {
+              certificate = issuance.certificate;
+            } else if (issuance.error !== 'not_eligible') {
+              console.warn(
+                '[final-exams] certificate issuance did not complete:',
+                issuance.error,
               );
             }
           }

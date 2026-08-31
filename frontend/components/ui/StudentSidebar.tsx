@@ -23,6 +23,7 @@ import { useClerk, useUser } from '@clerk/nextjs';
 import { cn } from '@/lib/utils';
 import { BrandLogo } from '@/components/ui/BrandLogo';
 import { useCollapsedState } from '@/contexts/CollapsedStateContext';
+import { SidebarTooltip, useSidebarTooltip } from '@/components/ui/SidebarTooltip';
 
 const navItems = [
   { label: 'My Garden', href: '/student', icon: LayoutDashboard },
@@ -41,9 +42,11 @@ export const StudentSidebar = () => {
   const { signOut } = useClerk();
   const { collapsed, setCollapsed } = useCollapsedState();
   const [showProfileMenu, setShowProfileMenu] = React.useState(false);
+  const { tooltip, show: showTooltip, hide: hideTooltip } = useSidebarTooltip(collapsed);
 
   return (
-    <motion.div 
+    <>
+    <motion.div
       initial={{ width: 260 }}
       animate={{ width: collapsed ? 95 : 260 }}
       className={cn(
@@ -102,7 +105,16 @@ export const StudentSidebar = () => {
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           return (
-            <Link key={item.href} href={item.href} className="block group relative z-20 pointer-events-auto">
+            <Link
+              key={item.href}
+              href={item.href}
+              className="block group relative z-20 pointer-events-auto"
+              aria-label={item.label}
+              onMouseEnter={showTooltip(item.label)}
+              onMouseLeave={hideTooltip}
+              onFocus={showTooltip(item.label)}
+              onBlur={hideTooltip}
+            >
               <div className={cn(
                 "flex items-center gap-4 transition-all duration-300 px-4 py-3.5 rounded-xl mx-1 cursor-pointer",
                 collapsed ? "justify-center" : "",
@@ -119,23 +131,21 @@ export const StudentSidebar = () => {
                   <span className="text-sm tracking-wide">{item.label}</span>
                 )}
               </div>
-              {collapsed && (
-                <div className="absolute left-full top-1/2 -translate-y-1/2 ml-3 pointer-events-none z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                  <div className="relative">
-                    <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-t-transparent border-b-transparent border-r-[#1e1b4b]"></div>
-                    <div className="px-3 py-2.5 rounded-lg text-xs font-semibold bg-[#1e1b4b] text-white whitespace-nowrap shadow-lg border border-white/20 backdrop-blur-sm">
-                      {item.label}
-                    </div>
-                  </div>
-                </div>
-              )}
             </Link>
           );
         })}
 
         {/* Book Session */}
         <div className="px-1 mt-1">
-          <Link href="/student/meetings/select-teacher" className="block group relative z-20 pointer-events-auto">
+          <Link
+            href="/student/meetings/select-teacher"
+            className="block group relative z-20 pointer-events-auto"
+            aria-label="Book Session"
+            onMouseEnter={showTooltip('Book Session')}
+            onMouseLeave={hideTooltip}
+            onFocus={showTooltip('Book Session')}
+            onBlur={hideTooltip}
+          >
             <div className={cn(
               "flex items-center gap-4 transition-all duration-300 px-4 py-3.5 rounded-xl mx-1 cursor-pointer",
               collapsed 
@@ -150,16 +160,6 @@ export const StudentSidebar = () => {
                 <span className="text-sm font-bold tracking-wide">Book Session</span>
               )}
             </div>
-            {collapsed && (
-              <div className="absolute left-full top-1/2 -translate-y-1/2 ml-3 pointer-events-none z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                <div className="relative">
-                  <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-t-transparent border-b-transparent border-r-[#1e1b4b]"></div>
-                  <div className="px-3 py-2.5 rounded-lg text-xs font-semibold bg-[#1e1b4b] text-white whitespace-nowrap shadow-lg border border-white/20 backdrop-blur-sm">
-                    Book Session
-                  </div>
-                </div>
-              </div>
-            )}
           </Link>
         </div>
       </div>
@@ -223,13 +223,11 @@ export const StudentSidebar = () => {
               </p>
             </div>
           )}
-          {collapsed && (
-            <span className="absolute left-full top-1/2 -translate-y-1/2 ml-3 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-[#1e1b4b] text-white whitespace-nowrap shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
-              Profile
-            </span>
-          )}
         </div>
       </div>
     </motion.div>
+
+    <SidebarTooltip tooltip={tooltip} />
+    </>
   );
 };

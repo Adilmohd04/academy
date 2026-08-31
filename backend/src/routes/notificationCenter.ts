@@ -5,7 +5,7 @@
  */
 
 import express from 'express';
-import { requireAuth } from '../middleware/clerkAuth';
+import { requireAuth, requireRole } from '../middleware/clerkAuth';
 import * as notificationController from '../modules/shared/controllers/notificationController';
 
 const router = express.Router();
@@ -81,13 +81,13 @@ router.patch('/preferences', ...authRequired, notificationController.updatePrefe
  * Create a new notification (admin/system only)
  * Body: CreateNotificationInput
  */
-router.post('/', ...authRequired, notificationController.createNotification);
+router.post('/', ...authRequired, requireRole(['admin']), notificationController.createNotification);
 
 /**
  * POST /api/notification-center/bulk
  * Create bulk notifications (admin/system only)
  * Body: { user_ids: string[], ...CreateNotificationInput }
  */
-router.post('/bulk', ...authRequired, notificationController.createBulkNotifications);
+router.post('/bulk', ...authRequired, requireRole(['admin']), notificationController.createBulkNotifications);
 
 export default router;

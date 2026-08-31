@@ -12,25 +12,26 @@ export default function CourseLayout({ children }: { children: React.ReactNode }
   const params = useParams();
   const pathname = usePathname();
   const router = useRouter();
-  const { userId } = useAuth();
+  const { getToken } = useAuth();
   const courseId = params.courseId as string;
   
   const [course, setCourse] = useState<any>(null);
   
   useEffect(() => {
-    if (userId && courseId) {
-      fetchCourse();
+    if (courseId) {
+      void fetchCourse();
     }
-  }, [userId, courseId]);
+  }, [courseId]);
 
   const fetchCourse = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
-        headers: { 'x-clerk-user-id': userId || '' }
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/teacher/my-courses/${courseId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
       if (res.ok) {
         const data = await res.json();
-        setCourse(data);
+        setCourse(data.course || data);
       }
     } catch (error) {
       console.error('Error fetching course:', error);
@@ -55,7 +56,7 @@ export default function CourseLayout({ children }: { children: React.ReactNode }
     { label: 'Discussion', href: `/teacher/courses/${courseId}/builder?tab=discussion`, icon: MessageSquare },
     { label: 'Announcements', href: `/teacher/courses/${courseId}/builder?tab=announcements`, icon: Bell },
     { label: 'Schedule', href: `/teacher/courses/${courseId}/builder?tab=schedule`, icon: Calendar },
-    { label: 'Analytics', href: `/teacher/courses/${courseId}/analytics`, icon: BarChart },
+    { label: 'Analytics', href: `/teacher/courses/${courseId}/dashboard`, icon: BarChart },
     { label: 'Settings', href: `/teacher/courses/${courseId}/builder?tab=settings`, icon: Settings }
   ];
 

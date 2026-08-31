@@ -26,13 +26,16 @@ interface SaveAnswerData {
 /**
  * Get available exams for student
  */
-export const getAvailableExams = async (studentId: string) => {
+export const getAvailableExams = async (
+  enrollmentStudentId: string,
+  submissionStudentId: string = enrollmentStudentId,
+) => {
   try {
     // Get all courses student is enrolled in
     const { data: enrollments, error: enrollError } = await supabase
       .from('enrollments')
       .select('course_id')
-      .eq('student_id', studentId);
+      .eq('student_id', enrollmentStudentId);
 
     if (enrollError) throw enrollError;
 
@@ -70,7 +73,7 @@ export const getAvailableExams = async (studentId: string) => {
           .from('final_exam_submissions')
           .select('id, submission_status, attempt_number, total_score')
           .eq('exam_id', exam.id)
-          .eq('student_id', studentId)
+          .eq('student_id', submissionStudentId)
           .order('attempt_number', { ascending: false })
           .limit(1);
 
@@ -81,7 +84,7 @@ export const getAvailableExams = async (studentId: string) => {
           .from('final_exam_submissions')
           .select('id')
           .eq('exam_id', exam.id)
-          .eq('student_id', studentId);
+          .eq('student_id', submissionStudentId);
 
         return {
           ...exam,

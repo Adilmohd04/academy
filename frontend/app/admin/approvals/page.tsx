@@ -58,7 +58,7 @@ type TabType = 'courses' | 'meetings';
 type BoxFilterType = 'all' | 'open' | 'closed' | 'approved' | 'missed';
 
 export default function ApprovalsPage() {
-  const { userId } = useAuth();
+  const { getToken, isLoaded } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('courses');
   const [courseFilter, setCourseFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [boxFilter, setBoxFilter] = useState<BoxFilterType>('closed');
@@ -70,21 +70,22 @@ export default function ApprovalsPage() {
   const [expandedBoxes, setExpandedBoxes] = useState<{[id: string]: boolean}>({});
 
   useEffect(() => {
-    if (userId) {
+    if (isLoaded) {
       if (activeTab === 'courses') {
-        fetchCourses();
+        void fetchCourses();
       } else {
-        fetchBoxes();
+        void fetchBoxes();
       }
     }
-  }, [userId, activeTab]);
+  }, [isLoaded, activeTab]);
 
   const fetchCourses = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses`, {
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/admin/courses`, {
         headers: {
-          'x-clerk-user-id': userId || ''
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         }
       });
       if (res.ok) {
@@ -111,10 +112,11 @@ export default function ApprovalsPage() {
   const fetchBoxes = async () => {
     setLoading(true);
     try {
+      const token = await getToken();
       // Fetch all meeting bookings and group by slot (box)
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/meetings/admin/pending`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/meetings/admin/pending`, {
         headers: {
-          'x-clerk-user-id': userId || ''
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         }
       });
       if (res.ok) {
@@ -228,11 +230,12 @@ export default function ApprovalsPage() {
     if (!confirm('Approve this course?')) return;
     
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses/${courseId}/approve`, {
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/admin/courses/${courseId}/approve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         }
       });
 
@@ -250,11 +253,12 @@ export default function ApprovalsPage() {
     if (!reason) return;
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/admin/courses/${courseId}/reject`, {
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/admin/courses/${courseId}/reject`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ reason })
       });
@@ -279,13 +283,14 @@ export default function ApprovalsPage() {
     
     setApprovingId(boxId);
     try {
+      const token = await getToken();
       // Approve all students in the box
       const approvalPromises = box.students.map(student =>
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/meetings/admin/${student.requestId}/approve`, {
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/meetings/admin/${student.requestId}/approve`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-clerk-user-id': userId || ''
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({ meetingLink: meetingLink || null })
         })
@@ -311,13 +316,14 @@ export default function ApprovalsPage() {
     
     setApprovingId(boxId);
     try {
+      const token = await getToken();
       // Reject all students in the box
       const rejectPromises = box.students.map(student =>
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/meetings/admin/${student.requestId}/reject`, {
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/meetings/admin/${student.requestId}/reject`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-clerk-user-id': userId || ''
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({ reason })
         })

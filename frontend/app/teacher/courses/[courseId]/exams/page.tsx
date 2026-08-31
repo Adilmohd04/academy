@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import { useParams } from 'next/navigation';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface ExamQuestion {
   id?: string;
   question_text: string;
@@ -36,7 +38,7 @@ interface FinalExam {
 }
 
 const ExamBuilder = () => {
-  const { userId } = useAuth();
+  const { getToken } = useAuth();
   const { courseId } = useParams();
   const [exam, setExam] = useState<FinalExam>({
     title: 'Final Examination',
@@ -55,6 +57,7 @@ const ExamBuilder = () => {
   const [message, setMessage] = useState('');
   const [importText, setImportText] = useState('');
   const [showImportModal, setShowImportModal] = useState(false);
+  const [deletedQuestionIds, setDeletedQuestionIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (courseId) {
@@ -65,17 +68,25 @@ const ExamBuilder = () => {
   const fetchExam = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/teacher/exams/${courseId}`, {
-        headers: {
-          'x-clerk-user-id': userId || ''
-        }
+      const token = await getToken();
+      if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
+      const response = await fetch(`${API}/api/teacher/courses/${courseId}/final-exam`, {
+        headers: { Authorization: `Bearer ${token}` }
       });
-      const data = await response.json();
+
+      if (response.status === 404) {
+        return;
+      }
+
+      const data = await response.json().catch(() => ({}));
       if (response.ok) {
-        setExam(data);
+        setExam({ ...data.data, questions: data.data?.questions || [] });
+      } else {
+        throw new Error(data.error || 'Unable to load the final exam');
       }
     } catch (error) {
       console.error('Error fetching exam:', error);
+      setMessage(error instanceof Error ? error.message : 'Unable to load the final exam');
     } finally {
       setLoading(false);
     }
@@ -84,33 +95,80 @@ const ExamBuilder = () => {
   const saveExam = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/teacher/exams', {
+      const token = await getToken();
+      if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
+
+      const response = await fetch(`${API}/api/teacher/courses/${courseId}/final-exam`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
-          ...exam,
-          course_id: courseId
+          title: exam.title,
+          description: exam.description,
+          total_marks: exam.total_marks,
+          passing_marks: exam.passing_marks,
+          time_limit_minutes: exam.time_limit_minutes,
+          instructions: exam.instructions,
+          available_from: exam.available_from,
+          available_until: exam.available_until
         })
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setExam(data);
-        setMessage('Exam saved successfully!');
-        setTimeout(() => setMessage(''), 3000);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.data?.id) {
+        throw new Error(data.error || 'Unable to save the final exam');
       }
+
+      const savedExam: FinalExam = data.data;
+      const savedQuestions = await Promise.all((exam.questions || []).map(async (question) => {
+        const questionResponse = await fetch(
+          question.id
+            ? `${API}/api/teacher/final-exam-questions/${question.id}`
+            : `${API}/api/teacher/final-exams/${savedExam.id}/questions`,
+          {
+            method: question.id ? 'PUT' : 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify(question)
+          }
+        );
+
+        const questionData = await questionResponse.json().catch(() => ({}));
+        if (!questionResponse.ok) {
+          throw new Error(questionData.error || 'Unable to save an exam question');
+        }
+
+        return { ...question, id: question.id || questionData.data?.id };
+      }));
+
+      await Promise.all(deletedQuestionIds.map(async (questionId) => {
+        const deleteResponse = await fetch(`${API}/api/teacher/final-exam-questions/${questionId}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!deleteResponse.ok) {
+          const deleteData = await deleteResponse.json().catch(() => ({}));
+          throw new Error(deleteData.error || 'Unable to remove an exam question');
+        }
+      }));
+
+      setExam({ ...savedExam, questions: savedQuestions });
+      setDeletedQuestionIds([]);
+      setMessage('Exam saved successfully!');
+      setTimeout(() => setMessage(''), 3000);
     } catch (error) {
       console.error('Error saving exam:', error);
-      setMessage('Error saving exam');
+      setMessage(error instanceof Error ? error.message : 'Error saving exam');
     } finally {
       setLoading(false);
     }
   };
 
-  const addQuestion = async () => {
+  const addQuestion = () => {
     const newQuestion: ExamQuestion = {
       question_text: 'New Question',
       question_type: 'multiple_choice',
@@ -139,6 +197,10 @@ const ExamBuilder = () => {
   };
 
   const deleteQuestion = (index: number) => {
+    const deletedQuestion = exam.questions?.[index];
+    if (deletedQuestion?.id) {
+      setDeletedQuestionIds((previous) => [...previous, deletedQuestion.id as string]);
+    }
     const updated = (exam.questions || []).filter((_, i) => i !== index);
     setExam({ ...exam, questions: updated });
     setSelectedQuestion(null);
@@ -182,11 +244,18 @@ const ExamBuilder = () => {
   const togglePublish = async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/teacher/exams/publish', {
-        method: 'PUT',
+      if (!exam.id) {
+        setMessage('Save the exam before publishing it.');
+        return;
+      }
+
+      const token = await getToken();
+      if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
+      const response = await fetch(`${API}/api/teacher/final-exams/${exam.id}/toggle-publish`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
           exam_id: exam.id,
@@ -194,13 +263,16 @@ const ExamBuilder = () => {
         })
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setExam(data);
-        setMessage(`Exam ${data.is_published ? 'published' : 'unpublished'}!`);
+      const data = await response.json().catch(() => ({}));
+      if (response.ok && data.data) {
+        setExam((current) => current ? { ...current, ...data.data, questions: current.questions } : current);
+        setMessage(`Exam ${data.data.is_published ? 'published' : 'unpublished'}!`);
+      } else {
+        throw new Error(data.error || 'Unable to update the exam status');
       }
     } catch (error) {
       console.error('Error toggling publish:', error);
+      setMessage(error instanceof Error ? error.message : 'Unable to update the exam status');
     } finally {
       setLoading(false);
     }

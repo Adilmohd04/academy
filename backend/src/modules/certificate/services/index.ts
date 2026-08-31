@@ -22,8 +22,12 @@ export {
 
 export {
   issueCertificate,
+  reissueRevokedCertificate,
+  regenerateCertificateVerification,
   type IssueOptions,
   type IssueResult,
+  type ReissueCertificateResult,
+  type RegenerateVerificationResult,
   checkAndAwardCertificate as issueIfEligible,
 } from './issuanceService';
 

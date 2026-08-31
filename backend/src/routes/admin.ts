@@ -7,6 +7,7 @@ import * as courseArchivalController from '../modules/admin/controllers/courseAr
 import * as teacherPricingService from '../modules/teacher/services/teacherPricingService';
 import { UserService } from '../modules/shared/services/userService';
 import { UserRole } from '../types';
+import { supabase } from '../config/database';
 
 const router = Router();
 
@@ -25,6 +26,115 @@ router.delete('/courses/:id/co-teachers/:teacherId', courseController.removeCoTe
 
 // Teacher Management
 router.get('/teachers', teacherController.getAllTeachers);
+
+const isIsoDate = (value: unknown): value is string => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+};
+
+/**
+ * The admin teacher/calendar pages use this read model.  It deliberately
+ * accepts either legacy profile UUIDs or current Clerk IDs and normalizes
+ * them before reading slots, rather than silently returning an empty calendar.
+ */
+router.get('/teacher-slots', async (req: Request, res: Response) => {
+  try {
+    const rawTeacherId = typeof req.query.teacher_id === 'string' ? req.query.teacher_id.trim() : '';
+    const startDate = req.query.start_date;
+    const endDate = req.query.end_date;
+
+    if ((startDate && !endDate) || (!startDate && endDate)) {
+      return res.status(400).json({ error: 'start_date and end_date must be provided together' });
+    }
+    if ((startDate && !isIsoDate(startDate)) || (endDate && !isIsoDate(endDate))) {
+      return res.status(400).json({ error: 'Dates must use YYYY-MM-DD format' });
+    }
+    if (isIsoDate(startDate) && isIsoDate(endDate) && startDate > endDate) {
+      return res.status(400).json({ error: 'start_date must not be after end_date' });
+    }
+
+    let teacherIdentifiers: string[] | undefined;
+    if (rawTeacherId) {
+      let profileResult = await supabase
+        .from('profiles')
+        .select('id, clerk_user_id, role')
+        .eq('clerk_user_id', rawTeacherId)
+        .maybeSingle();
+
+      if (!profileResult.data && !profileResult.error) {
+        profileResult = await supabase
+          .from('profiles')
+          .select('id, clerk_user_id, role')
+          .eq('id', rawTeacherId)
+          .maybeSingle();
+      }
+
+      if (profileResult.error) {
+        console.error('Error resolving teacher for admin slots:', profileResult.error);
+        return res.status(500).json({ error: 'Unable to load teacher slots' });
+      }
+      if (!profileResult.data || profileResult.data.role !== 'teacher') {
+        return res.status(404).json({ error: 'Teacher not found' });
+      }
+
+      teacherIdentifiers = [profileResult.data.id, profileResult.data.clerk_user_id]
+        .filter((identifier): identifier is string => Boolean(identifier));
+    }
+
+    let query = supabase
+      .from('teacher_slot_availability')
+      .select(`
+        id,
+        teacher_id,
+        date,
+        max_capacity,
+        current_bookings,
+        is_available,
+        is_free,
+        meeting_price,
+        topic,
+        notes,
+        time_slots!time_slot_id ( start_time, end_time ),
+        meeting_bookings ( payment_status, payment_amount )
+      `)
+      .order('date', { ascending: true });
+
+    if (teacherIdentifiers) query = query.in('teacher_id', teacherIdentifiers);
+    if (isIsoDate(startDate) && isIsoDate(endDate)) {
+      query = query.gte('date', startDate).lte('date', endDate);
+    }
+
+    const { data: slots, error } = await query;
+    if (error) {
+      console.error('Error fetching admin teacher slots:', error);
+      return res.status(500).json({ error: 'Unable to load teacher slots' });
+    }
+
+    const ownerIds = Array.from(new Set((slots || []).map((slot: any) => slot.teacher_id).filter(Boolean)));
+    const [{ data: profilesByClerk }, { data: profilesById }] = await Promise.all([
+      ownerIds.length > 0
+        ? supabase.from('profiles').select('id, clerk_user_id, full_name').in('clerk_user_id', ownerIds)
+        : Promise.resolve({ data: [] as any[] }),
+      ownerIds.length > 0
+        ? supabase.from('profiles').select('id, clerk_user_id, full_name').in('id', ownerIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+    const names = new Map<string, string>();
+    [...(profilesByClerk || []), ...(profilesById || [])].forEach((profile: any) => {
+      if (profile.id) names.set(profile.id, profile.full_name || 'Unknown teacher');
+      if (profile.clerk_user_id) names.set(profile.clerk_user_id, profile.full_name || 'Unknown teacher');
+    });
+
+    return res.json((slots || []).map((slot: any) => ({
+      ...slot,
+      teacher_name: names.get(slot.teacher_id) || 'Unknown teacher',
+    })));
+  } catch (error) {
+    console.error('Error in admin teacher-slots route:', error);
+    return res.status(500).json({ error: 'Unable to load teacher slots' });
+  }
+});
 
 // Teacher Pricing
 router.post('/teacher-price', async (req: Request, res: Response) => {

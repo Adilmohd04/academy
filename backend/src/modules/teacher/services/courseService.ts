@@ -471,6 +471,7 @@ export const approveCourse = async (id: string): Promise<Course> => {
     .update({ 
       approval_status: 'approved',
       status: 'published',
+      is_published: true,
       published_at: new Date().toISOString()
     })
     .eq('id', id)

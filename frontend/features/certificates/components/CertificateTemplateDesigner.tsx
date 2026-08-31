@@ -21,12 +21,14 @@ import CertificateTemplateDesignerV2 from './CertificateTemplateDesignerV2';
 interface Props {
   mode: 'admin' | 'teacher';
   courseId?: string;
+  // Retained for the legacy fallback only. The v2 designer trusts the Clerk
+  // bearer token and never transmits a client-provided user identifier.
   userId?: string | null;
 }
 
 export default function CertificateTemplateDesigner(props: Props) {
   if (isCertDesignerV2Enabled()) {
-    return <CertificateTemplateDesignerV2 {...props} />;
+    return <CertificateTemplateDesignerV2 mode={props.mode} courseId={props.courseId} />;
   }
   return <LegacyDesigner {...props} />;
 }

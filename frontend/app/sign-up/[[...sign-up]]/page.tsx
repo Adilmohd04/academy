@@ -1,9 +1,18 @@
 'use client';
 
-import { SignUp } from '@clerk/nextjs';
+import { useEffect, useState } from 'react';
+import { SignUp, useAuth } from '@clerk/nextjs';
 import Link from 'next/link';
 
 export default function SignUpPage() {
+  const { isLoaded } = useAuth();
+  // Gate on mount, not on isLoaded alone: the server always renders with
+  // isLoaded=false, so branching on it directly can disagree with the client's
+  // first render and make React discard the subtree — which blanks the panel.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const showForm = mounted && isLoaded;
+
   return (
     <div className="min-h-screen flex">
       <div
@@ -88,14 +97,32 @@ export default function SignUpPage() {
             </p>
           </div>
 
+          {/* Same mount-window fallback as sign-in: Clerk renders nothing
+              until ClerkJS is ready, which left this panel blank on step
+              changes such as /sign-up/verify-email-address. */}
+          {!showForm ? (
+            <div
+              aria-busy="true"
+              aria-live="polite"
+              className="w-full rounded-3xl border border-slate-200/80 bg-white p-5 shadow-[0_20px_60px_rgba(27,54,93,0.10)] sm:p-7"
+            >
+              <div className="flex items-center gap-3 text-sm font-medium text-slate-700">
+                <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-[#1B365D]" />
+                Loading secure sign-up…
+              </div>
+              <div className="mt-6 space-y-4" aria-hidden="true">
+                <div className="h-11 animate-pulse rounded-xl bg-slate-100" />
+                <div className="h-11 animate-pulse rounded-xl bg-slate-100" />
+                <div className="h-11 animate-pulse rounded-xl bg-[#1B365D]/10" />
+              </div>
+            </div>
+          ) : (
           <SignUp
             routing="path"
             path="/sign-up"
             signInUrl="/sign-in"
-            forceRedirectUrl="/sync"
-            fallbackRedirectUrl="/sync"
-            afterSignInUrl="/sync"
-            afterSignUpUrl="/sync"
+            forceRedirectUrl="/dashboard"
+            fallbackRedirectUrl="/dashboard"
             appearance={{
               elements: {
                 rootBox: 'w-full',
@@ -130,6 +157,7 @@ export default function SignUpPage() {
               },
             }}
           />
+          )}
         </div>
       </div>
     </div>

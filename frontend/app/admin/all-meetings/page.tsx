@@ -7,7 +7,6 @@ import {
   ArrowLeft, Search, Filter, Loader2, User, Mail,
   Calendar, Clock, DollarSign, CheckCircle, XCircle, AlertCircle
 } from 'lucide-react';
-import { api } from '@/lib/api';
 
 interface Meeting {
   id: string;
@@ -44,8 +43,20 @@ export default function AllMeetingsPage() {
   const fetchMeetings = async () => {
     try {
       const token = await getToken();
-      const response = await api.admin.getLegacyAllMeetings(token);
-      setMeetings(Array.isArray(response.data) ? response.data : []);
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      // `/api/admin/all-meetings` is a same-origin, role-protected proxy.
+      // Calling it directly avoids sending a browser request to the Express
+      // backend's non-existent `/api/admin/all-meetings` endpoint.
+      const response = await fetch('/api/admin/all-meetings', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to load meetings.');
+      }
+
+      setMeetings(Array.isArray(data) ? data : []);
       setLoading(false);
     } catch (error) {
       console.error('Error fetching meetings:', error);

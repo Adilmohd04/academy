@@ -14,13 +14,11 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000').re
 
 interface RequestOpts {
   token?: string | null;
-  clerkUserId?: string | null;
 }
 
 function headers(opts: RequestOpts): Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
   if (opts.token) h['Authorization'] = `Bearer ${opts.token}`;
-  if (opts.clerkUserId) h['x-clerk-user-id'] = opts.clerkUserId;
   return h;
 }
 
