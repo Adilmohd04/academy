@@ -20,6 +20,8 @@ import { IslamicButton } from '@/components/ui/IslamicButtons';
 import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 import { BRAND_CONFIG, getGreeting } from '@/lib/brand-config';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface TeacherStats {
   totalClasses: number;
   totalStudents: number;
@@ -100,22 +102,34 @@ export default function IslamicTeacherDashboard({ courses = [], meetings = [] }:
       }
 
       // Fetch teacher's meetings
-      const meetingsRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher/meetings`, {
+      const meetingsRes = await fetch(`${API}/api/meetings/teacher/assigned`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
       if (meetingsRes.ok) {
         const meetingsData = await meetingsRes.json();
+        const assignedMeetings = Array.isArray(meetingsData)
+          ? meetingsData
+          : Array.isArray(meetingsData?.data)
+            ? meetingsData.data
+            : [];
         // Process meetings data
-        const upcoming = meetingsData.filter((m: any) => 
-          new Date(m.date) >= new Date() && m.approval_status === 'approved'
+        const upcoming = assignedMeetings.filter((m: any) =>
+          new Date(m.meeting_date || m.date) >= new Date() && m.approval_status === 'approved'
         );
-        
-        setUpcomingSessions(upcoming.slice(0, 5)); // Get next 5
+
+        setUpcomingSessions(upcoming.slice(0, 5).map((meeting: any) => ({
+          id: meeting.id,
+          title: meeting.time_slots?.slot_name || meeting.slot_name || 'Class session',
+          studentName: meeting.student_name || 'Student',
+          date: new Date(meeting.meeting_date || meeting.date).toLocaleDateString(),
+          time: meeting.time_slots?.start_time || meeting.meeting_time || '',
+          meetingLink: meeting.meeting_link || undefined,
+        })));
         setStats(prev => ({
           ...prev,
           upcomingSessions: upcoming.length,
-          completedSessions: meetingsData.filter((m: any) => 
+          completedSessions: assignedMeetings.filter((m: any) =>
             m.attendance === 'present'
           ).length,
         }));
@@ -185,8 +199,6 @@ export default function IslamicTeacherDashboard({ courses = [], meetings = [] }:
                 value={stats.averageRating > 0 ? stats.averageRating.toFixed(1) : 'N/A'}
                 iconColor="text-islamic-gold-600"
                 iconBg="bg-islamic-gold-50"
-                trend="up"
-                trendValue="+0.3"
               />
             </div>
 
@@ -334,7 +346,7 @@ export default function IslamicTeacherDashboard({ courses = [], meetings = [] }:
                   icon={BookOpen}
                   title="Create Assignment"
                   description="Add new homework for students"
-                  href="/teacher/assignments/create"
+                  href="/teacher/courses"
                   gradient="from-purple-600 to-indigo-600"
                 />
                 <IslamicActionCard

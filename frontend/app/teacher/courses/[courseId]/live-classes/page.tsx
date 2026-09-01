@@ -2,9 +2,12 @@
 
 import { useParams } from 'next/navigation'
 import { useEffect, useState } from 'react'
+import { useAuth } from '@clerk/nextjs'
 import { Video, Calendar, Clock, Users, Plus, ExternalLink } from 'lucide-react'
 import Card from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
+
+const API = process.env.NEXT_PUBLIC_API_URL || ''
 
 interface LiveClass {
   id: string
@@ -20,24 +23,43 @@ interface LiveClass {
 
 export default function LiveClassesPage() {
   const params = useParams()
+  const { getToken } = useAuth()
   const courseId = params.courseId as string
   const [classes, setClasses] = useState<LiveClass[]>([])
   const [loading, setLoading] = useState(true)
   const [showScheduleModal, setShowScheduleModal] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     fetchLiveClasses()
   }, [courseId])
 
   const fetchLiveClasses = async () => {
+    setError(null)
     try {
-      const res = await fetch(`/api/teacher/courses/${courseId}/schedules`)
-      if (res.ok) {
-        const data = await res.json()
-        setClasses(data.schedules || [])
+      const token = await getToken()
+      const res = await fetch(`${API}/api/teacher/courses/${courseId}/schedules`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || body.message || 'Could not load live classes')
       }
+      const data = await res.json()
+      setClasses((data.data || data.schedules || []).map((liveClass: any) => ({
+        id: liveClass.id,
+        title: liveClass.title,
+        description: liveClass.description,
+        scheduledDate: liveClass.scheduled_date || liveClass.scheduledDate,
+        startTime: liveClass.start_time || liveClass.startTime,
+        endTime: liveClass.end_time || liveClass.endTime,
+        status: liveClass.status,
+        meetLink: liveClass.meet_link || liveClass.meetLink,
+        attendeeCount: liveClass.attendee_count,
+      })))
     } catch (error) {
       console.error('Error fetching live classes:', error)
+      setError(error instanceof Error ? error.message : 'Could not load live classes')
     } finally {
       setLoading(false)
     }
@@ -45,55 +67,56 @@ export default function LiveClassesPage() {
 
   const scheduleLiveClass = async (formData: any) => {
     try {
-      const res = await fetch(`/api/teacher/courses/${courseId}/schedules`, {
+      const token = await getToken()
+      const res = await fetch(`${API}/api/teacher/courses/${courseId}/schedules`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(formData)
       })
 
-      if (res.ok) {
-        fetchLiveClasses()
-        setShowScheduleModal(false)
-      }
+      if (!res.ok) throw new Error(await res.text())
+      fetchLiveClasses()
+      setShowScheduleModal(false)
     } catch (error) {
       console.error('Error scheduling class:', error)
+      setError('Could not schedule the live class. Please check the details and try again.')
     }
   }
 
   const goLive = async (scheduleId: string) => {
     const meetLink = prompt('Enter Google Meet link (or leave empty to generate):')
     try {
-      const res = await fetch(`/api/teacher/schedules/${scheduleId}/go-live`, {
+      const token = await getToken()
+      const res = await fetch(`${API}/api/teacher/schedules/${scheduleId}/go-live`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ meet_link: meetLink })
       })
 
-      if (res.ok) {
-        fetchLiveClasses()
-        if (meetLink) {
-          window.open(meetLink, '_blank')
-        }
-      }
+      if (!res.ok) throw new Error(await res.text())
+      fetchLiveClasses()
+      if (meetLink) window.open(meetLink, '_blank')
     } catch (error) {
       console.error('Error going live:', error)
+      setError('Could not start this live class. Please try again.')
     }
   }
 
   const endClass = async (scheduleId: string) => {
     const recordingUrl = prompt('Enter recording URL (optional):')
     try {
-      const res = await fetch(`/api/teacher/schedules/${scheduleId}/end`, {
+      const token = await getToken()
+      const res = await fetch(`${API}/api/teacher/schedules/${scheduleId}/end`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ recording_url: recordingUrl })
       })
 
-      if (res.ok) {
-        fetchLiveClasses()
-      }
+      if (!res.ok) throw new Error(await res.text())
+      fetchLiveClasses()
     } catch (error) {
       console.error('Error ending class:', error)
+      setError('Could not end this live class. Please try again.')
     }
   }
 
@@ -127,6 +150,13 @@ export default function LiveClassesPage() {
           Schedule Class
         </Button>
       </div>
+
+      {error ? (
+        <div className="mb-5 flex items-center justify-between gap-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          <span>{error}</span>
+          <button onClick={() => void fetchLiveClasses()} className="font-semibold underline">Retry</button>
+        </div>
+      ) : null}
 
       <div className="grid gap-4">
         {classes.map((liveClass) => (

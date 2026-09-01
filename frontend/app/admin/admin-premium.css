@@ -1,0 +1,189 @@
+.admin-premium {
+  --admin-bg: #f6f4ef;
+  --admin-surface: #ffffff;
+  --admin-surface-soft: #fcfbf8;
+  --admin-border: #e6e1d5;
+  --admin-text: #1f2a24;
+  --admin-muted: #6f7a72;
+  --admin-primary: #1f5b4b;
+  --admin-primary-strong: #154236;
+  --admin-accent: #c7a96b;
+  --admin-shadow: 0 10px 30px rgba(18, 30, 24, 0.08);
+  color: var(--admin-text);
+  font-family: "Plus Jakarta Sans", "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+.admin-premium .admin-main-bg {
+  background:
+    radial-gradient(circle at 10% 5%, rgba(199, 169, 107, 0.18), transparent 30%),
+    radial-gradient(circle at 95% 0%, rgba(31, 91, 75, 0.12), transparent 35%),
+    linear-gradient(180deg, #f7f5ef 0%, #f3f1ea 42%, #efece3 100%);
+}
+
+.admin-premium .admin-content-shell {
+  background: rgba(255, 255, 255, 0.58);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(230, 225, 213, 0.9);
+  border-radius: 20px;
+  box-shadow: var(--admin-shadow);
+}
+
+.admin-premium .admin-page-wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.admin-premium h1,
+.admin-premium h2,
+.admin-premium h3,
+.admin-premium h4,
+.admin-premium h5,
+.admin-premium h6 {
+  color: inherit;
+  letter-spacing: -0.01em;
+}
+
+.admin-premium .admin-section-title {
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #1e2f28;
+}
+
+.admin-premium .admin-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 91, 75, 0.2);
+  background: rgba(31, 91, 75, 0.08);
+  color: var(--admin-primary);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-premium .admin-card,
+.admin-premium .bg-white.rounded-xl,
+.admin-premium .bg-white.rounded-2xl,
+.admin-premium .bg-white.rounded-lg,
+.admin-premium .bg-white.border,
+.admin-premium .bg-white.shadow-sm {
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-border);
+  border-radius: 16px;
+  box-shadow: var(--admin-shadow);
+}
+
+.admin-premium table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.admin-premium table thead th {
+  background: linear-gradient(180deg, #f7f6f2 0%, #efece3 100%) !important;
+  color: #2b3f37 !important;
+  border-bottom: 1px solid var(--admin-border);
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.admin-premium table tbody tr {
+  transition: background-color 180ms ease, transform 180ms ease;
+}
+
+.admin-premium table tbody tr:hover {
+  background: #f7f7f2 !important;
+}
+
+.admin-premium input,
+.admin-premium textarea,
+.admin-premium select {
+  border: 1px solid #d8d3c7 !important;
+  background: #ffffff;
+  color: var(--admin-text);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 140ms ease;
+}
+
+.admin-premium input:focus,
+.admin-premium textarea:focus,
+.admin-premium select:focus {
+  border-color: rgba(31, 91, 75, 0.58) !important;
+  box-shadow: 0 0 0 3px rgba(31, 91, 75, 0.12);
+  outline: none;
+}
+
+.admin-premium button,
+.admin-premium a[role='button'] {
+  transition: all 170ms ease;
+}
+
+.admin-premium button:hover,
+.admin-premium a[role='button']:hover {
+  transform: translateY(-1px);
+}
+
+.admin-premium button:active,
+.admin-premium a[role='button']:active {
+  transform: translateY(0);
+}
+
+.admin-premium .admin-btn-primary {
+  background: linear-gradient(180deg, #1f5b4b 0%, #164438 100%);
+  color: #fff;
+  border: 1px solid rgba(22, 68, 56, 0.8);
+}
+
+.admin-premium .admin-btn-primary:hover {
+  box-shadow: 0 8px 18px rgba(22, 68, 56, 0.25);
+}
+
+.admin-premium .admin-btn-muted {
+  background: #fff;
+  color: #2f443b;
+  border: 1px solid #d8d3c7;
+}
+
+.admin-premium .admin-btn-muted:hover {
+  background: #f7f5f0;
+  border-color: #c8c1b0;
+}
+
+.admin-premium .admin-panel {
+  background: #fff;
+  border: 1px solid var(--admin-border);
+  border-radius: 18px;
+  box-shadow: var(--admin-shadow);
+}
+
+.admin-premium .admin-metric {
+  background: linear-gradient(155deg, #ffffff 0%, #f8f6f0 100%);
+  border: 1px solid #e8e3d8;
+  border-radius: 18px;
+  box-shadow: 0 8px 24px rgba(24, 32, 28, 0.06);
+}
+
+.admin-premium .admin-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, #d8d3c7 50%, transparent 100%);
+}
+
+.admin-premium .admin-soft-pattern {
+  position: relative;
+}
+
+.admin-premium .admin-soft-pattern::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle at 25% 20%, rgba(31, 91, 75, 0.06) 0, rgba(31, 91, 75, 0.06) 2px, transparent 2px),
+    radial-gradient(circle at 75% 80%, rgba(199, 169, 107, 0.07) 0, rgba(199, 169, 107, 0.07) 2px, transparent 2px);
+  background-size: 24px 24px;
+  opacity: 0.4;
+}

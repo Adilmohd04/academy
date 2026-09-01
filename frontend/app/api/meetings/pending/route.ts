@@ -1,12 +1,17 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
+    }
+
+    const supabase = getSupabaseAdminClient();
 
     // Fetch pending meeting bookings with teacher slot details
     const { data: requests, error: requestsError } = await supabase
@@ -32,8 +37,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch student and teacher details separately
-    const studentIds = [...new Set(requests?.map((r: any) => r.student_id) || [])];
-    const teacherIds = [...new Set(requests?.map((r: any) => r.teacher_id) || [])];
+    const studentIds = Array.from(new Set(requests?.map((request: any) => request.student_id) || []));
+    const teacherIds = Array.from(new Set(requests?.map((request: any) => request.teacher_id) || []));
 
     const [studentsRes, teachersRes] = await Promise.all([
       supabase
@@ -91,23 +96,28 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
+    }
+
     const body = await request.json();
     const { id, status, notes } = body;
 
-    if (!id || !status) {
+    if (typeof id !== 'string' || !id || !['approved', 'rejected'].includes(status)) {
       return NextResponse.json(
-        { error: 'Missing required fields: id and status' },
+        { error: 'A meeting ID and an approved or rejected status are required' },
         { status: 400 }
       );
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabaseAdminClient();
 
     const { data, error } = await supabase
       .from('meeting_bookings')
       .update({ 
         approval_status: status,
-        rejection_reason: notes || null,
+        rejection_reason: typeof notes === 'string' ? notes : null,
         approval_date: status === 'approved' ? new Date().toISOString() : null,
         updated_at: new Date().toISOString(),
       })

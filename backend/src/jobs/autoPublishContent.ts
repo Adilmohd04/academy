@@ -25,14 +25,17 @@ export async function autoPublishContent() {
     
     console.log('🔄 Running auto-publish job...');
     
-    // 1. Auto-publish WEEKS
+    // 1. Auto-publish WEEKS (only for live/hybrid courses)
     // Uses `unlock_date` and `status` fields as defined in courseWeekService.ts
+    // Pre-recorded courses are excluded — their weeks stay in draft until
+    // the entire course is published at the course level.
     const { data: weeksToPublish, error: weekFetchError } = await supabase
       .from('course_weeks')
-      .select('id, title, unlock_date')
+      .select('id, title, unlock_date, course_id, courses!inner(course_type)')
       .eq('status', 'draft')
       .not('unlock_date', 'is', null)
-      .lte('unlock_date', now);
+      .lte('unlock_date', now)
+      .in('courses.course_type', ['live', 'hybrid']);
     
     if (weekFetchError) {
       if (isTransientSupabaseConnectivityError(weekFetchError)) {

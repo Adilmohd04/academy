@@ -3,9 +3,42 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
+import toast from "react-hot-toast";
 import { utcToLocal, localToUTC } from "@/lib/dateUtils";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+const resolveApiBaseUrl = (): string => {
+  const candidates = [
+    process.env.NEXT_PUBLIC_API_BASE_URL,
+    process.env.NEXT_PUBLIC_API_URL,
+    "http://127.0.0.1:5000",
+  ];
+
+  for (const value of candidates) {
+    const normalized = (value || "").trim();
+    if (!normalized) continue;
+    if (normalized === "undefined" || normalized === "null") continue;
+    return normalized.replace(/\/+$/, "");
+  }
+
+  return "http://127.0.0.1:5000";
+};
+
+const API_BASE_URL = resolveApiBaseUrl();
+
+async function parseApiResponse(response: Response): Promise<any> {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+
+  const text = await response.text();
+  return {
+    error: text.includes("<!DOCTYPE")
+      ? "Server returned HTML instead of JSON. Check NEXT_PUBLIC_API_URL and backend server status."
+      : text || "Unexpected non-JSON response from server.",
+  };
+}
 
 interface CourseFormData {
   title: string;
@@ -103,6 +136,12 @@ export default function CreateCoursePage() {
     setLoading(true);
 
     try {
+      if (!API_BASE_URL) {
+        throw new Error(
+          "API base URL is missing. Set NEXT_PUBLIC_API_URL in frontend environment."
+        );
+      }
+
       const token = await getToken();
       const response = await fetch(`${API_BASE_URL}/api/courses`, {
         method: "POST",
@@ -110,19 +149,52 @@ export default function CreateCoursePage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          approval_status: "draft",
+        }),
       });
 
-      const data = await response.json();
+      const data = await parseApiResponse(response);
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to create course");
+        throw new Error(
+          data?.error ||
+            `Failed to create course (HTTP ${response.status})`
+        );
       }
 
-      // Redirect to course builder to add sections/lessons
-      router.push(`/teacher/courses/${data.course_id}/edit`);
+      const createdCourseId = data?.data?.id || data?.course_id || data?.id;
+      if (!createdCourseId) {
+        throw new Error("Course created but course ID was not returned by API");
+      }
+
+      // Immediately send created draft to admin approval queue.
+      const submitResponse = await fetch(
+        `${API_BASE_URL}/api/teacher/courses/${createdCourseId}/submit-for-approval`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!submitResponse.ok) {
+        const submitData = await parseApiResponse(submitResponse);
+        throw new Error(
+          submitData?.error ||
+            "Course was created, but failed to submit for admin approval"
+        );
+      }
+
+      toast.success("Course submitted for admin approval successfully.");
+      router.push('/teacher/courses');
     } catch (err: any) {
-      setError(err.message || "Something went wrong");
+      const errorMessage = err.message || "Something went wrong";
+      setError(errorMessage);
+      toast.error(errorMessage);
+    } finally {
       setLoading(false);
     }
   };
@@ -135,8 +207,8 @@ export default function CreateCoursePage() {
             Create New Course
           </h1>
           <p className="text-gray-600 mb-8">
-            Fill in the details below to create a new course. After creation,
-            you'll be able to add sections, lessons, and activities.
+            Fill in the basic details below. Once submitted, this course goes to
+            admin for approval before course building starts.
           </p>
 
           {error && (
@@ -393,14 +465,13 @@ export default function CreateCoursePage() {
               
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Your Title/Credentials *
+                  Your Title/Credentials
                 </label>
                 <input
                   type="text"
                   name="teacher_title"
                   value={formData.teacher_title}
                   onChange={handleInputChange}
-                  required
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                   placeholder="e.g., Ph.D., Professor of Islamic Studies"
                 />
@@ -411,13 +482,12 @@ export default function CreateCoursePage() {
 
               <div className="mb-6">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Instructor Bio *
+                  Instructor Bio
                 </label>
                 <textarea
                   name="teacher_bio"
                   value={formData.teacher_bio}
                   onChange={handleInputChange}
-                  required
                   rows={4}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
                   placeholder="Brief introduction about yourself, your expertise, and teaching experience..."
@@ -523,7 +593,7 @@ export default function CreateCoursePage() {
                 disabled={loading}
                 className="flex-1 px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
-                {loading ? "Creating..." : "Create Course"}
+                {loading ? "Submitting for Approval..." : "Create & Submit for Approval"}
               </button>
             </div>
           </form>

@@ -7,13 +7,51 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { clerkClient } from '@clerk/clerk-sdk-node';
+import { timingSafeEqual } from 'crypto';
 import config from '../config/env';
 
 // Note: Express Request type is augmented in types/express.d.ts
 // All requests now have req.auth property
 
+const getSingleHeader = (value: string | string[] | undefined): string | undefined => {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || undefined;
+};
+
+const secretsMatch = (providedSecret: string, configuredSecret: string): boolean => {
+  const provided = Buffer.from(providedSecret);
+  const configured = Buffer.from(configuredSecret);
+
+  return provided.length === configured.length && timingSafeEqual(provided, configured);
+};
+
+const setAuthenticatedUser = async (
+  req: Request,
+  userId: string,
+  sessionId = ''
+) => {
+  const user = await clerkClient.users.getUser(userId);
+
+  req.auth = {
+    userId,
+    sessionId,
+    role: (user.publicMetadata as any)?.role || 'student',
+    email: user.emailAddresses[0]?.emailAddress,
+  };
+};
+
 /**
- * Middleware to verify Clerk JWT token
+ * Middleware to verify Clerk JWT tokens.
+ *
+ * `x-clerk-user-id` is deliberately not an authentication credential. A
+ * browser can forge it, so protected API routes only accept a verified Clerk
+ * bearer token. Server-side Next.js proxies may use the optional internal
+ * bridge below, but only when they supply a separately configured shared
+ * secret that is never exposed to the browser.
  */
 export const requireAuth = async (
   req: Request,
@@ -27,7 +65,8 @@ export const requireAuth = async (
 
     const e2eBypassEnabled =
       config.nodeEnv === 'development' &&
-      process.env.E2E_AUTH_BYPASS === 'true';
+      process.env.E2E_AUTH_BYPASS === 'true' &&
+      process.env.NODE_ENV !== 'production';
 
     const e2eRole = req.headers['x-e2e-role'] as string;
     const e2eUserId = req.headers['x-e2e-user-id'] as string;
@@ -45,75 +84,86 @@ export const requireAuth = async (
       return next();
     }
 
-    // Check for x-clerk-user-id header first (from Next.js API routes)
-    const clerkUserId = req.headers['x-clerk-user-id'] as string;
-    
-    if (clerkUserId) {
-      console.log('[Auth Middleware] Using x-clerk-user-id:', clerkUserId);
-      
-      try {
-        // Get user details from Clerk
-        const user = await clerkClient.users.getUser(clerkUserId);
-        
-        // Attach user info to request
-        req.auth = {
-          userId: clerkUserId,
-          sessionId: '',
-          role: (user.publicMetadata as any)?.role || 'student',
-          email: user.emailAddresses[0]?.emailAddress,
-        };
-        
-        console.log('[Auth Middleware] User authenticated:', req.auth.email, 'Role:', req.auth.role);
-        return next();
-      } catch (error) {
-        console.error('[Auth Middleware] Failed to get user from Clerk:', error);
+    const authHeader = getSingleHeader(req.headers.authorization);
+
+    // A supplied Authorization header is always authoritative. Do not fall
+    // back to a user-id header if it is malformed or fails verification.
+    if (authHeader) {
+      if (!authHeader.startsWith('Bearer ')) {
         return res.status(401).json({
           success: false,
-          message: 'Invalid user ID',
+          message: 'Invalid authorization header',
+        });
+      }
+
+      const token = authHeader.slice('Bearer '.length).trim();
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid authorization header',
+        });
+      }
+
+      try {
+        const sessionToken = await clerkClient.verifyToken(token, {
+          secretKey: config.clerkSecretKey,
+        });
+
+        if (!sessionToken.sub) {
+          return res.status(401).json({
+            success: false,
+            message: 'Invalid or expired token',
+          });
+        }
+
+        await setAuthenticatedUser(req, sessionToken.sub, sessionToken.sid || '');
+        return next();
+      } catch (verifyError) {
+        console.error('[Auth Middleware] Clerk token verification failed');
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired token',
         });
       }
     }
-    
-    // Fallback to Bearer token method
-    const authHeader = req.headers.authorization;
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.error('[Auth Middleware] No authorization provided');
-      return res.status(401).json({
-        success: false,
-        message: 'No authorization token provided',
-      });
+
+    // This bridge is intentionally opt-in and fail-closed. It supports a
+    // same-team server proxy when forwarding a Clerk bearer token is not
+    // possible. Never put INTERNAL_AUTH_SHARED_SECRET in a browser-visible
+    // environment variable, and never treat x-clerk-user-id as sufficient.
+    const internalUserId = getSingleHeader(req.headers['x-internal-auth-user-id']);
+    const internalSecret = getSingleHeader(req.headers['x-internal-auth-secret']);
+
+    if (internalUserId || internalSecret) {
+      if (
+        !internalUserId ||
+        !internalSecret ||
+        !config.internalAuthSharedSecret ||
+        !secretsMatch(internalSecret, config.internalAuthSharedSecret)
+      ) {
+        console.warn('[Auth Middleware] Rejected an untrusted internal auth bridge request');
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid authentication credentials',
+        });
+      }
+
+      try {
+        await setAuthenticatedUser(req, internalUserId, 'internal-auth-bridge');
+        return next();
+      } catch (error) {
+        console.error('[Auth Middleware] Failed to resolve trusted bridge user');
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid authentication credentials',
+        });
+      }
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-
-    // Verify token with Clerk
-    try {
-      const sessionToken = await clerkClient.verifyToken(token, {
-        secretKey: config.clerkSecretKey,
-      });
-
-      // Attach user info to request
-      req.auth = {
-        userId: sessionToken.sub,
-        sessionId: sessionToken.sid || '',
-      };
-
-      // Get user details from Clerk to check role
-      const user = await clerkClient.users.getUser(sessionToken.sub);
-      
-      // Extract role from user metadata
-      req.auth.role = (user.publicMetadata as any)?.role || 'student';
-      req.auth.email = user.emailAddresses[0]?.emailAddress;
-
-      next();
-    } catch (verifyError) {
-      console.error('Token verification failed:', verifyError);
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid or expired token',
-      });
-    }
+    return res.status(401).json({
+      success: false,
+      message: 'No authorization token provided',
+    });
   } catch (error) {
     console.error('Auth middleware error:', error);
     return res.status(500).json({

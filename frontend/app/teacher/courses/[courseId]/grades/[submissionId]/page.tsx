@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 
 const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL;
+  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
 interface SubmissionDetail {
   id: string;
@@ -55,7 +55,7 @@ interface SubmissionDetail {
 export default function SubmissionDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { userId } = useAuth();
+  const { getToken } = useAuth();
   const courseId = params.courseId as string;
   const submissionId = params.submissionId as string;
 
@@ -67,17 +67,19 @@ export default function SubmissionDetailPage() {
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    if (courseId && submissionId && userId) {
-      loadSubmission();
+    if (courseId && submissionId) {
+      void loadSubmission();
     }
-  }, [courseId, submissionId, userId]);
+  }, [courseId, submissionId]);
 
   const loadSubmission = async () => {
     try {
       setLoading(true);
+      const token = await getToken();
+      if (!token) throw new Error("Your sign-in session is unavailable. Please sign in again.");
       const res = await fetch(
         `${API_URL}/api/teacher/courses/${courseId}/submissions/${submissionId}`,
-        { headers: { "x-clerk-user-id": userId || "" } }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) {
         const data = await res.json();
@@ -99,13 +101,15 @@ export default function SubmissionDetailPage() {
     setSuccess(false);
 
     try {
+      const token = await getToken();
+      if (!token) throw new Error("Your sign-in session is unavailable. Please sign in again.");
       const res = await fetch(
         `${API_URL}/api/teacher/courses/${courseId}/submissions/${submissionId}/grade`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-clerk-user-id": userId || "",
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             grade: Number(gradeValue),

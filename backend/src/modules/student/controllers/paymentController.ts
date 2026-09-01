@@ -27,7 +27,8 @@ export const createPaymentOrder = async (req: Request, res: Response) => {
     res.status(200).json(result);
   } catch (error: any) {
     console.error('Error creating payment order:', error);
-    res.status(500).json({ 
+    const statusCode = error instanceof paymentService.StudentPaymentError ? error.statusCode : 500;
+    res.status(statusCode).json({
       success: false, 
       message: error.message || 'Failed to create payment order' 
     });
@@ -40,31 +41,41 @@ export const createPaymentOrder = async (req: Request, res: Response) => {
 export const verifyPayment = async (req: Request, res: Response) => {
   try {
     const studentId = req.auth?.userId;
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const {
+      razorpay_order_id: razorpayOrderId,
+      razorpay_payment_id: razorpayPaymentId,
+      razorpay_signature: razorpaySignature,
+    } = req.body || {};
 
     if (!studentId) {
       return res.status(401).json({ success: false, message: 'Unauthorized' });
     }
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Payment verification details are required' 
+    if (
+      typeof razorpayOrderId !== 'string' ||
+      typeof razorpayPaymentId !== 'string' ||
+      typeof razorpaySignature !== 'string'
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment verification details are required',
       });
     }
 
     const result = await paymentService.confirmPayment(
-      razorpay_order_id, 
-      razorpay_payment_id, 
-      razorpay_signature
+      studentId,
+      razorpayOrderId,
+      razorpayPaymentId,
+      razorpaySignature,
     );
 
-    res.status(200).json(result);
+    return res.json(result);
   } catch (error: any) {
-    console.error('Error verifying payment:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || 'Payment verification failed' 
+    console.error('Error verifying student payment:', error);
+    const statusCode = error instanceof paymentService.StudentPaymentError ? error.statusCode : 500;
+    return res.status(statusCode).json({
+      success: false,
+      message: error.message || 'Failed to verify payment',
     });
   }
 };

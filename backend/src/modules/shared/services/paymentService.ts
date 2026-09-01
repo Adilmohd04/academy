@@ -247,7 +247,7 @@ export const updatePaymentStatus = async (orderId: string, status: string): Prom
   if (data && data.meeting_request_id && (status === 'failed' || status === 'cancelled')) {
     try {
       // Import here to avoid circular dependency
-      const meetingService = await import('./meetingService');
+      const meetingService = await import('./meetingService.js');
       await meetingService.updateMeetingRequestStatus(data.meeting_request_id, status);
     } catch (err) {
       console.error('Error updating meeting_request status after payment failure/cancel:', err);

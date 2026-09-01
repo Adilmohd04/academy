@@ -86,17 +86,17 @@ router.get('/courses/:courseId/grades', requireAuth, async (req: Request, res: R
 
       // Calculate averages
       const quizScores = weeks
-        .filter(w => w.quiz_percentage !== null)
-        .map(w => w.quiz_percentage!);
+        .filter((w: any) => w.quiz_percentage !== null)
+        .map((w: any) => w.quiz_percentage!);
       const quizAverage = quizScores.length > 0
-        ? quizScores.reduce((sum, score) => sum + score, 0) / quizScores.length
+        ? quizScores.reduce((sum: any, score: any) => sum + score, 0) / quizScores.length
         : 0;
 
       const assignmentScores = weeks
-        .filter(w => w.assignment_percentage !== null)
-        .map(w => w.assignment_percentage!);
+        .filter((w: any) => w.assignment_percentage !== null)
+        .map((w: any) => w.assignment_percentage!);
       const assignmentAverage = assignmentScores.length > 0
-        ? assignmentScores.reduce((sum, score) => sum + score, 0) / assignmentScores.length
+        ? assignmentScores.reduce((sum: any, score: any) => sum + score, 0) / assignmentScores.length
         : 0;
 
       // Get enrollment and grading policy

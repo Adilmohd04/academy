@@ -5,7 +5,7 @@ import { useAuth, useUser } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
 import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 import toast from 'react-hot-toast';
-import { 
+import {
   Calendar, 
   User, 
   FileText, 
@@ -15,6 +15,8 @@ import {
   ExternalLink,
   CheckCircle
 } from 'lucide-react';
+
+const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 interface Meeting {
   id: string;
@@ -74,7 +76,7 @@ export default function TeacherMeetingsPage() {
       const token = await getToken();
       
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/meetings/teacher/assigned`,
+        `${API}/api/meetings/teacher/assigned`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -145,7 +147,7 @@ export default function TeacherMeetingsPage() {
       }
 
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/meetings/${meetingId}/notes`,
+        `${API}/api/meetings/${meetingId}/notes`,
         {
           method: 'PUT',
           headers: {
@@ -191,7 +193,7 @@ export default function TeacherMeetingsPage() {
       }
 
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/meetings/${meetingId}/resource`,
+        `${API}/api/meetings/${meetingId}/resource`,
         {
           method: 'PUT',
           headers: {
@@ -223,7 +225,7 @@ export default function TeacherMeetingsPage() {
       const token = await getToken();
 
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/meetings/${meetingId}/attendance`,
+        `${API}/api/meetings/${meetingId}/attendance`,
         {
           method: 'PUT',
           headers: {

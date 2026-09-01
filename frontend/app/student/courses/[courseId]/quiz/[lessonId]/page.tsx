@@ -59,18 +59,19 @@ export default function QuizPage() {
 
   useEffect(() => {
     if (timeRemaining === null || timeRemaining <= 0) return;
-
     const timer = setInterval(() => {
       setTimeRemaining(prev => {
-        if (prev === null || prev <= 1) {
-          handleSubmitQuiz();
-          return 0;
-        }
+        if (prev === null || prev <= 1) return 0;
         return prev - 1;
       });
     }, 1000);
-
     return () => clearInterval(timer);
+  }, [timeRemaining]);
+
+  useEffect(() => {
+    if (timeRemaining === 0 && !submitting) {
+      handleSubmitQuiz();
+    }
   }, [timeRemaining]);
 
   const fetchQuiz = async () => {

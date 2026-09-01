@@ -7,8 +7,10 @@ import {
   BookOpen, FileText, ClipboardList, ChevronRight, ChevronDown, 
   Loader2, Video, FileQuestion, BarChart3, Upload, 
   Link as LinkIcon, ArrowLeft, Home, MessageSquare, PlayCircle, Award, Calendar,
-  CheckCircle, XCircle, AlertTriangle, Clock, ThumbsUp, ThumbsDown, Reply, Pencil, Trash2, Send, Pin
+  CheckCircle, XCircle, AlertTriangle, Clock, ThumbsUp, ThumbsDown, Reply, Pencil, Trash2, Send, Pin,
+  Scroll
 } from 'lucide-react';
+import { IslamicLoader } from '@/components/ui/IslamicLoader';
 
 interface Lesson {
   id: string;
@@ -218,6 +220,7 @@ export default function LearnPage() {
   const [activeFinalExam, setActiveFinalExam] = useState<CourseFinalExam | null>(null);
   const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
   const [loading, setLoading] = useState(true);
+  const [modulesLoading, setModulesLoading] = useState(false);
   const [activeLesson, setActiveLesson] = useState<Lesson | null>(null);
   const [activeModule, setActiveModule] = useState<Module | null>(null);
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
@@ -331,14 +334,46 @@ export default function LearnPage() {
         console.error('Course fetch failed:', await courseRes.text());
       }
 
+      setModulesLoading(true);
       if (modulesRes.ok) {
         const modulesData = await modulesRes.json();
         const modulesArray = Array.isArray(modulesData) ? modulesData : (modulesData.data || []);
         setModules(modulesArray);
+        
+        // Auto-expand all modules and their content groups
+        if (modulesArray.length > 0) {
+          const moduleIds = new Set<string>();
+          modulesArray.forEach((m: any) => {
+            moduleIds.add(m.id);
+          });
+          setExpandedModules(moduleIds);
+          
+          // Auto-expand all content groups (Videos, Quizzes, Assignments, Resources)
+          const contentGroups = new Set<string>();
+          modulesArray.forEach((module: any) => {
+            if (module.lessons && module.lessons.length > 0) {
+              // Add content group keys for each type that exists
+              if (module.lessons.some((l: any) => l.content_type === 'video' && l.is_published !== false)) {
+                contentGroups.add(`${module.id}-video`);
+              }
+              if (module.lessons.some((l: any) => l.content_type === 'quiz' && l.is_published !== false)) {
+                contentGroups.add(`${module.id}-quiz`);
+              }
+              if (module.lessons.some((l: any) => l.content_type === 'assignment' && l.is_published !== false)) {
+                contentGroups.add(`${module.id}-assignment`);
+              }
+              if (module.lessons.some((l: any) => l.content_type === 'text' && l.is_published !== false)) {
+                contentGroups.add(`${module.id}-text`);
+              }
+            }
+          });
+          setExpandedContentGroups(contentGroups);
+        }
       } else {
         const errorText = await modulesRes.text();
         console.error('Modules fetch failed:', errorText);
       }
+      setModulesLoading(false);
 
       if (enrollmentRes.ok) {
         const enrollmentData = await enrollmentRes.json();
@@ -1341,7 +1376,12 @@ export default function LearnPage() {
               </div>
 
               {/* Weeks */}
-              {modules.length === 0 ? (
+              {modulesLoading ? (
+                <div className="flex flex-col items-center justify-center py-16 px-5">
+                  <IslamicLoader size="lg" className="mb-4" />
+                  <p className="text-sm text-gray-500 font-medium">Loading course content...</p>
+                </div>
+              ) : modules.length === 0 ? (
                 <div className="text-center text-gray-400 text-sm py-8 px-5">
                   No modules available
                 </div>
@@ -2798,60 +2838,41 @@ export default function LearnPage() {
 
             {/* Quiz Content */}
             {activeLesson && activeLesson.content_type === 'quiz' && (
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8">
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 md:p-10">
                 {quizLoading ? (
-                  <div className="text-center py-12">
-                    <Loader2 className="w-8 h-8 text-purple-600 animate-spin mx-auto mb-4" />
-                    <p className="text-slate-600">Loading quiz...</p>
+                  <div className="text-center py-16">
+                    <Loader2 className="w-8 h-8 text-gray-400 animate-spin mx-auto mb-4" />
+                    <p className="text-gray-500 text-sm font-medium">Loading assessment...</p>
                   </div>
                 ) : quizData ? (
                   <>
                     {/* Quiz Header with Total Marks & Last Submission Info */}
-                    <div className="flex items-center gap-3 mb-6 pb-6 border-b border-slate-200">
-                      <div className="w-12 h-12 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-xl flex items-center justify-center">
-                        <FileQuestion className="w-6 h-6 text-indigo-600" />
+                    <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-8 pb-8 border-b border-gray-200">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-gray-50 border border-gray-200 rounded-lg flex items-center justify-center shadow-sm">
+                          <FileQuestion className="w-6 h-6 text-gray-700" />
+                        </div>
+                        <div>
+                          <h2 className="text-2xl font-bold text-gray-900 leading-tight">{quizData.quiz.title}</h2>
+                          <p className="text-sm text-gray-500 mt-1 font-medium">Assessment</p>
+                        </div>
                       </div>
-                      <div className="flex-1">
-                        <h2 className="text-xl font-bold text-slate-900">{quizData.quiz.title}</h2>
-                        <p className="text-sm text-slate-500 font-medium">Assessment</p>
-                      </div>
-                      <div className="text-right">
+                      <div className="flex gap-8 text-right">
                         {quizData.quiz.questions && quizData.quiz.questions.length > 0 && (
-                          <div className="mb-2">
-                            <p className="text-xs text-slate-500">Total Marks</p>
-                            <p className="text-2xl font-bold text-blue-600">
+                          <div>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Total Marks</p>
+                            <p className="text-2xl font-bold text-gray-900">
                               {quizData.quiz.questions.reduce((sum: number, q: any) => sum + (q.marks || 1), 0)}
                             </p>
                           </div>
                         )}
                         {quizData.quiz.deadline && (
-                          <>
-                            <p className="text-xs text-slate-500">Due Date</p>
-                            <p className="text-sm font-semibold text-red-600">
+                          <div>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Due Date</p>
+                            <p className="text-sm font-bold text-red-600 mt-2">
                               {new Date(quizData.quiz.deadline).toLocaleString('en-IN', {
                                 year: 'numeric',
-                                month: '2-digit',
-                                day: '2-digit',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                timeZone: 'Asia/Kolkata'
-                              })} IST
-                            </p>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Previous Submission Score Banner */}
-                    {quizData.last_submission && (
-                      <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-200 rounded-2xl p-5 mb-6">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h3 className="text-sm font-semibold text-indigo-800 mb-1">Last Submission</h3>
-                            <p className="text-xs text-indigo-600">
-                              Submitted on: {new Date(quizData.last_submission.submitted_at).toLocaleString('en-IN', {
-                                year: 'numeric',
-                                month: 'long',
+                                month: 'short',
                                 day: 'numeric',
                                 hour: '2-digit',
                                 minute: '2-digit',
@@ -2859,56 +2880,89 @@ export default function LearnPage() {
                               })} IST
                             </p>
                           </div>
-                          <div className="text-right">
-                            {quizData.last_submission.score != null && (
-                              <div>
-                                <p className="text-xs text-indigo-500">Score</p>
-                                <p className="text-2xl font-bold text-indigo-700">
-                                  {quizData.last_submission.score}/{quizData.quiz.questions?.reduce((sum: number, q: any) => sum + (q.marks || 1), 0) || '?'}
-                                </p>
-                                <p className="text-xs text-indigo-500">
-                                  {quizData.quiz.questions ? Math.round((quizData.last_submission.score / quizData.quiz.questions.reduce((sum: number, q: any) => sum + (q.marks || 1), 0)) * 100) : 0}%
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                        )}
                       </div>
-                    )}
+                    </div>
 
-                    {/* Quiz Description */}
-                    {quizData.quiz.description && (
-                      <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
-                        <p className="text-sm text-yellow-800">
-                          <strong>Note:</strong> {quizData.quiz.description}
-                        </p>
+                    {/* Previous Submission Info */}
+                    {quizData.last_submission && (
+                      <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                        <div>
+                          <h3 className="text-sm font-bold text-gray-900 mb-1">Last Submission</h3>
+                          <p className="text-sm text-gray-600">
+                            Submitted on: <span className="font-medium text-gray-800">{new Date(quizData.last_submission.submitted_at).toLocaleString('en-IN', {
+                              year: 'numeric',
+                              month: 'long',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              timeZone: 'Asia/Kolkata'
+                            })} IST</span>
+                          </p>
+                        </div>
+                        {quizData.last_submission.score != null && (
+                          <div className="text-right">
+                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Score</p>
+                            <div className="flex items-baseline gap-2">
+                              <span className="text-2xl font-bold text-gray-900">
+                                {quizData.last_submission.score}<span className="text-lg text-gray-400">/{quizData.quiz.questions?.reduce((sum: number, q: any) => sum + (q.marks || 1), 0) || '?'}</span>
+                              </span>
+                              <span className="text-sm font-bold text-gray-500">
+                                {quizData.quiz.questions ? Math.round((quizData.last_submission.score / quizData.quiz.questions.reduce((sum: number, q: any) => sum + (q.marks || 1), 0)) * 100) : 0}%
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {/* Instructions */}
-                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 mb-6">
-                      <h3 className="font-semibold text-slate-900 mb-3">Instructions</h3>
-                      <ul className="text-sm text-slate-700 space-y-2 list-disc list-inside">
-                        <li>You may submit any number of times{quizData.quiz.deadline ? ' before the due date' : ''}. The final submission will be considered for grading.</li>
-                        {quizData.quiz.deadline ? (
-                          <li>Your score and correct answers will be revealed after the deadline passes.</li>
-                        ) : (
-                          <li>Your score and correct answers will be revealed immediately after submission.</li>
+                    <div className="mb-10">
+                      <h3 className="text-base font-bold text-gray-900 mb-4">Instructions</h3>
+                      <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm">
+                        <ul className="text-sm text-gray-600 space-y-4">
+                          <li className="flex gap-3">
+                            <div className="w-1.5 h-1.5 rounded-full bg-gray-400 mt-1.5 flex-shrink-0"></div>
+                            <span className="leading-relaxed">You may submit any number of times{quizData.quiz.deadline ? ' before the due date' : ''}. The final submission will be considered for grading.</span>
+                          </li>
+                          <li className="flex gap-3">
+                            <div className="w-1.5 h-1.5 rounded-full bg-gray-400 mt-1.5 flex-shrink-0"></div>
+                            <span className="leading-relaxed">
+                              {quizData.quiz.deadline 
+                                ? 'Your score and correct answers will be revealed after the deadline passes.'
+                                : 'Your score and correct answers will be revealed immediately after submission.'}
+                            </span>
+                          </li>
+                          <li className="flex gap-3">
+                            <div className="w-1.5 h-1.5 rounded-full bg-gray-400 mt-1.5 flex-shrink-0"></div>
+                            <span className="leading-relaxed">All questions must be answered.</span>
+                          </li>
+                          {quizData.quiz.time_limit_minutes && (
+                            <li className="flex gap-3">
+                              <div className="w-1.5 h-1.5 rounded-full bg-gray-400 mt-1.5 flex-shrink-0"></div>
+                              <span className="leading-relaxed">Time limit: <strong className="text-gray-900">{quizData.quiz.time_limit_minutes} minutes</strong></span>
+                            </li>
+                          )}
+                          {quizData.quiz.max_attempts && (
+                            <li className="flex gap-3">
+                              <div className="w-1.5 h-1.5 rounded-full bg-gray-400 mt-1.5 flex-shrink-0"></div>
+                              <span className="leading-relaxed">Maximum attempts: <strong className="text-gray-900">{quizData.quiz.max_attempts}</strong> <span className="text-gray-400">(Used: {quizData.attempts_used})</span></span>
+                            </li>
+                          )}
+                        </ul>
+                        {quizData.quiz.description && (
+                          <div className="mt-5 pt-5 border-t border-gray-100">
+                            <p className="text-sm text-gray-700 leading-relaxed"><strong className="text-gray-900">Note:</strong> {quizData.quiz.description}</p>
+                          </div>
                         )}
-                        <li>All questions must be answered</li>
-                        {quizData.quiz.time_limit_minutes && (
-                          <li>Time limit: {quizData.quiz.time_limit_minutes} minutes</li>
-                        )}
-                        {quizData.quiz.max_attempts && (
-                          <li>Maximum attempts: {quizData.quiz.max_attempts} (Used: {quizData.attempts_used})</li>
-                        )}
-                      </ul>
+                      </div>
                     </div>
 
                     {/* Deadline passed or max attempts message */}
                     {(quizData.deadline_passed || !quizData.can_submit) && (
-                      <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-                        <p className="text-sm text-red-800 font-semibold">
+                      <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-8 flex items-start gap-3">
+                        <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                        <p className="text-sm text-red-800 font-medium">
                           {quizData.deadline_passed 
                             ? 'The deadline for this quiz has passed. No more submissions are allowed.'
                             : 'You have used all available attempts for this quiz.'}
@@ -2919,7 +2973,7 @@ export default function LearnPage() {
                     {/* Quiz Questions */}
                     {quizData.quiz.questions && quizData.quiz.questions.length > 0 ? (
                       <div className="space-y-6">
-                        <h3 className="font-bold text-slate-900 text-lg mb-4">Questions</h3>
+                        <h3 className="text-xl font-bold text-gray-900 mb-6 pb-2 border-b border-gray-200">Questions</h3>
                         
                         {quizData.quiz.questions.map((question: any, index: number) => {
                           const qType = question.type || 'mcq';
@@ -2928,18 +2982,22 @@ export default function LearnPage() {
                           const isFillBlank = qType === 'fill-blank' || qType === 'fill_in_the_blank' || qType === 'fill-in-blank';
 
                           return (
-                            <div key={index} className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                              <div className="flex items-start gap-3 mb-4">
-                                <span className="font-bold text-slate-700">{index + 1})</span>
-                                <div className="flex-1">
-                                  <p className="text-slate-700 mb-1">{question.question || question.text}</p>
-                                  <span className="text-xs text-slate-500 italic">{question.marks || 1} point{(question.marks || 1) > 1 ? 's' : ''}</span>
+                            <div key={index} className="bg-white border border-gray-200 rounded-xl p-6 md:p-8 hover:border-gray-300 transition-colors shadow-sm">
+                              <div className="flex items-start justify-between gap-4 mb-6">
+                                <div className="flex gap-4">
+                                  <span className="flex-shrink-0 w-8 h-8 bg-gray-100 text-gray-700 rounded-lg flex items-center justify-center font-bold text-sm border border-gray-200">
+                                    {index + 1}
+                                  </span>
+                                  <p className="text-gray-900 font-medium pt-1 text-base leading-relaxed">{question.question || question.text}</p>
                                 </div>
+                                <span className="flex-shrink-0 px-2.5 py-1 bg-gray-50 border border-gray-200 rounded text-xs font-bold text-gray-500 uppercase tracking-wide">
+                                  {question.marks || 1} pt{(question.marks || 1) > 1 ? 's' : ''}
+                                </span>
                               </div>
 
-                              {/* Fill-in-the-blank input */}
-                              {isFillBlank ? (
-                                <div className="pl-7">
+                              <div className="pl-12">
+                                {/* Fill-in-the-blank input */}
+                                {isFillBlank ? (
                                   <input
                                     type="text"
                                     placeholder="Type your answer here..."
@@ -2950,69 +3008,86 @@ export default function LearnPage() {
                                       setQuizAnswers(newAnswers);
                                     }}
                                     disabled={quizData.deadline_passed || !quizData.can_submit}
-                                    className="w-full px-4 py-3 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all disabled:bg-gray-100 disabled:cursor-not-allowed"
+                                    className="w-full max-w-lg px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
                                   />
-                                </div>
-                              ) : (
-                                /* MCQ options */
-                                <div className="space-y-3 pl-7">
-                                  {question.options && question.options.map((option: string, optIndex: number) => (
-                                    <label 
-                                      key={optIndex} 
-                                      className="flex items-center gap-3 p-3 border border-slate-200 rounded-xl hover:bg-indigo-50 cursor-pointer transition-colors"
-                                    >
-                                      <input 
-                                        type={isMultiSelect ? 'checkbox' : 'radio'}
-                                        name={`question-${index}`}
-                                        value={optIndex}
-                                        checked={
-                                          Array.isArray(quizAnswers[index])
-                                            ? quizAnswers[index].includes(optIndex)
-                                            : quizAnswers[index] === optIndex
-                                        }
-                                        onChange={(e) => {
-                                          const newAnswers = { ...quizAnswers };
-                                          if (isMultiSelect) {
-                                            if (!Array.isArray(newAnswers[index])) {
-                                              newAnswers[index] = [];
-                                            }
-                                            if (e.target.checked) {
-                                              newAnswers[index] = [...newAnswers[index], optIndex];
-                                            } else {
-                                              newAnswers[index] = newAnswers[index].filter((a: number) => a !== optIndex);
-                                            }
-                                          } else {
-                                            newAnswers[index] = optIndex;
-                                          }
-                                          setQuizAnswers(newAnswers);
-                                        }}
-                                        className="w-4 h-4 text-indigo-600"
-                                        disabled={quizData.deadline_passed || !quizData.can_submit}
-                                      />
-                                      <span className="text-slate-700">{option}</span>
-                                    </label>
-                                  ))}
-                                </div>
-                              )}
+                                ) : (
+                                  /* MCQ options */
+                                  <div className="space-y-3">
+                                    {question.options && question.options.map((option: string, optIndex: number) => {
+                                      const isChecked = Array.isArray(quizAnswers[index])
+                                        ? quizAnswers[index].includes(optIndex)
+                                        : quizAnswers[index] === optIndex;
+                                      
+                                      return (
+                                        <label 
+                                          key={optIndex} 
+                                          className={`flex items-center gap-3.5 p-4 border rounded-lg cursor-pointer transition-all ${
+                                            isChecked 
+                                              ? 'border-blue-500 bg-blue-50/50' 
+                                              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                          } ${quizData.deadline_passed || !quizData.can_submit ? 'opacity-75 cursor-not-allowed hover:bg-transparent hover:border-gray-200' : ''}`}
+                                        >
+                                          <div className={`flex items-center justify-center flex-shrink-0 w-5 h-5 border transition-colors ${isMultiSelect ? 'rounded' : 'rounded-full'} ${
+                                            isChecked ? 'border-blue-500 bg-blue-500 text-white' : 'border-gray-300 bg-white'
+                                          }`}>
+                                            {isChecked && <CheckCircle className="w-3.5 h-3.5" />}
+                                          </div>
+                                          <input 
+                                            type={isMultiSelect ? 'checkbox' : 'radio'}
+                                            name={`question-${index}`}
+                                            value={optIndex}
+                                            checked={isChecked}
+                                            onChange={(e) => {
+                                              const newAnswers = { ...quizAnswers };
+                                              if (isMultiSelect) {
+                                                if (!Array.isArray(newAnswers[index])) {
+                                                  newAnswers[index] = [];
+                                                }
+                                                if (e.target.checked) {
+                                                  newAnswers[index] = [...newAnswers[index], optIndex];
+                                                } else {
+                                                  newAnswers[index] = newAnswers[index].filter((a: number) => a !== optIndex);
+                                                }
+                                              } else {
+                                                newAnswers[index] = optIndex;
+                                              }
+                                              setQuizAnswers(newAnswers);
+                                            }}
+                                            className="hidden"
+                                            disabled={quizData.deadline_passed || !quizData.can_submit}
+                                          />
+                                          <span className="text-gray-800 text-sm font-medium">{option}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
                       </div>
                     ) : (
-                      <div className="text-center text-slate-500 py-8">
-                        <p>No questions available for this quiz.</p>
+                      <div className="text-center bg-gray-50 border border-gray-200 rounded-xl py-12">
+                        <FileQuestion className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                        <p className="text-gray-500 font-medium">No questions available for this assessment.</p>
                       </div>
                     )}
 
                     {/* Submit Button */}
                     {quizData.quiz.questions && quizData.quiz.questions.length > 0 && (
-                      <div className="mt-8 pt-6 border-t border-gray-200">
+                      <div className="mt-8 pt-8 border-t border-gray-200 flex justify-end">
                         <button 
                           onClick={handleQuizSubmit}
                           disabled={quizData.deadline_passed || !quizData.can_submit || quizSubmitting}
-                          className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white py-4 rounded-xl hover:from-indigo-700 hover:to-violet-700 transition-all shadow-md font-semibold text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="px-8 py-3 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors shadow-sm font-semibold text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                         >
-                          {quizSubmitting ? 'Submitting...' : 'Submit Quiz'}
+                          {quizSubmitting ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Submitting...
+                            </>
+                          ) : 'Submit Final Answers'}
                         </button>
                       </div>
                     )}
@@ -3027,189 +3102,192 @@ export default function LearnPage() {
 
             {/* Quiz Review Results - Shown after submission */}
             {activeLesson && activeLesson.content_type === 'quiz' && quizReview && (
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8 mt-6">
-                {/* Score Banner with submission time */}
-                <div className={`rounded-2xl p-6 text-white mb-6 ${
-                  quizReview.show_answers
-                    ? (quizReview.percentage >= 70 
-                      ? 'bg-gradient-to-r from-green-600 to-emerald-600' 
-                      : quizReview.percentage >= 50 
-                        ? 'bg-gradient-to-r from-yellow-600 to-orange-600' 
-                        : 'bg-gradient-to-r from-red-600 to-rose-600')
-                    : 'bg-gradient-to-r from-blue-600 to-indigo-600'
-                }`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h2 className="text-2xl font-bold mb-1">Quiz Submitted!</h2>
-                      {quizReview.show_answers ? (
-                        <p className="opacity-90">Your answers have been scored</p>
-                      ) : (
-                        <p className="opacity-90">Answers will be revealed after the deadline</p>
-                      )}
-                      {quizReview.submitted_at && (
-                        <p className="text-xs opacity-80 mt-2">
-                          Submitted: {new Date(quizReview.submitted_at).toLocaleString('en-IN', {
-                            year: 'numeric',
-                            month: 'long',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            timeZone: 'Asia/Kolkata'
-                          })} IST
-                        </p>
-                      )}
-                    </div>
-                    <div className="text-right">
-                      {quizReview.show_answers ? (
-                        <>
-                          <div className="text-4xl font-bold">{quizReview.score}/{quizReview.total}</div>
-                          <div className="text-sm opacity-90">{Math.round(quizReview.percentage)}%</div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="text-3xl font-bold">Pending</div>
-                          <div className="text-xs opacity-80 mt-1">
-                            Deadline: {quizReview.deadline ? new Date(quizReview.deadline).toLocaleString('en-IN', {
-                              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata'
-                            }) : '--'} IST
+              <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 md:p-10 mt-6">
+                
+                {/* Score Header */}
+                <div className="text-center mb-10 pb-10 border-b border-gray-200">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-50 border border-green-100 mb-5 shadow-sm">
+                    <CheckCircle className="w-8 h-8 text-green-600" />
+                  </div>
+                  <h2 className="text-3xl font-bold text-gray-900 mb-2">Quiz Submitted!</h2>
+                  <p className="text-gray-500 font-medium">
+                    {quizReview.show_answers ? 'Your answers have been scored' : 'Answers will be revealed after the deadline'}
+                  </p>
+                  
+                  {quizReview.submitted_at && (
+                    <p className="text-sm text-gray-400 mt-2 font-medium">
+                      Submitted: {new Date(quizReview.submitted_at).toLocaleString('en-IN', {
+                        year: 'numeric', month: 'long', day: 'numeric',
+                        hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata'
+                      })} IST
+                    </p>
+                  )}
+
+                  <div className="mt-8 inline-flex flex-col md:flex-row items-center gap-8 px-10 py-6 bg-gray-50 border border-gray-200 rounded-2xl">
+                    {quizReview.show_answers ? (
+                      <>
+                        <div className="text-center">
+                          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Score</p>
+                          <div className="text-4xl font-bold text-gray-900">
+                            {quizReview.score}<span className="text-2xl text-gray-400 font-medium">/{quizReview.total}</span>
                           </div>
-                        </>
-                      )}
-                    </div>
+                        </div>
+                        <div className="hidden md:block w-px h-12 bg-gray-300"></div>
+                        <div className="text-center">
+                          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Percentage</p>
+                          <div className="text-4xl font-bold text-gray-900">
+                            {Math.round(quizReview.percentage)}%
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-center">
+                        <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Status</p>
+                        <div className="text-2xl font-bold text-gray-900">Pending Review</div>
+                        <p className="text-sm text-gray-500 mt-1 font-medium">
+                          Deadline: {quizReview.deadline ? new Date(quizReview.deadline).toLocaleString('en-IN', {
+                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata'
+                          }) : '--'} IST
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
 
                 {/* Question-by-Question Review - only show details if answers should be revealed */}
                 {quizReview.show_answers ? (
-                  <>
-                    <h3 className="text-lg font-bold text-slate-800 mb-4">Question Review</h3>
-                    <div className="space-y-4">
-                      {quizReview.questions.map((question: any, index: number) => {
-                        const studentAnswer = quizReview.answers[index];
-                        const correctAnswer = question.correctAnswer ?? question.correct_answer;
-                        const marks = question.marks || 1;
-                        const qType = question.type || 'mcq';
-                        const isFillBlank = qType === 'fill-blank' || qType === 'fill_in_the_blank' || qType === 'fill-in-blank';
-                        
-                        // Check if correct - handle both index-based and string-based correct answers
-                        let isCorrect = false;
-                        if (isFillBlank) {
-                          const studentText = (String(studentAnswer || '')).trim().toLowerCase();
-                          const correctText = (String(correctAnswer || '')).trim().toLowerCase();
-                          isCorrect = studentText === correctText;
-                        } else if (typeof correctAnswer === 'string' && question.options) {
-                          // String-based correct answer - find index in options
-                          const correctIndex = question.options.indexOf(correctAnswer);
-                          isCorrect = studentAnswer === correctIndex;
-                        } else if (Array.isArray(correctAnswer)) {
-                          let correctIndices: number[];
-                          if (typeof correctAnswer[0] === 'string' && question.options) {
-                            correctIndices = correctAnswer.map((a: string) => question.options.indexOf(a)).filter((i: number) => i !== -1);
-                          } else {
-                            correctIndices = correctAnswer;
-                          }
-                          const studentSet = new Set(Array.isArray(studentAnswer) ? studentAnswer : [studentAnswer]);
-                          const correctSet = new Set(correctIndices);
-                          isCorrect = studentSet.size === correctSet.size && [...studentSet].every((a: number) => correctSet.has(a));
+                  <div className="space-y-6">
+                    <h3 className="text-xl font-bold text-gray-900 mb-6 pb-2 border-b border-gray-200">Question Review</h3>
+                    
+                    {quizReview.questions.map((question: any, index: number) => {
+                      const studentAnswer = quizReview.answers[index];
+                      const correctAnswer = question.correctAnswer ?? question.correct_answer;
+                      const marks = question.marks || 1;
+                      const qType = question.type || 'mcq';
+                      const isFillBlank = qType === 'fill-blank' || qType === 'fill_in_the_blank' || qType === 'fill-in-blank';
+                      
+                      let isCorrect = false;
+                      if (isFillBlank) {
+                        const studentText = (String(studentAnswer || '')).trim().toLowerCase();
+                        const correctText = (String(correctAnswer || '')).trim().toLowerCase();
+                        isCorrect = studentText === correctText;
+                      } else if (typeof correctAnswer === 'string' && question.options) {
+                        const correctIndex = question.options.indexOf(correctAnswer);
+                        isCorrect = studentAnswer === correctIndex;
+                      } else if (Array.isArray(correctAnswer)) {
+                        let correctIndices: number[];
+                        if (typeof correctAnswer[0] === 'string' && question.options) {
+                          correctIndices = correctAnswer.map((a: string) => question.options.indexOf(a)).filter((i: number) => i !== -1);
                         } else {
-                          isCorrect = studentAnswer === correctAnswer;
+                          correctIndices = correctAnswer;
                         }
+                        const studentSet = new Set(Array.isArray(studentAnswer) ? studentAnswer : [studentAnswer]);
+                        const correctSet = new Set(correctIndices);
+                        isCorrect = studentSet.size === correctSet.size && Array.from(studentSet).every((a: number) => correctSet.has(a));
+                      } else {
+                        isCorrect = studentAnswer === correctAnswer;
+                      }
 
-                        // Resolve correct option index for MCQ display
-                        let correctOptionIndex: number | number[] | null = null;
-                        if (!isFillBlank) {
-                          if (typeof correctAnswer === 'string' && question.options) {
-                            correctOptionIndex = question.options.indexOf(correctAnswer);
-                          } else if (Array.isArray(correctAnswer)) {
-                            if (typeof correctAnswer[0] === 'string' && question.options) {
-                              correctOptionIndex = correctAnswer.map((a: string) => question.options.indexOf(a));
-                            } else {
-                              correctOptionIndex = correctAnswer;
-                            }
+                      let correctOptionIndex: number | number[] | null = null;
+                      if (!isFillBlank) {
+                        if (typeof correctAnswer === 'string' && question.options) {
+                          correctOptionIndex = question.options.indexOf(correctAnswer);
+                        } else if (Array.isArray(correctAnswer)) {
+                          if (typeof correctAnswer[0] === 'string' && question.options) {
+                            correctOptionIndex = correctAnswer.map((a: string) => question.options.indexOf(a));
                           } else {
                             correctOptionIndex = correctAnswer;
                           }
+                        } else {
+                          correctOptionIndex = correctAnswer;
                         }
+                      }
 
-                        return (
-                          <div key={index} className={`border-2 rounded-lg p-5 ${isCorrect ? 'border-green-300 bg-green-50' : 'border-red-300 bg-red-50'}`}>
-                            <div className="flex items-start justify-between mb-3">
-                              <div className="flex items-start gap-2">
-                                <span className={`text-lg ${isCorrect ? 'text-green-600' : 'text-red-600'}`}>
-                                  {isCorrect ? '✓' : '✗'}
-                                </span>
-                                <span className="font-semibold text-slate-700">Q{index + 1}: {question.question || question.text}</span>
-                              </div>
-                              <span className={`text-sm font-bold px-2 py-1 rounded ${isCorrect ? 'bg-green-200 text-green-800' : 'bg-red-200 text-red-800'}`}>
-                                {isCorrect ? marks : 0}/{marks}
+                      return (
+                        <div key={index} className="bg-white border border-gray-200 rounded-xl p-6 relative shadow-sm hover:border-gray-300 transition-colors">
+                          <div className={`absolute top-0 left-0 w-1.5 h-full rounded-l-xl ${isCorrect ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                          
+                          <div className="flex items-start justify-between gap-4 mb-6 pl-2">
+                            <div className="flex gap-4">
+                              <span className="flex-shrink-0 w-8 h-8 bg-gray-100 text-gray-700 rounded-lg flex items-center justify-center font-bold text-sm border border-gray-200">
+                                {index + 1}
                               </span>
+                              <p className="text-gray-900 font-medium pt-1 text-base leading-relaxed">{question.question || question.text}</p>
                             </div>
-                            
-                            {/* Fill-in-blank review */}
+                            <span className="flex-shrink-0 px-2.5 py-1 bg-gray-50 border border-gray-200 rounded text-xs font-bold text-gray-500 tracking-wide uppercase">
+                              {isCorrect ? marks : 0}/{marks} pt
+                            </span>
+                          </div>
+                          
+                          <div className="pl-14">
                             {isFillBlank ? (
-                              <div className="space-y-2 pl-6">
-                                <div className={`flex items-center gap-3 p-3 border rounded ${isCorrect ? 'border-green-400 bg-green-100' : 'border-red-400 bg-red-100'}`}>
-                                  <span className={`font-bold text-sm ${isCorrect ? 'text-green-600' : 'text-red-600'}`}>
-                                    {isCorrect ? '✓' : '✗'}
+                              <div className="space-y-3">
+                                <div className={`flex items-center gap-3.5 p-4 border rounded-lg ${isCorrect ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+                                  <span className={`flex-shrink-0 w-5 h-5 rounded flex items-center justify-center text-white ${isCorrect ? 'bg-green-500' : 'bg-red-500'}`}>
+                                    {isCorrect ? <CheckCircle className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
                                   </span>
-                                  <span className="text-slate-700">Your answer: <strong>{String(studentAnswer || '(empty)')}</strong></span>
+                                  <span className="text-gray-700 text-sm font-medium">Your answer: <strong className="text-gray-900 ml-1">{String(studentAnswer || '(empty)')}</strong></span>
                                 </div>
                                 {!isCorrect && (
-                                  <div className="flex items-center gap-3 p-3 border rounded border-green-400 bg-green-50">
-                                    <span className="text-green-600 font-bold text-sm">✓</span>
-                                    <span className="text-slate-700">Correct answer: <strong>{String(correctAnswer)}</strong></span>
+                                  <div className="flex items-center gap-3.5 p-4 border border-green-200 bg-green-50 rounded-lg mt-3">
+                                    <span className="flex-shrink-0 w-5 h-5 rounded bg-green-500 flex items-center justify-center text-white">
+                                      <CheckCircle className="w-3.5 h-3.5" />
+                                    </span>
+                                    <span className="text-gray-700 text-sm font-medium">Correct answer: <strong className="text-green-800 ml-1">{String(correctAnswer)}</strong></span>
                                   </div>
                                 )}
                               </div>
                             ) : (
-                              /* MCQ Options with highlighting */
-                              <div className="space-y-2 pl-6">
+                              <div className="space-y-3">
                                 {question.options?.map((option: string, optIdx: number) => {
                                   const isStudentPick = Array.isArray(studentAnswer) ? studentAnswer.includes(optIdx) : studentAnswer === optIdx;
                                   const isCorrectOption = Array.isArray(correctOptionIndex) 
                                     ? correctOptionIndex.includes(optIdx) 
                                     : correctOptionIndex === optIdx;
                                   
-                                  let optionClass = 'border-gray-200 bg-white';
-                                  if (isCorrectOption && isStudentPick) optionClass = 'border-green-400 bg-green-100';
-                                  else if (isCorrectOption) optionClass = 'border-green-400 bg-green-50';
-                                  else if (isStudentPick) optionClass = 'border-red-400 bg-red-100';
-                                  
                                   return (
-                                    <div key={optIdx} className={`flex items-center gap-3 p-3 border rounded ${optionClass}`}>
-                                      {isCorrectOption && <span className="text-green-600 font-bold text-sm">✓</span>}
-                                      {isStudentPick && !isCorrectOption && <span className="text-red-600 font-bold text-sm">✗</span>}
-                                      {!isCorrectOption && !isStudentPick && <span className="text-gray-400 text-sm">○</span>}
-                                      <span className="text-slate-700">{option}</span>
-                                      {isStudentPick && <span className="text-xs text-slate-500 ml-auto">(Your answer)</span>}
-                                      {isCorrectOption && !isStudentPick && <span className="text-xs text-green-600 ml-auto">(Correct answer)</span>}
+                                    <div key={optIdx} className={`flex items-center gap-3 p-3.5 border rounded-lg transition-all ${
+                                      isCorrectOption && isStudentPick ? 'border-green-500 bg-green-50 text-green-900 shadow-sm' 
+                                      : isCorrectOption ? 'border-green-500 bg-white text-green-900 shadow-sm'
+                                      : isStudentPick ? 'border-red-300 bg-red-50 text-red-900'
+                                      : 'border-gray-200 bg-white text-gray-700 opacity-60'
+                                    }`}>
+                                      <div className="flex items-center justify-center flex-shrink-0 w-5 h-5">
+                                        {isCorrectOption ? (
+                                          <CheckCircle className="w-5 h-5 text-green-500" />
+                                        ) : isStudentPick ? (
+                                          <XCircle className="w-5 h-5 text-red-500" />
+                                        ) : (
+                                          <div className="w-4 h-4 border-2 border-gray-300 rounded-full"></div>
+                                        )}
+                                      </div>
+                                      <span className="text-sm font-medium flex-1">{option}</span>
+                                      {isStudentPick && <span className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-auto whitespace-nowrap pl-2">(Your answer)</span>}
+                                      {isCorrectOption && !isStudentPick && <span className="text-xs font-bold text-green-600 uppercase tracking-wider ml-auto whitespace-nowrap pl-2">(Correct answer)</span>}
                                     </div>
                                   );
                                 })}
                               </div>
                             )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </>
+                        </div>
+                      );
+                    })}
+                  </div>
                 ) : (
-                  /* Deadline not passed - don't reveal answers */
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
-                    <div className="text-4xl mb-3">📝</div>
-                    <h3 className="text-lg font-bold text-blue-800 mb-2">Submission Recorded</h3>
-                    <p className="text-sm text-blue-700">
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-8 text-center mt-6">
+                    <div className="inline-flex items-center justify-center w-12 h-12 bg-white border border-gray-200 rounded-full mb-4 shadow-sm">
+                      <FileText className="w-5 h-5 text-gray-400" />
+                    </div>
+                    <h3 className="text-lg font-bold text-gray-900 mb-2">Submission Recorded</h3>
+                    <p className="text-sm text-gray-600 max-w-md mx-auto">
                       Your answers have been saved. The correct answers and your score will be revealed after the quiz deadline passes.
                     </p>
                     {quizReview.deadline && (
-                      <p className="text-xs text-blue-600 mt-3">
+                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mt-4">
                         Deadline: {new Date(quizReview.deadline).toLocaleString('en-IN', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          timeZone: 'Asia/Kolkata'
+                          year: 'numeric', month: 'long', day: 'numeric',
+                          hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata'
                         })} IST
                       </p>
                     )}
@@ -3218,15 +3296,15 @@ export default function LearnPage() {
 
                 {/* Retake button if allowed */}
                 {quizData && quizData.can_submit && !quizData.deadline_passed && (
-                  <div className="mt-6 pt-4 border-t">
+                  <div className="mt-10 pt-6 border-t border-gray-200 flex justify-end">
                     <button
                       onClick={() => {
                         setQuizReview(null);
                         setQuizAnswers({});
                       }}
-                      className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                      className="px-6 py-2.5 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 hover:text-gray-900 font-medium text-sm transition-colors shadow-sm"
                     >
-                      Retake Quiz
+                      Retake Assessment
                     </button>
                   </div>
                 )}
@@ -3235,57 +3313,97 @@ export default function LearnPage() {
 
             {/* Final Exam View - separate from week modules */}
             {leftSidebarTab === 'content' && activeFinalExam && !activeLesson && !showAbout && !showGradingPolicy && !showSchedule && (
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 md:p-8">
-                <div className="flex items-start gap-3 mb-6 pb-6 border-b border-slate-200">
-                  <div className="w-12 h-12 bg-gradient-to-br from-orange-100 to-amber-100 rounded-xl flex items-center justify-center">
-                    <FileQuestion className="w-6 h-6 text-orange-600" />
+              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 md:p-10">
+                {/* Final Exam Header */}
+                <div className="flex items-start gap-4 mb-8 pb-8 border-b border-gray-200">
+                  <div className="w-14 h-14 bg-gradient-to-br from-amber-100 to-orange-100 rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
+                    <Scroll className="w-7 h-7 text-amber-700" />
                   </div>
-                  <div className="flex-1">
-                    <h2 className="text-xl font-bold text-slate-900">{activeFinalExam.title}</h2>
-                    <p className="text-sm text-slate-500 font-medium">Final Exam • {activeFinalExam.exam_type?.toUpperCase()}</p>
+                  <div className="flex-1 min-w-0">
+                    <h2 className="text-3xl font-bold text-gray-900 leading-tight">Final Exam</h2>
+                    <p className="text-sm text-gray-500 mt-2 font-medium">{activeFinalExam.title} • {activeFinalExam.exam_type?.toUpperCase()}</p>
                   </div>
                 </div>
 
-                {activeFinalExam.description && (
-                  <p className="text-slate-700 mb-4">{activeFinalExam.description}</p>
-                )}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                  <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                    <p className="text-xs text-orange-600 font-semibold mb-1">Total Marks</p>
-                    <p className="text-lg font-bold text-orange-700">{activeFinalExam.points ?? '--'}</p>
+                {/* Exam Meta Info */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <p className="text-xs text-amber-700 font-bold uppercase tracking-wider mb-1">Total Marks</p>
+                    <p className="text-3xl font-bold text-amber-800">{activeFinalExam.points ?? '--'}</p>
                   </div>
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <p className="text-xs text-blue-600 font-semibold mb-1">Due Date</p>
-                    <p className="text-lg font-bold text-blue-700">{activeFinalExam.due_date ? new Date(activeFinalExam.due_date).toLocaleString() : 'Not set'}</p>
+                    <p className="text-xs text-blue-700 font-bold uppercase tracking-wider mb-1">Due Date</p>
+                    <p className="text-lg font-bold text-blue-800">
+                      {activeFinalExam.due_date 
+                        ? new Date(activeFinalExam.due_date).toLocaleString('en-IN', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            timeZone: 'Asia/Kolkata'
+                          }) + ' IST'
+                        : 'Not set'}
+                    </p>
                   </div>
                 </div>
 
-                {activeFinalExam.instructions && (
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6">
-                    <h3 className="text-sm font-semibold text-slate-800 mb-2">Instructions</h3>
-                    <p className="text-sm text-slate-600 whitespace-pre-wrap">{activeFinalExam.instructions}</p>
+                {/* Description */}
+                {activeFinalExam.description && (
+                  <div className="mb-8 pb-8 border-b border-gray-200">
+                    <h3 className="text-base font-bold text-gray-900 mb-3">Overview</h3>
+                    <p className="text-gray-700 leading-relaxed">{activeFinalExam.description}</p>
                   </div>
                 )}
 
+                {/* Instructions */}
+                {activeFinalExam.instructions && (
+                  <div className="mb-8 pb-8 border-b border-gray-200">
+                    <h3 className="text-base font-bold text-gray-900 mb-3">Instructions</h3>
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-5">
+                      <ul className="text-sm text-gray-700 space-y-3">
+                        {activeFinalExam.instructions.split('\n').filter((line: string) => line.trim()).map((instruction: string, idx: number) => (
+                          <li key={idx} className="flex gap-3">
+                            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-amber-200 text-amber-700 flex items-center justify-center text-xs font-bold">{idx + 1}</span>
+                            <span className="pt-0.5">{instruction.trim()}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+
+
+
+                {/* Interview Schedule - if applicable */}
                 {activeFinalExam.exam_type === 'interview' && activeFinalExam.interview && (
-                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
-                    <h3 className="text-sm font-semibold text-indigo-900 mb-2">Interview Schedule</h3>
-                    <p className="text-sm text-indigo-700">
-                      {activeFinalExam.interview.scheduled_date
-                        ? `Scheduled: ${new Date(activeFinalExam.interview.scheduled_date).toLocaleString()}`
-                        : 'Interview time will be announced by your teacher.'}
-                    </p>
-                    {activeFinalExam.interview.duration_minutes && (
-                      <p className="text-xs text-indigo-600 mt-1">Duration: {activeFinalExam.interview.duration_minutes} minutes</p>
-                    )}
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-6 mb-8">
+                    <h3 className="text-base font-bold text-indigo-900 mb-3">Interview Schedule</h3>
+                    <div className="space-y-2 text-sm text-indigo-800">
+                      <p>
+                        {activeFinalExam.interview.scheduled_date
+                          ? `📅 Scheduled: ${new Date(activeFinalExam.interview.scheduled_date).toLocaleString('en-IN', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              timeZone: 'Asia/Kolkata'
+                            })} IST`
+                          : '⏳ Interview time will be announced by your teacher.'}
+                      </p>
+                      {activeFinalExam.interview.duration_minutes && (
+                        <p>⏱️ Duration: {activeFinalExam.interview.duration_minutes} minutes</p>
+                      )}
+                    </div>
                     {activeFinalExam.interview.meeting_link && (
                       <a
                         href={activeFinalExam.interview.meeting_link}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center mt-3 px-3 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
+                        className="inline-flex items-center mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm"
                       >
+                        <Calendar className="w-4 h-4 mr-2" />
                         Join Interview Meeting
                       </a>
                     )}

@@ -5,7 +5,7 @@
  */
 
 import { Router } from 'express';
-import { requireAuth } from '../middleware/clerkAuth';
+import { requireAuth, requireRole } from '../middleware/clerkAuth';
 import * as meetingController from '../modules/shared/controllers/meetingController';
 
 const router = Router();
@@ -15,10 +15,10 @@ const router = Router();
 // ============================================
 
 // Create meeting request (Student)
-router.post('/meetings/requests', requireAuth, meetingController.createMeetingRequest);
+router.post('/meetings/requests', requireAuth, requireRole(['student']), meetingController.createMeetingRequest);
 
 // Create free meeting booking directly (Student)
-router.post('/meetings/bookings/free', requireAuth, meetingController.createFreeBooking);
+router.post('/meetings/bookings/free', requireAuth, requireRole(['student']), meetingController.createFreeBooking);
 
 // Get meeting requests
 router.get('/meetings/requests', requireAuth, meetingController.getMeetingRequests);
@@ -38,25 +38,25 @@ router.get('/meetings', requireAuth, meetingController.getScheduledMeetings);
 // ============================================
 
 // Student's upcoming meetings
-router.get('/meetings/student/upcoming', requireAuth, meetingController.getStudentUpcomingMeetings);
+router.get('/meetings/student/upcoming', requireAuth, requireRole(['student']), meetingController.getStudentUpcomingMeetings);
 
 // Teacher's upcoming meetings
-router.get('/meetings/teacher/upcoming', requireAuth, meetingController.getTeacherUpcomingMeetings);
+router.get('/meetings/teacher/upcoming', requireAuth, requireRole(['teacher']), meetingController.getTeacherUpcomingMeetings);
 
 // Teacher's assigned meetings
-router.get('/meetings/teacher/assigned', requireAuth, meetingController.getTeacherAssignedMeetings);
+router.get('/meetings/teacher/assigned', requireAuth, requireRole(['teacher']), meetingController.getTeacherAssignedMeetings);
 
 // Admin - pending meetings
-router.get('/meetings/admin/pending', requireAuth, meetingController.getPendingMeetingsForAdmin);
+router.get('/meetings/admin/pending', requireAuth, requireRole(['admin']), meetingController.getPendingMeetingsForAdmin);
 
 // Admin - approve meeting booking
-router.post('/meetings/admin/:id/approve', requireAuth, meetingController.approveMeetingBooking);
+router.post('/meetings/admin/:id/approve', requireAuth, requireRole(['admin']), meetingController.approveMeetingBooking);
 
 // Admin - reject meeting booking
-router.post('/meetings/admin/:id/reject', requireAuth, meetingController.rejectMeetingBooking);
+router.post('/meetings/admin/:id/reject', requireAuth, requireRole(['admin']), meetingController.rejectMeetingBooking);
 
 // Admin - all meetings
-router.get('/meetings/all', requireAuth, meetingController.getAllMeetings);
+router.get('/meetings/all', requireAuth, requireRole(['admin']), meetingController.getAllMeetings);
 
 // ============================================
 // SINGLE MEETING OPERATIONS (/:id routes)
@@ -66,22 +66,22 @@ router.get('/meetings/all', requireAuth, meetingController.getAllMeetings);
 router.get('/meetings/:id', requireAuth, meetingController.getScheduledMeetingById);
 
 // Assign teacher to meeting (Admin only)
-router.post('/meetings/:id/assign-teacher', requireAuth, meetingController.assignTeacherToMeeting);
+router.post('/meetings/:id/assign-teacher', requireAuth, requireRole(['admin']), meetingController.assignTeacherToMeeting);
 
-// Update meeting status
-router.put('/meetings/:id/status', requireAuth, meetingController.updateMeetingStatus);
+// Update meeting status (admin, or the teacher assigned to the meeting)
+router.put('/meetings/:id/status', requireAuth, requireRole(['admin', 'teacher']), meetingController.updateMeetingStatus);
 
-// Update meeting attendance (Teacher only)
-router.put('/meetings/:id/attendance', requireAuth, meetingController.updateAttendance);
+// Update meeting attendance (assigned teacher or admin)
+router.put('/meetings/:id/attendance', requireAuth, requireRole(['admin', 'teacher']), meetingController.updateAttendance);
 
-// Update meeting notes link (Teacher only)
-router.put('/meetings/:id/notes', requireAuth, meetingController.updateNotesLink);
+// Update meeting notes link (assigned teacher or admin)
+router.put('/meetings/:id/notes', requireAuth, requireRole(['admin', 'teacher']), meetingController.updateNotesLink);
 
-// Update meeting resource link (Teacher only)
-router.put('/meetings/:id/resource', requireAuth, meetingController.updateResourceLink);
+// Update meeting resource link (assigned teacher or admin)
+router.put('/meetings/:id/resource', requireAuth, requireRole(['admin', 'teacher']), meetingController.updateResourceLink);
 
-// Update meeting resources list (Teacher only)
-router.put('/meetings/:id/resources', requireAuth, meetingController.updateResources);
+// Update meeting resources list (assigned teacher or admin)
+router.put('/meetings/:id/resources', requireAuth, requireRole(['admin', 'teacher']), meetingController.updateResources);
 
 // Reschedule meeting
 router.put('/meetings/:id/reschedule', requireAuth, meetingController.rescheduleMeeting);

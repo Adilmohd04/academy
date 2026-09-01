@@ -10,6 +10,39 @@
 
 import { Request, Response } from 'express';
 import * as gradeDashboardService from '../../shared/services/gradeDashboardService';
+import { supabase } from '../../../config/database';
+
+const ensureTeacherCanAccessCourse = async (teacherClerkUserId: string, courseId: string) => {
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('clerk_user_id', teacherClerkUserId)
+    .single();
+
+  if (profileError || !profile?.id) {
+    return false;
+  }
+
+  const { data: ownedCourse } = await supabase
+    .from('courses')
+    .select('id')
+    .eq('id', courseId)
+    .eq('teacher_id', profile.id)
+    .maybeSingle();
+
+  if (ownedCourse?.id) {
+    return true;
+  }
+
+  const { data: coTeaching } = await supabase
+    .from('course_teachers')
+    .select('course_id')
+    .eq('course_id', courseId)
+    .eq('teacher_id', profile.id)
+    .maybeSingle();
+
+  return !!coTeaching?.course_id;
+};
 
 /**
  * Get complete gradebook for a course
@@ -27,7 +60,13 @@ export const getCourseGradebook = async (req: Request, res: Response) => {
       });
     }
     
-    // TODO: Verify teacher owns this course (enrollment check)
+    const hasAccess = await ensureTeacherCanAccessCourse(teacherId, courseId);
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to access gradebook for this course',
+      });
+    }
     
     const gradebook = await gradeDashboardService.getCourseGradebook(courseId);
     
@@ -60,7 +99,13 @@ export const getStudentGradeDetail = async (req: Request, res: Response) => {
       });
     }
     
-    // TODO: Verify teacher owns this course
+    const hasAccess = await ensureTeacherCanAccessCourse(teacherId, courseId);
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to access grades for this course',
+      });
+    }
     
     const grade = await gradeDashboardService.calculateStudentGrade(courseId, studentId);
     
@@ -93,7 +138,13 @@ export const exportGradebook = async (req: Request, res: Response) => {
       });
     }
     
-    // TODO: Verify teacher owns this course
+    const hasAccess = await ensureTeacherCanAccessCourse(teacherId, courseId);
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        error: 'Not authorized to export gradebook for this course',
+      });
+    }
     
     const gradebook = await gradeDashboardService.getCourseGradebook(courseId);
     const csv = gradeDashboardService.exportGradebookToCSV(gradebook);

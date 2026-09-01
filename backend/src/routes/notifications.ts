@@ -6,8 +6,14 @@ import {
   sendWeeklyDigest 
 } from '../services/emailNotifications';
 import { query } from '../config/database';
+import { requireAuth, requireRole } from '../middleware/clerkAuth';
 
 const router = Router();
+
+// These endpoints can send email and return enrolled learners' email
+// addresses. They are operational tooling, never browser-public APIs.
+// Notification Center self-service lives on /api/notification-center.
+router.use(requireAuth, requireRole(['admin']));
 
 /**
  * POST /api/notifications/class-reminder
@@ -37,7 +43,9 @@ router.post('/class-reminder', async (req: Request, res: Response) => {
         results.sent++;
       } catch (error: any) {
         results.failed++;
-        results.errors.push(`Failed for ${student.studentEmail}: ${error.message}`);
+        // Avoid reflecting a learner's email address in an API response or
+        // application log. The caller only needs the aggregate result.
+        results.errors.push('Failed to send one reminder');
       }
     }
 
@@ -85,7 +93,7 @@ router.post('/class-starting-soon', async (req: Request, res: Response) => {
         results.sent++;
       } catch (error: any) {
         results.failed++;
-        results.errors.push(`Failed for ${student.studentEmail}: ${error.message}`);
+        results.errors.push('Failed to send one alert');
       }
     }
 
@@ -137,7 +145,7 @@ router.post('/weekly-digest', async (req: Request, res: Response) => {
         results.sent++;
       } catch (error: any) {
         results.failed++;
-        results.errors.push(`Failed for ${student.studentEmail}: ${error.message}`);
+        results.errors.push('Failed to send one digest');
       }
     }
 

@@ -2,8 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
+import { useAuth } from '@clerk/nextjs';
 import { Download, CheckCircle, XCircle, Clock, FileText, User, Upload, Save } from 'lucide-react';
 import IslamicLoader from '@/components/shared/IslamicLoader';
+
+const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 interface Submission {
   id: string;
@@ -29,6 +32,7 @@ interface Assignment {
 
 export default function GradeAssignmentsPage() {
   const params = useParams();
+  const { getToken } = useAuth();
   const assignmentId = params.assignmentId as string;
 
   const [assignment, setAssignment] = useState<Assignment | null>(null);
@@ -44,6 +48,15 @@ export default function GradeAssignmentsPage() {
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [bulkGrades, setBulkGrades] = useState<{ [key: string]: { score: number; feedback: string } }>({});
 
+  const getAuthHeaders = async (includeJson = false) => {
+    const token = await getToken();
+    if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
+    return {
+      ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
+      Authorization: `Bearer ${token}`,
+    };
+  };
+
   useEffect(() => {
     fetchSubmissions();
   }, [assignmentId]);
@@ -51,11 +64,9 @@ export default function GradeAssignmentsPage() {
   const fetchSubmissions = async () => {
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/assignments/${assignmentId}/submissions`,
+        `${API}/api/assignments/${assignmentId}/submissions`,
         {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
+          headers: await getAuthHeaders()
         }
       );
 
@@ -99,13 +110,10 @@ export default function GradeAssignmentsPage() {
 
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/submissions/${selectedSubmission.id}/grade`,
+        `${API}/api/submissions/${selectedSubmission.id}/grade`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json'
-          },
+          headers: await getAuthHeaders(true),
           body: JSON.stringify({ score, feedback, status: gradeStatus })
         }
       );
@@ -143,13 +151,10 @@ export default function GradeAssignmentsPage() {
       }));
 
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/assignments/bulk-grade`,
+        `${API}/api/assignments/bulk-grade`,
         {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json'
-          },
+          headers: await getAuthHeaders(true),
           body: JSON.stringify({ grades: gradesToSave })
         }
       );
@@ -170,11 +175,9 @@ export default function GradeAssignmentsPage() {
   const handleExportCSV = async () => {
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/assignments/${assignmentId}/export`,
+        `${API}/api/assignments/${assignmentId}/export`,
         {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
+          headers: await getAuthHeaders()
         }
       );
 

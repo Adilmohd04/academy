@@ -95,18 +95,18 @@ Edit `c:\Users\sadil\Desktop\acad\.env`:
 
 **Comment out Supabase (add # at the start):**
 ```env
-# DATABASE_URL=postgresql://postgres:Adil0004@db.ufmxviifrjubkhpywcpo.supabase.co:5432/postgres
+# DATABASE_URL=postgresql://postgres:<your-db-password>@db.<project-ref>.supabase.co:5432/postgres
 # DB_HOST=db.ufmxviifrjubkhpywcpo.supabase.co
 ```
 
 **Uncomment local PostgreSQL:**
 ```env
-DATABASE_URL=postgresql://postgres:Adil0004@localhost:5432/academy
+DATABASE_URL=postgresql://postgres:<your-local-password>@localhost:5432/academy
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=academy
 DB_USER=postgres
-DB_PASSWORD=Adil0004
+DB_PASSWORD=<your-local-password>
 ```
 
 #### **Step 5: Restart backend**

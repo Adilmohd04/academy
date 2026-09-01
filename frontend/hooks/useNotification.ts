@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { NotificationType } from '@/components/shared/StunningNotification';
+
+type NotificationType = 'success' | 'error' | 'warning' | 'info';
 
 interface Notification {
   type: NotificationType;

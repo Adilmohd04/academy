@@ -1,29 +1,16 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { auth } from '@clerk/nextjs/server';
+
 export const dynamic = 'force-dynamic';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = getSupabaseAdminClient();
 
 export async function POST(request: NextRequest) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Verify admin role
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role, id')
-      .eq('clerk_user_id', userId)
-      .single();
-
-    if (!profile || profile.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
     }
 
     const body = await request.json();
@@ -33,20 +20,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Title and content are required' }, { status: 400 });
     }
 
-    const { data, error } = await supabase
-      .from('announcements')
+    const { data, error } = await ((supabase.from('announcements') as any)
       .insert([
-        { 
-          title, 
-          content, 
+        {
+          title,
+          content,
           link,
           link_text,
-          created_by: profile.id,
-          is_active: true 
-        }
+          created_by: authorization.actor.profileId,
+          is_active: true,
+        },
       ])
       .select()
-      .single();
+      .single());
 
     if (error) {
       console.error('Error creating announcement:', error);
@@ -62,20 +48,9 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    const { userId } = await auth();
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Verify admin role
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('clerk_user_id', userId)
-      .single();
-
-    if (!profile || profile.role !== 'admin') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
     }
 
     const { searchParams } = new URL(request.url);

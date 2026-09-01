@@ -5,7 +5,7 @@
  */
 
 import { Router } from 'express';
-import { requireAuth } from '../middleware/clerkAuth';
+import { requireAuth, requireRole } from '../middleware/clerkAuth';
 import * as timeSlotController from '../modules/admin/controllers/timeSlotController';
 
 const router = Router();
@@ -33,41 +33,41 @@ router.get('/time-slots/check-availability', timeSlotController.checkTimeSlotAva
 router.get('/time-slots/:id', timeSlotController.getTimeSlotById);
 
 // Create time slot (Admin only)
-router.post('/time-slots', requireAuth, timeSlotController.createTimeSlot);
+router.post('/time-slots', requireAuth, requireRole(['admin']), timeSlotController.createTimeSlot);
 
 // Update time slot (Admin only)
-router.put('/time-slots/:id', requireAuth, timeSlotController.updateTimeSlot);
+router.put('/time-slots/:id', requireAuth, requireRole(['admin']), timeSlotController.updateTimeSlot);
 
 // Delete time slot (Admin only)
-router.delete('/time-slots/:id', requireAuth, timeSlotController.deleteTimeSlot);
+router.delete('/time-slots/:id', requireAuth, requireRole(['admin']), timeSlotController.deleteTimeSlot);
 
 // Toggle time slot status (Admin only)
-router.put('/time-slots/:id/toggle', requireAuth, timeSlotController.toggleTimeSlotStatus);
+router.put('/time-slots/:id/toggle', requireAuth, requireRole(['admin']), timeSlotController.toggleTimeSlotStatus);
 
 // ============================================
 // BLOCKED DATES (Admin only)
 // ============================================
 
 // Get all blocked dates
-router.get('/blocked-dates', requireAuth, timeSlotController.getAllBlockedDates);
+router.get('/blocked-dates', requireAuth, requireRole(['admin']), timeSlotController.getAllBlockedDates);
 
 // Create blocked date
-router.post('/blocked-dates', requireAuth, timeSlotController.createBlockedDate);
+router.post('/blocked-dates', requireAuth, requireRole(['admin']), timeSlotController.createBlockedDate);
 
 // Delete blocked date
-router.delete('/blocked-dates/:id', requireAuth, timeSlotController.deleteBlockedDate);
+router.delete('/blocked-dates/:id', requireAuth, requireRole(['admin']), timeSlotController.deleteBlockedDate);
 
 // ============================================
 // BLOCKED TIME SLOTS (Admin only)
 // ============================================
 
 // Get all blocked time slots
-router.get('/blocked-time-slots', requireAuth, timeSlotController.getAllBlockedTimeSlots);
+router.get('/blocked-time-slots', requireAuth, requireRole(['admin']), timeSlotController.getAllBlockedTimeSlots);
 
 // Create blocked time slot
-router.post('/blocked-time-slots', requireAuth, timeSlotController.createBlockedTimeSlot);
+router.post('/blocked-time-slots', requireAuth, requireRole(['admin']), timeSlotController.createBlockedTimeSlot);
 
 // Delete blocked time slot
-router.delete('/blocked-time-slots/:id', requireAuth, timeSlotController.deleteBlockedTimeSlot);
+router.delete('/blocked-time-slots/:id', requireAuth, requireRole(['admin']), timeSlotController.deleteBlockedTimeSlot);
 
 export default router;

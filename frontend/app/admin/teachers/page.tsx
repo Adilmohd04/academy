@@ -4,6 +4,7 @@ import { useAuth } from '@clerk/nextjs';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import IslamicLoader from '@/components/shared/IslamicLoader';
+import { api } from '@/lib/api';
 import {
   ArrowLeft, Search, Loader2, User, Mail, DollarSign,
   Calendar, Clock, BookOpen, Users, ChevronLeft, ChevronRight
@@ -52,6 +53,33 @@ export default function TeacherManagementPage() {
   const [editingSlot, setEditingSlot] = useState<string | null>(null);
   const [slotPriceValue, setSlotPriceValue] = useState<number>(0);
 
+  const dedupeTeachers = (list: Teacher[]): Teacher[] => {
+    const seen = new Map<string, Teacher>();
+
+    for (const teacher of list || []) {
+      const emailKey = (teacher.email || '').trim().toLowerCase();
+      const clerkKey = (teacher.clerk_user_id || '').trim();
+      const idKey = (teacher.id || '').trim();
+      const key = emailKey || clerkKey || idKey;
+
+      if (!key) continue;
+
+      if (!seen.has(key)) {
+        seen.set(key, teacher);
+        continue;
+      }
+
+      const existing = seen.get(key)!;
+      const existingScore = Number(Boolean(existing.full_name)) + Number(Boolean(existing.email)) + Number(Boolean(existing.teacher_price)) + Number(Boolean(existing.is_free));
+      const currentScore = Number(Boolean(teacher.full_name)) + Number(Boolean(teacher.email)) + Number(Boolean(teacher.teacher_price)) + Number(Boolean(teacher.is_free));
+      if (currentScore >= existingScore) {
+        seen.set(key, teacher);
+      }
+    }
+
+    return Array.from(seen.values());
+  };
+
   useEffect(() => {
     fetchTeachers();
   }, []);
@@ -78,12 +106,18 @@ export default function TeacherManagementPage() {
   const fetchTeachers = async () => {
     try {
       const token = await getToken();
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-      const response = await fetch(`${apiUrl}/api/admin/teachers`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json();
-      setTeachers(data.teachers || data || []);
+      const response = await api.admin.getTeachers(token);
+      const data = response.data;
+      const incoming = Array.isArray(data?.teachers) ? data.teachers : (Array.isArray(data) ? data : []);
+      const uniqueTeachers = dedupeTeachers(incoming);
+      setTeachers(uniqueTeachers);
+
+      if (selectedTeacher) {
+        const selectedKey = selectedTeacher.clerk_user_id || selectedTeacher.email || selectedTeacher.id;
+        const refreshed = uniqueTeachers.find((t) => (t.clerk_user_id || t.email || t.id) === selectedKey) || null;
+        setSelectedTeacher(refreshed);
+      }
+
       setLoading(false);
     } catch (error) {
       console.error('Error fetching teachers:', error);
@@ -122,13 +156,8 @@ export default function TeacherManagementPage() {
       // Use clerk_user_id instead of database id for API call
       const teacherIdentifier = selectedTeacher?.clerk_user_id || teacherId;
 
-      const response = await fetch(
-        `/api/admin/teacher-slots?teacher_id=${teacherIdentifier}&start_date=${startDate}&end_date=${endDate}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      const data = await response.json();
+      const response = await api.admin.getTeacherSlotsByRange(teacherIdentifier, startDate, endDate, token);
+      const data = response.data;
       console.log('📊 Received slots:', data);
       setSlots(data || []);
     } catch (error) {
@@ -141,20 +170,9 @@ export default function TeacherManagementPage() {
 
     try {
       const token = await getToken();
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-      const response = await fetch(`${apiUrl}/api/admin/teacher-price`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          clerk_user_id: selectedTeacher.clerk_user_id,
-          price: priceValue,
-        }),
-      });
+      const response = await api.admin.updateTeacherPrice(selectedTeacher.clerk_user_id, priceValue, token);
 
-      if (response.ok) {
+      if (response.status >= 200 && response.status < 300) {
         // Update local state
         const updatedTeachers = teachers.map(t =>
           t.id === selectedTeacher.id ? { ...t, teacher_price: priceValue, hourly_price: priceValue } : t
@@ -184,23 +202,11 @@ export default function TeacherManagementPage() {
         new_is_free: newIsFree
       });
       
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
-      const response = await fetch(`${apiUrl}/api/admin/teacher-free`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          teacher_id: selectedTeacher.clerk_user_id,
-          is_free: newIsFree,
-        }),
-      });
-
-      const result = await response.json();
+      const response = await api.admin.updateTeacherFreeStatus(selectedTeacher.clerk_user_id, newIsFree, token);
+      const result = response.data;
       console.log('📝 API Response:', result);
 
-      if (response.ok) {
+      if (response.status >= 200 && response.status < 300) {
         console.log('✅ Successfully toggled, refreshing teachers list...');
         
         // Refresh the entire teachers list from backend to get updated data
@@ -230,26 +236,19 @@ export default function TeacherManagementPage() {
       const token = await getToken();
       const newIsFree = !currentIsFree;
       
-      const response = await fetch('/api/admin/slot-pricing', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          slot_id: slotId,
-          is_free: newIsFree,
-        }),
-      });
+      const response = await api.admin.updateSlotPricing({
+        slot_id: slotId,
+        is_free: newIsFree,
+      }, token);
 
-      if (response.ok) {
+      if (response.status >= 200 && response.status < 300) {
         // Update slots locally
         setSlots(slots.map(s =>
           s.id === slotId ? { ...s, is_free: newIsFree } : s
         ));
         alert(`✓ Slot updated to ${newIsFree ? 'FREE' : 'PAID'} successfully!`);
       } else {
-        const result = await response.json();
+        const result = response.data;
         alert('Failed to update slot: ' + (result.error || 'Unknown error'));
       }
     } catch (error) {
@@ -264,19 +263,12 @@ export default function TeacherManagementPage() {
     try {
       const token = await getToken();
       
-      const response = await fetch('/api/admin/slot-pricing', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          slot_id: slotId,
-          meeting_price: slotPriceValue,
-        }),
-      });
+      const response = await api.admin.updateSlotPricing({
+        slot_id: slotId,
+        meeting_price: slotPriceValue,
+      }, token);
 
-      if (response.ok) {
+      if (response.status >= 200 && response.status < 300) {
         // Update slots locally
         setSlots(slots.map(s =>
           s.id === slotId ? { ...s, meeting_price: slotPriceValue } : s
@@ -284,7 +276,7 @@ export default function TeacherManagementPage() {
         setEditingSlot(null);
         alert(`✓ Slot price updated to ₹${slotPriceValue} successfully!`);
       } else {
-        const result = await response.json();
+        const result = response.data;
         alert('Failed to update price: ' + (result.error || 'Unknown error'));
       }
     } catch (error) {
@@ -322,8 +314,8 @@ export default function TeacherManagementPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 p-4">
-      <div className="max-w-7xl mx-auto">
+    <div className="admin-page-wrap space-y-6">
+      <div>
         {/* Header - Compact */}
         <div className="flex items-center space-x-4 mb-6">
           <Link
@@ -374,11 +366,11 @@ export default function TeacherManagementPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2 flex-1 min-w-0">
                         <div className="h-8 w-8 rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                          {teacher.full_name.charAt(0)}
+                          {(teacher.full_name || teacher.email || '?').charAt(0).toUpperCase()}
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-emerald-900 text-sm truncate">
-                            {teacher.full_name}
+                            {teacher.full_name || 'Unnamed Teacher'}
                           </p>
                           <p className="text-xs text-emerald-600 truncate">
                             {teacher.email}
@@ -416,11 +408,11 @@ export default function TeacherManagementPage() {
                 <div className="bg-white rounded-xl border border-emerald-200 shadow-md p-4">
                   <div className="flex items-center space-x-3 mb-4">
                     <div className="h-12 w-12 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white text-lg font-bold">
-                      {selectedTeacher.full_name.charAt(0)}
+                      {(selectedTeacher.full_name || selectedTeacher.email || '?').charAt(0).toUpperCase()}
                     </div>
                     <div>
                       <h2 className="text-xl font-bold text-emerald-900">
-                        {selectedTeacher.full_name}
+                        {selectedTeacher.full_name || 'Unnamed Teacher'}
                       </h2>
                       <div className="flex items-center space-x-2 text-emerald-600 text-sm">
                         <Mail className="h-4 w-4" />

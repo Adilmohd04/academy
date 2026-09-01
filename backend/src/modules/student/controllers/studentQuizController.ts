@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { supabase } from '../../../config/database';
 import autoGradingService from '../../../services/autoGradingService';
+import * as courseNotifications from '../../../services/courseNotificationService';
 
 /**
  * Student Quiz Controller
@@ -16,7 +17,7 @@ export const getAvailableQuizzes = async (req: any, res: Response) => {
     // Get student profile
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('id')
+      .select('id, full_name, email')
       .eq('clerk_id', userId)
       .single();
 
@@ -94,7 +95,7 @@ export const startQuizAttempt = async (req: any, res: Response) => {
     // Get student profile
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('id')
+      .select('id, full_name, email')
       .eq('clerk_id', userId)
       .single();
 
@@ -199,9 +200,11 @@ export const submitQuizAttempt = async (req: any, res: Response) => {
       .from('quizzes')
       .select(`
         id,
+        title,
         course_id,
         max_attempts,
         courses!inner (
+          title,
           passing_score
         )
       `)
@@ -265,6 +268,33 @@ export const submitQuizAttempt = async (req: any, res: Response) => {
         console.error('Error updating course progress:', progressError);
         // Don't fail the request if progress update fails
       }
+    }
+
+    try {
+      const courseDataForNotification = Array.isArray(quiz.courses) ? quiz.courses[0] : quiz.courses;
+      const studentEmail = (profile as any)?.email;
+      const studentName = (profile as any)?.full_name || 'Student';
+      if (studentEmail) {
+        await courseNotifications.notifyQuizResults(
+          {
+            id: profile.id,
+            email: studentEmail,
+            name: studentName,
+          },
+          {
+            courseId: quiz.course_id,
+            courseTitle: courseDataForNotification?.title || 'Course',
+            quizTitle: quiz.title || 'Quiz',
+            score: gradingResult.score,
+            totalPoints: gradingResult.total_points,
+            percentage: gradingResult.percentage,
+            passed: gradingResult.passed,
+            attemptId: attempt.id,
+          }
+        );
+      }
+    } catch (notifError) {
+      console.error('⚠️ Failed to send quiz result notification:', notifError);
     }
 
     res.json({

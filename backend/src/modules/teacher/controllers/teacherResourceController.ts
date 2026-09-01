@@ -1,40 +1,214 @@
 /**
  * Teacher Resource Management Controller
- * 
- * Handles resource management for teachers:
- * - Upload resources to courses/weeks/lessons
- * - Update and delete resources
- * - View resource statistics
- * - Bulk operations
+ *
+ * Every mutation in this controller is course-scoped.  The backend uses
+ * Clerk's `req.auth` contract (not the legacy `req.user` contract), and a
+ * course can be owned by either a Clerk id or a legacy profile id.  Co-teacher
+ * access is resolved through `course_teachers`.
  */
 
 import { Request, Response } from 'express';
 import * as courseResourceService from '../../shared/services/courseResourceService';
-import pool from '../../../config/database';
+import { supabase } from '../../../config/database';
+
+type ResourcePlacement = {
+  weekId?: string;
+  lessonId?: string;
+};
+
+const resourceTypes = new Set([
+  'pdf',
+  'document',
+  'image',
+  'video',
+  'audio',
+  'link',
+  'other',
+]);
+
+const getActor = (req: Request, res: Response) => {
+  const userId = req.auth?.userId;
+
+  if (!userId) {
+    res.status(401).json({ error: 'Authentication required' });
+    return null;
+  }
+
+  return {
+    userId,
+    role: req.auth?.role || 'student',
+  };
+};
 
 /**
- * Get all resources for a course with hierarchy
+ * Check a teacher/admin against a course without filtering a potentially UUID
+ * `teacher_id` column with a Clerk id.  Some older rows store a profile UUID,
+ * while newer rows can store a Clerk id, so the comparison is deliberately
+ * done after retrieving the course.
+ */
+const authorizeCourse = async (req: Request, res: Response, courseId: string): Promise<boolean> => {
+  const actor = getActor(req, res);
+  if (!actor) return false;
+
+  const { data: course, error: courseError } = await supabase
+    .from('courses')
+    .select('id, teacher_id')
+    .eq('id', courseId)
+    .maybeSingle();
+
+  if (courseError) {
+    console.error('Error resolving resource course:', courseError);
+    res.status(500).json({ error: 'Unable to verify course access' });
+    return false;
+  }
+
+  if (!course) {
+    res.status(404).json({ error: 'Course not found' });
+    return false;
+  }
+
+  if (actor.role === 'admin') {
+    return true;
+  }
+
+  if (course.teacher_id === actor.userId) {
+    return true;
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('clerk_user_id', actor.userId)
+    .maybeSingle();
+
+  if (profileError || !profile) {
+    if (profileError) {
+      console.error('Error resolving teacher profile for resource access:', profileError);
+    }
+    res.status(403).json({ error: 'You do not have access to this course' });
+    return false;
+  }
+
+  if (course.teacher_id === profile.id) {
+    return true;
+  }
+
+  const { data: coTeacher, error: coTeacherError } = await supabase
+    .from('course_teachers')
+    .select('id')
+    .eq('course_id', courseId)
+    .eq('teacher_id', profile.id)
+    .maybeSingle();
+
+  if (coTeacherError) {
+    console.error('Error resolving co-teacher resource access:', coTeacherError);
+    res.status(500).json({ error: 'Unable to verify course access' });
+    return false;
+  }
+
+  if (!coTeacher) {
+    res.status(403).json({ error: 'You do not have access to this course' });
+    return false;
+  }
+
+  return true;
+};
+
+/** Resolve a resource's parent course before authorizing update/delete. */
+const authorizeResource = async (req: Request, res: Response, resourceId: string): Promise<boolean> => {
+  const { data: resource, error: resourceError } = await supabase
+    .from('course_resources')
+    .select('id, course_id')
+    .eq('id', resourceId)
+    .maybeSingle();
+
+  if (resourceError) {
+    console.error('Error resolving resource:', resourceError);
+    res.status(500).json({ error: 'Unable to verify resource access' });
+    return false;
+  }
+
+  if (!resource || !resource.course_id) {
+    res.status(404).json({ error: 'Resource not found' });
+    return false;
+  }
+
+  return authorizeCourse(req, res, resource.course_id);
+};
+
+/**
+ * A resource may be course-, week-, or lesson-level, but supplied child ids
+ * must always belong to the course being edited.  A lesson implies its parent
+ * week so hierarchy reads remain correct even when the client omits week_id.
+ */
+const resolveResourcePlacement = async (
+  courseId: string,
+  rawWeekId: unknown,
+  rawLessonId: unknown,
+): Promise<ResourcePlacement | null> => {
+  const weekId = rawWeekId == null ? undefined : typeof rawWeekId === 'string' ? rawWeekId : null;
+  const lessonId = rawLessonId == null ? undefined : typeof rawLessonId === 'string' ? rawLessonId : null;
+
+  if (weekId === null || lessonId === null || weekId === '' || lessonId === '') {
+    return null;
+  }
+
+  if (lessonId) {
+    const { data: lesson, error: lessonError } = await supabase
+      .from('course_lessons')
+      .select('id, week_id')
+      .eq('id', lessonId)
+      .maybeSingle();
+
+    if (lessonError || !lesson?.week_id) {
+      return null;
+    }
+
+    const { data: lessonWeek, error: lessonWeekError } = await supabase
+      .from('course_weeks')
+      .select('id')
+      .eq('id', lesson.week_id)
+      .eq('course_id', courseId)
+      .maybeSingle();
+
+    if (lessonWeekError || !lessonWeek || (weekId && weekId !== lesson.week_id)) {
+      return null;
+    }
+
+    return { weekId: lesson.week_id, lessonId };
+  }
+
+  if (weekId) {
+    const { data: week, error: weekError } = await supabase
+      .from('course_weeks')
+      .select('id')
+      .eq('id', weekId)
+      .eq('course_id', courseId)
+      .maybeSingle();
+
+    if (weekError || !week) {
+      return null;
+    }
+  }
+
+  return weekId ? { weekId } : {};
+};
+
+const isValidResourceInput = (resource: Record<string, unknown>): boolean => (
+  typeof resource.title === 'string' && resource.title.trim().length > 0 &&
+  typeof resource.file_url === 'string' && resource.file_url.trim().length > 0 &&
+  typeof resource.resource_type === 'string' && resourceTypes.has(resource.resource_type)
+);
+
+/**
+ * Get all resources for a course with hierarchy.
  * GET /teacher/courses/:courseId/resources
  */
 export const getCourseResources = async (req: Request, res: Response) => {
   try {
     const { courseId } = req.params;
-    const teacherId = (req as any).user.id;
 
-    // Verify teacher owns/teaches this course
-    const client = await pool.connect();
-    try {
-      const courseCheck = await client.query(
-        'SELECT id FROM courses WHERE id = $1 AND teacher_id = $2',
-        [courseId, teacherId]
-      );
-
-      if (courseCheck.rows.length === 0) {
-        return res.status(403).json({ error: 'Access denied to this course' });
-      }
-    } finally {
-      client.release();
-    }
+    if (!await authorizeCourse(req, res, courseId)) return;
 
     const hierarchy = await courseResourceService.getCourseResourcesHierarchy(courseId);
     res.json({ success: true, resources: hierarchy });
@@ -45,37 +219,35 @@ export const getCourseResources = async (req: Request, res: Response) => {
 };
 
 /**
- * Create a new resource
+ * Create a new resource.
  * POST /teacher/courses/:courseId/resources
  */
 export const createResource = async (req: Request, res: Response) => {
   try {
     const { courseId } = req.params;
-    const teacherId = (req as any).user.id;
     const { title, description, resource_type, file_url, file_size_kb, week_id, lesson_id, order_index } = req.body;
 
-    // Verify teacher owns/teaches this course
-    const { data: courseCheck2, error: courseError2 } = await pool
-      .from('courses')
-      .select('id')
-      .eq('id', courseId)
-      .eq('teacher_id', teacherId)
-      .maybeSingle();
+    if (!await authorizeCourse(req, res, courseId)) return;
 
-    if (courseError2 || !courseCheck2) {
-      return res.status(403).json({ error: 'Access denied to this course' });
+    if (!isValidResourceInput({ title, resource_type, file_url })) {
+      return res.status(400).json({ error: 'title, resource_type, and file_url are required' });
+    }
+
+    const placement = await resolveResourcePlacement(courseId, week_id, lesson_id);
+    if (!placement) {
+      return res.status(400).json({ error: 'The selected week or lesson does not belong to this course' });
     }
 
     const resource = await courseResourceService.createResource({
       course_id: courseId,
-      week_id,
-      lesson_id,
-      title,
-      description,
+      week_id: placement.weekId,
+      lesson_id: placement.lessonId,
+      title: title.trim(),
+      description: typeof description === 'string' ? description : undefined,
       resource_type,
-      file_url,
-      file_size_kb,
-      order_index,
+      file_url: file_url.trim(),
+      file_size_kb: typeof file_size_kb === 'number' ? file_size_kb : undefined,
+      order_index: typeof order_index === 'number' ? order_index : undefined,
     });
 
     res.status(201).json({ success: true, resource });
@@ -86,35 +258,53 @@ export const createResource = async (req: Request, res: Response) => {
 };
 
 /**
- * Bulk create resources
+ * Bulk create resources.
  * POST /teacher/courses/:courseId/resources/bulk
  */
 export const bulkCreateResources = async (req: Request, res: Response) => {
   try {
     const { courseId } = req.params;
-    const teacherId = (req as any).user.id;
     const { resources } = req.body;
 
     if (!Array.isArray(resources) || resources.length === 0) {
       return res.status(400).json({ error: 'Resources array is required' });
     }
 
-    // Verify teacher owns/teaches this course
-    const { data: courseCheck3, error: courseError3 } = await pool
-      .from('courses')
-      .select('id')
-      .eq('id', courseId)
-      .eq('teacher_id', teacherId)
-      .maybeSingle();
+    if (!await authorizeCourse(req, res, courseId)) return;
 
-    if (courseError3 || !courseCheck3) {
-      return res.status(403).json({ error: 'Access denied to this course' });
+    const resourcesWithCourse: courseResourceService.CreateResourceInput[] = [];
+
+    // Validate every row before creating any rows, preventing partial bulk
+    // writes and preventing a teacher from attaching another course's lesson.
+    for (const candidate of resources) {
+      if (!candidate || typeof candidate !== 'object') {
+        return res.status(400).json({ error: 'Each resource must be an object' });
+      }
+
+      const resource = candidate as Record<string, unknown>;
+      if (!isValidResourceInput(resource)) {
+        return res.status(400).json({ error: 'Each resource needs title, resource_type, and file_url' });
+      }
+
+      const placement = await resolveResourcePlacement(courseId, resource.week_id, resource.lesson_id);
+      if (!placement) {
+        return res.status(400).json({ error: 'Every selected week and lesson must belong to this course' });
+      }
+
+      resourcesWithCourse.push({
+        course_id: courseId,
+        week_id: placement.weekId,
+        lesson_id: placement.lessonId,
+        title: (resource.title as string).trim(),
+        description: typeof resource.description === 'string' ? resource.description : undefined,
+        resource_type: resource.resource_type as courseResourceService.CreateResourceInput['resource_type'],
+        file_url: (resource.file_url as string).trim(),
+        file_size_kb: typeof resource.file_size_kb === 'number' ? resource.file_size_kb : undefined,
+        order_index: typeof resource.order_index === 'number' ? resource.order_index : undefined,
+      });
     }
 
-    // Add course_id to each resource
-    const resourcesWithCourse = resources.map((r) => ({ ...r, course_id: courseId }));
     const created = await courseResourceService.bulkCreateResources(resourcesWithCourse);
-
     res.status(201).json({ success: true, resources: created, count: created.length });
   } catch (error) {
     console.error('Error bulk creating resources:', error);
@@ -123,34 +313,22 @@ export const bulkCreateResources = async (req: Request, res: Response) => {
 };
 
 /**
- * Update a resource
+ * Update a resource.
  * PUT /teacher/resources/:resourceId
  */
 export const updateResource = async (req: Request, res: Response) => {
   try {
     const { resourceId } = req.params;
-    const teacherId = (req as any).user.id;
     const { title, description, file_url, file_size_kb, order_index } = req.body;
 
-    // Verify teacher owns the course this resource belongs to
-    const { data: resourceCheck, error: resourceError } = await pool
-      .from('course_resources')
-      .select('cr.id')
-      .eq('cr.id', resourceId)
-      .eq('c.teacher_id', teacherId)
-      .limit(1)
-      .maybeSingle();
-
-    if (resourceError || !resourceCheck) {
-      return res.status(403).json({ error: 'Access denied to this resource' });
-    }
+    if (!await authorizeResource(req, res, resourceId)) return;
 
     const updated = await courseResourceService.updateResource(resourceId, {
-      title,
-      description,
-      file_url,
-      file_size_kb,
-      order_index,
+      title: typeof title === 'string' ? title : undefined,
+      description: typeof description === 'string' ? description : undefined,
+      file_url: typeof file_url === 'string' ? file_url : undefined,
+      file_size_kb: typeof file_size_kb === 'number' ? file_size_kb : undefined,
+      order_index: typeof order_index === 'number' ? order_index : undefined,
     });
 
     if (!updated) {
@@ -165,25 +343,14 @@ export const updateResource = async (req: Request, res: Response) => {
 };
 
 /**
- * Delete a resource
+ * Delete a resource.
  * DELETE /teacher/resources/:resourceId
  */
 export const deleteResource = async (req: Request, res: Response) => {
   try {
     const { resourceId } = req.params;
-    const teacherId = (req as any).user.id;
 
-    // Verify teacher owns the course this resource belongs to
-    const { data: resourceCheck2, error: resourceError2 } = await pool
-      .from('course_resources')
-      .select('cr.id')
-      .eq('cr.id', resourceId)
-      .limit(1)
-      .maybeSingle();
-
-    if (resourceError2 || !resourceCheck2) {
-      return res.status(403).json({ error: 'Access denied to this resource' });
-    }
+    if (!await authorizeResource(req, res, resourceId)) return;
 
     const deleted = await courseResourceService.deleteResource(resourceId);
 
@@ -199,25 +366,14 @@ export const deleteResource = async (req: Request, res: Response) => {
 };
 
 /**
- * Get resource statistics for a course
+ * Get resource statistics for a course.
  * GET /teacher/courses/:courseId/resources/stats
  */
 export const getResourceStats = async (req: Request, res: Response) => {
   try {
     const { courseId } = req.params;
-    const teacherId = (req as any).user.id;
 
-    // Verify teacher owns/teaches this course
-    const { data: courseCheck4, error: courseError4 } = await pool
-      .from('courses')
-      .select('id')
-      .eq('id', courseId)
-      .eq('teacher_id', teacherId)
-      .maybeSingle();
-
-    if (courseError4 || !courseCheck4) {
-      return res.status(403).json({ error: 'Access denied to this course' });
-    }
+    if (!await authorizeCourse(req, res, courseId)) return;
 
     const stats = await courseResourceService.getResourceStats(courseId);
     res.json({ success: true, stats });
@@ -228,32 +384,41 @@ export const getResourceStats = async (req: Request, res: Response) => {
 };
 
 /**
- * Reorder resources
+ * Reorder resources.
  * POST /teacher/courses/:courseId/resources/reorder
  */
 export const reorderResources = async (req: Request, res: Response) => {
   try {
     const { courseId } = req.params;
-    const teacherId = (req as any).user.id;
     const { resource_ids } = req.body;
 
-    if (!Array.isArray(resource_ids) || resource_ids.length === 0) {
-      return res.status(400).json({ error: 'resource_ids array is required' });
+    if (!Array.isArray(resource_ids) || resource_ids.length === 0 || !resource_ids.every((id) => typeof id === 'string' && id)) {
+      return res.status(400).json({ error: 'resource_ids must be a non-empty string array' });
     }
 
-    // Verify teacher owns/teaches this course
-    const { data: courseCheck5, error: courseError5 } = await pool
-      .from('courses')
+    if (!await authorizeCourse(req, res, courseId)) return;
+
+    const uniqueResourceIds = [...new Set(resource_ids)];
+    if (uniqueResourceIds.length !== resource_ids.length) {
+      return res.status(400).json({ error: 'resource_ids must not contain duplicates' });
+    }
+
+    const { data: courseResources, error: resourceError } = await supabase
+      .from('course_resources')
       .select('id')
-      .eq('id', courseId)
-      .eq('teacher_id', teacherId)
-      .maybeSingle();
+      .eq('course_id', courseId)
+      .in('id', uniqueResourceIds);
 
-    if (courseError5 || !courseCheck5) {
-      return res.status(403).json({ error: 'Access denied to this course' });
+    if (resourceError) {
+      console.error('Error validating resources for reorder:', resourceError);
+      return res.status(500).json({ error: 'Unable to validate resources' });
     }
 
-    await courseResourceService.reorderResources(resource_ids);
+    if ((courseResources || []).length !== uniqueResourceIds.length) {
+      return res.status(403).json({ error: 'Every resource must belong to this course' });
+    }
+
+    await courseResourceService.reorderResources(uniqueResourceIds);
     res.json({ success: true, message: 'Resources reordered successfully' });
   } catch (error) {
     console.error('Error reordering resources:', error);

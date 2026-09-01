@@ -10,6 +10,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { LucideIcon, ChevronLeft, ChevronRight } from 'lucide-react';
 import { UserButton } from '@clerk/nextjs';
+import { BrandLogo } from '@/components/ui/BrandLogo';
+import { SidebarTooltip, useSidebarTooltip } from '@/components/ui/SidebarTooltip';
 
 interface NavItem {
   label: string;
@@ -38,6 +40,7 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
+  const { tooltip, show: showTooltip, hide: hideTooltip } = useSidebarTooltip(collapsed);
 
   const toggleExpand = (label: string) => {
     setExpandedItems(prev =>
@@ -49,26 +52,29 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
 
   const roleConfig = {
     admin: {
-      gradient: 'from-slate-900 via-slate-800 to-slate-900',
-      activeItem: 'bg-amber-400/15 border border-amber-300/30 text-white',
-      hoverItem: 'hover:bg-white/10 hover:text-white',
-      badgeClass: 'bg-amber-300 text-slate-900',
+      surface: 'bg-[#17342b]',
+      surfaceGlow: 'rgba(199, 169, 107, 0.22)',
+      activeItem: 'bg-[rgba(199,169,107,0.18)] border border-[rgba(199,169,107,0.38)] text-[#f5ecd9]',
+      hoverItem: 'hover:bg-[rgba(255,255,255,0.08)] hover:text-[#fdf8ec]',
+      badgeClass: 'bg-[#c7a96b] text-[#163229]',
       title: 'Little Muslimah Academy',
       arabicTitle: 'أكاديمية المسلمة الصغيرة'
     },
     teacher: {
-      gradient: 'from-emerald-900 via-teal-800 to-emerald-900',
-      activeItem: 'bg-white/20 border border-emerald-200/30 text-white',
-      hoverItem: 'hover:bg-white/10 hover:text-white',
-      badgeClass: 'bg-emerald-200 text-emerald-900',
+      surface: 'bg-[#154138]',
+      surfaceGlow: 'rgba(92, 167, 141, 0.2)',
+      activeItem: 'bg-[rgba(92,167,141,0.2)] border border-[rgba(123,197,172,0.35)] text-[#f2fbf8]',
+      hoverItem: 'hover:bg-[rgba(255,255,255,0.08)] hover:text-[#f2fbf8]',
+      badgeClass: 'bg-[#8ad2bb] text-[#143a31]',
       title: 'Little Muslimah Academy',
       arabicTitle: 'بوابة المعلم'
     },
     student: {
-      gradient: 'from-slate-900 via-slate-800 to-slate-900',
-      activeItem: 'bg-violet-400/15 border border-violet-300/30 text-white',
-      hoverItem: 'hover:bg-white/10 hover:text-white',
-      badgeClass: 'bg-violet-300 text-slate-900',
+      surface: 'bg-[#1f2e47]',
+      surfaceGlow: 'rgba(137, 154, 201, 0.2)',
+      activeItem: 'bg-[rgba(137,154,201,0.2)] border border-[rgba(174,188,224,0.35)] text-[#f4f6fb]',
+      hoverItem: 'hover:bg-[rgba(255,255,255,0.08)] hover:text-[#f4f6fb]',
+      badgeClass: 'bg-[#bcc8ea] text-[#1f2e47]',
       title: 'Little Muslimah Academy',
       arabicTitle: 'أكاديمية المسلمة الصغيرة'
     }
@@ -80,32 +86,56 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
     <>
       <div
         className={`${
-          collapsed ? 'w-[88px]' : 'w-[280px]'
-        } h-screen bg-gradient-to-b ${config.gradient} text-white sticky top-0 z-50 transition-all duration-300 shadow-xl overflow-hidden flex flex-col flex-shrink-0 border-r border-white/10`}
+          collapsed ? 'w-[115px]' : 'w-[320px]'
+        } h-screen ${config.surface} text-white sticky top-0 z-50 transition-all duration-300 shadow-[0_18px_45px_rgba(12,24,20,0.34)] overflow-hidden flex flex-col flex-shrink-0 border-r border-white/10`}
       >
+      <div className="absolute inset-0 pointer-events-none opacity-70" style={{ backgroundImage: `radial-gradient(circle at 18% 10%, ${config.surfaceGlow} 0, transparent 36%), radial-gradient(circle at 86% 2%, rgba(255,255,255,0.08) 0, transparent 28%), linear-gradient(180deg, rgba(255,255,255,0.06) 0, rgba(255,255,255,0.01) 100%)` }} />
+      <div className="absolute inset-0 pointer-events-none opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.12) 0, rgba(255,255,255,0.12) 1px, transparent 1px)', backgroundSize: '18px 18px' }} />
+
       {/* Header */}
-      <div className="relative p-4 border-b border-white/10 bg-white/5 backdrop-blur-sm">
-        <div className="flex items-center justify-between">
-          {!collapsed && (
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center border border-white/20">
-                  <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                  </svg>
-                </div>
-                <h2 className="text-base font-semibold tracking-wide text-white">Little Muslimah</h2>
-              </div>
-              <p className="text-[11px] text-white/60 tracking-[0.18em]">ACADEMY</p>
+      <div className="relative p-3 lg:p-4 border-b border-white/10 bg-white/5 backdrop-blur-sm flex-shrink-0">
+        {!collapsed && (
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="flex-1 min-w-0">
+              <BrandLogo href="/" variant="shield" showText className="text-white" />
             </div>
-          )}
-          <button
-            onClick={() => setCollapsed(!collapsed)}
-            className="p-2 hover:bg-white/10 rounded-lg transition-all duration-200 hover:shadow-lg"
-          >
-            {collapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
-          </button>
-        </div>
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="p-2 lg:p-2.5 hover:bg-white/15 active:bg-white/20 rounded-lg transition-all duration-200 flex-shrink-0 group"
+              title="Collapse sidebar"
+            >
+              <ChevronLeft className="w-5 h-5 lg:w-6 lg:h-6 text-white/80 group-hover:text-white transition-colors" />
+            </button>
+          </div>
+        )}
+        
+        {!collapsed && (
+          <div className="space-y-1">
+            <p className="text-[9px] text-white/60 tracking-[0.16em] mt-2 font-semibold">Since 2024</p>
+          </div>
+        )}
+        
+        {collapsed && (
+          <div className="flex items-center justify-center py-3">
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="relative p-3 hover:bg-white/15 active:bg-white/20 rounded-lg transition-all duration-200 group flex-shrink-0 flex items-center justify-center"
+              title="Expand sidebar"
+              aria-label="Expand sidebar"
+            >
+              <div style={{ width: 40, height: 40 }} className="flex items-center justify-center">
+                <img 
+                  src="/academy-logo-shield.jpg" 
+                  alt="Academy"
+                  className="w-full h-full object-contain"
+                />
+              </div>
+              <div className="absolute -right-1 -bottom-1 bg-white/20 rounded-full p-1.5 group-hover:bg-white/30 transition-all">
+                <ChevronRight className="w-4 h-4 text-white transition-colors" />
+              </div>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Navigation Items */}
@@ -141,14 +171,18 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
                   className={`
                     group flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200
                     ${isActive 
-                      ? `${config.activeItem} shadow-sm`
+                      ? `${config.activeItem} shadow-[0_8px_20px_rgba(7,12,10,0.2)]`
                       : `text-white/80 ${config.hoverItem}`
                     }
                     ${collapsed ? 'justify-center' : ''}
                   `}
-                  title={collapsed ? item.label : ''}
+                  aria-label={item.label}
+                  onMouseEnter={showTooltip(item.label)}
+                  onMouseLeave={hideTooltip}
+                  onFocus={showTooltip(item.label)}
+                  onBlur={hideTooltip}
                 >
-                  <item.icon className={`w-5 h-5 ${isActive ? 'scale-110' : 'group-hover:scale-110'} transition-transform`} />
+                  <item.icon className={`w-5 h-5 ${isActive ? 'scale-105' : 'group-hover:scale-105'} transition-transform`} />
                   
                   {!collapsed && (
                     <>
@@ -175,7 +209,7 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
                         className={`
                           flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors
                           ${pathname === subItem.href
-                            ? 'bg-white/15 text-white font-medium'
+                            ? 'bg-white/15 text-white font-medium border border-white/10'
                             : 'text-white/70 hover:bg-white/10 hover:text-white'
                           }
                         `}
@@ -193,9 +227,9 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
       </nav>
 
       {/* User Profile Section - Bottom */}
-      <div className="relative p-3 border-t border-white/20">
+      <div className="relative p-3 border-t border-white/20 bg-white/[0.03]">
         {!collapsed ? (
-          <div className="flex items-center gap-3 p-3 bg-white/10 rounded-xl backdrop-blur-sm">
+          <div className="flex items-center gap-3 p-3 bg-white/10 rounded-xl backdrop-blur-sm border border-white/10">
             <UserButton
               appearance={{
                 elements: {
@@ -221,6 +255,8 @@ export const IslamicSidebar: React.FC<IslamicSidebarProps> = ({
         )}
       </div>
     </div>
+
+    <SidebarTooltip tooltip={tooltip} />
     </>
   );
 };

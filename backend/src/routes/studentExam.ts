@@ -3,7 +3,7 @@
  */
 
 import express from 'express';
-import { requireAuth } from '../middleware/clerkAuth';
+import { requireAuth, requireRole } from '../middleware/clerkAuth';
 import * as studentExamController from '../modules/student/controllers/studentExamController';
 import * as studentGradeDashboardController from '../modules/student/controllers/studentGradeDashboardController';
 import * as studentResourceController from '../modules/student/controllers/studentResourceController';
@@ -11,7 +11,10 @@ import * as paymentController from '../modules/student/controllers/paymentContro
 
 const router = express.Router();
 
-const authRequired = [requireAuth];
+// This router is mounted before the newer student-course router, including
+// the duplicate payment paths below. Keep the entire namespace student-only
+// so a teacher/admin session cannot reach the student payment flow first.
+const authRequired = [requireAuth, requireRole(['student'])];
 
 // ==========================================
 // STUDENT EXAM ROUTES
@@ -58,12 +61,6 @@ router.post('/exam-submissions/:submissionId/submit', ...authRequired, studentEx
  * Get submission results
  */
 router.get('/exam-submissions/:submissionId/results', ...authRequired, studentExamController.getSubmissionResults);
-
-/**
- * GET /api/student/exam-history
- * Get student's exam history
- */
-router.get('/exam-history', ...authRequired, studentExamController.getExamHistory);
 
 // ==========================================
 // STUDENT GRADE DASHBOARD (Phase 5)
@@ -118,6 +115,19 @@ router.get('/resources/:resourceId', ...authRequired, studentResourceController.
 // ==========================================
 // STUDENT PAYMENT ROUTES
 // ==========================================
+
+/**
+ * POST /api/student/payment/create
+ * Create payment order for a course (student)
+ */
+router.post('/payment/create', ...authRequired, paymentController.createPaymentOrder);
+
+/**
+ * POST /api/student/payment/verify
+ * Verify Razorpay payment (student)
+ */
+router.post('/payment/verify', ...authRequired, paymentController.verifyPayment);
+
 
 /**
  * GET /api/student/payments

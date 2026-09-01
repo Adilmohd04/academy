@@ -1,13 +1,18 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
 
 export async function GET(request: NextRequest) {
   try {
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
+    }
+
     const { searchParams } = new URL(request.url);
     const teacherId = searchParams.get('teacher_id');
     const startDate = searchParams.get('start_date');
@@ -20,7 +25,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabaseAdminClient();
 
     const { data: slots, error } = await supabase
       .from('teacher_slot_availability')

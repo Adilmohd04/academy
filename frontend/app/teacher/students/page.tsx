@@ -5,6 +5,8 @@ import { useState, useEffect } from 'react';
 import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 import { Mail, Phone, Users } from 'lucide-react';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface Student {
   id: string;
   name: string;
@@ -27,50 +29,60 @@ export default function TeacherStudents() {
   const fetchStudents = async () => {
     try {
       const token = await getToken();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/meetings/teacher/assigned`, {
+      const response = await fetch(`${API}/api/meetings/teacher/assigned`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await response.json();
-      
-      if (data.meetings) {
-        // Group meetings by student
-        const studentMap = new Map<string, Student>();
-        
-        data.meetings.forEach((meeting: any) => {
-          const studentId = meeting.student_id;
-          
-          if (!studentMap.has(studentId)) {
-            studentMap.set(studentId, {
-              id: studentId,
-              name: meeting.student_name,
-              email: meeting.student_email,
-              phone: meeting.student_phone,
-              totalClasses: 0,
-              attendedClasses: 0,
-              attendanceRate: 0,
-            });
-          }
-          
-          const student = studentMap.get(studentId)!;
-          student.totalClasses++;
-          
-          if (meeting.attendance === 'present') {
-            student.attendedClasses++;
-          }
-        });
-        
-        // Calculate attendance rates
-        const studentList = Array.from(studentMap.values()).map(student => ({
-          ...student,
-          attendanceRate: student.totalClasses > 0 
-            ? Math.round((student.attendedClasses / student.totalClasses) * 100)
-            : 0,
-        }));
-        
-        setStudents(studentList);
+      if (!response.ok) {
+        throw new Error('Unable to load students');
       }
+      const data = await response.json();
+      // `/teacher/assigned` returns `{ data: [...] }`. Support the old
+      // `{ meetings: [...] }` contract while any cached client is updated.
+      const meetings = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.meetings)
+            ? data.meetings
+            : [];
+
+      // Group meetings by student
+      const studentMap = new Map<string, Student>();
+      meetings.forEach((meeting: any) => {
+        const studentId = meeting.student_id;
+        if (!studentId) return;
+
+        if (!studentMap.has(studentId)) {
+          studentMap.set(studentId, {
+            id: studentId,
+            name: meeting.student_name || 'Student',
+            email: meeting.student_email || '',
+            phone: meeting.student_phone,
+            totalClasses: 0,
+            attendedClasses: 0,
+            attendanceRate: 0,
+          });
+        }
+
+        const student = studentMap.get(studentId)!;
+        student.totalClasses++;
+
+        if (meeting.attendance === 'present') {
+          student.attendedClasses++;
+        }
+      });
+
+      const studentList = Array.from(studentMap.values()).map(student => ({
+        ...student,
+        attendanceRate: student.totalClasses > 0
+          ? Math.round((student.attendedClasses / student.totalClasses) * 100)
+          : 0,
+      }));
+
+      setStudents(studentList);
     } catch (error) {
       console.error('Error fetching students:', error);
+      setStudents([]);
     } finally {
       setLoading(false);
     }

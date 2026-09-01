@@ -1,9 +1,8 @@
 'use client';
 
 import { useAuth } from '@clerk/nextjs';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { DollarSign, Save, RefreshCw, Gift, Trash2, Users, ArrowLeft } from 'lucide-react';
-import { api } from '@/lib/api';
 import Link from 'next/link';
 
 interface TeacherPricing {
@@ -18,8 +17,10 @@ interface TeacherPricing {
   updatedAt: string;
 }
 
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000').replace('localhost', '127.0.0.1');
+
 export default function TeacherPricingPage() {
-  const { getToken } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const [teachers, setTeachers] = useState<TeacherPricing[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
@@ -28,29 +29,40 @@ export default function TeacherPricingPage() {
   const [editPrice, setEditPrice] = useState<string>('');
   const [editNotes, setEditNotes] = useState<string>('');
 
-  useEffect(() => {
-    loadTeachers();
-  }, []);
-
-  const loadTeachers = async () => {
+  const loadTeachers = useCallback(async () => {
     try {
       setLoading(true);
       const token = await getToken();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher-pricing`, {
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      const response = await fetch(`${API_URL}/api/teacher-pricing`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      
-      if (response.ok) {
-        const result = await response.json();
-        setTeachers(result.data);
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || result.message || 'Failed to load teachers');
       }
-    } catch (error) {
+
+      setTeachers(Array.isArray(result.data) ? result.data : []);
+    } catch (error: any) {
       console.error('Error loading teachers:', error);
-      setMessage({ type: 'error', text: 'Failed to load teachers' });
+      setTeachers([]);
+      setMessage({ type: 'error', text: error?.message || 'Failed to load teachers' });
     } finally {
       setLoading(false);
     }
-  };
+  }, [getToken]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      setLoading(false);
+      setMessage({ type: 'error', text: 'Please sign in again to manage teacher pricing.' });
+      return;
+    }
+    void loadTeachers();
+  }, [isLoaded, isSignedIn, loadTeachers]);
 
   const handleEdit = (teacher: TeacherPricing) => {
     setEditingTeacher(teacher.teacherId);
@@ -75,9 +87,10 @@ export default function TeacherPricingPage() {
 
       setSaving(teacherId);
       const token = await getToken();
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
       
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher-pricing/${teacherId}`,
+        `${API_URL}/api/teacher-pricing/${teacherId}`,
         {
           method: 'PUT',
           headers: {
@@ -88,17 +101,18 @@ export default function TeacherPricingPage() {
         }
       );
 
+      const result = await response.json().catch(() => ({}));
       if (response.ok) {
         setMessage({ type: 'success', text: '✅ Price updated successfully!' });
         setEditingTeacher(null);
-        loadTeachers();
+        void loadTeachers();
         setTimeout(() => setMessage(null), 3000);
       } else {
-        throw new Error('Failed to update price');
+        throw new Error(result.error || result.message || 'Failed to update price');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving price:', error);
-      setMessage({ type: 'error', text: 'Failed to save price' });
+      setMessage({ type: 'error', text: error?.message || 'Failed to save price' });
     } finally {
       setSaving(null);
     }
@@ -108,9 +122,10 @@ export default function TeacherPricingPage() {
     try {
       setSaving(teacherId);
       const token = await getToken();
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
       
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher-pricing/${teacherId}/free`,
+        `${API_URL}/api/teacher-pricing/${teacherId}/free`,
         {
           method: 'POST',
           headers: {
@@ -121,16 +136,17 @@ export default function TeacherPricingPage() {
         }
       );
 
+      const result = await response.json().catch(() => ({}));
       if (response.ok) {
         setMessage({ type: 'success', text: '✅ Teacher set to FREE!' });
-        loadTeachers();
+        void loadTeachers();
         setTimeout(() => setMessage(null), 3000);
       } else {
-        throw new Error('Failed to set FREE');
+        throw new Error(result.error || result.message || 'Failed to set FREE');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error setting FREE:', error);
-      setMessage({ type: 'error', text: 'Failed to set FREE' });
+      setMessage({ type: 'error', text: error?.message || 'Failed to set FREE' });
     } finally {
       setSaving(null);
     }
@@ -207,7 +223,7 @@ export default function TeacherPricingPage() {
                 {/* Teacher Info */}
                 <div className="flex items-start space-x-4 flex-1">
                   <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-2xl flex-shrink-0">
-                    {teacher.teacherName.charAt(0)}
+                    {(teacher.teacherName || '?').charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1">
                     <h3 className="text-xl font-semibold text-gray-900">{teacher.teacherName}</h3>

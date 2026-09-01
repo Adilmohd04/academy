@@ -1,22 +1,19 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
+
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
-import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
 export async function GET() {
   try {
-    const { userId } = await auth();
-    
-    if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
     }
 
     // Create Supabase client with service role key
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabaseAdminClient();
 
     // Fetch all users from the profiles table
     const { data: users, error } = await supabase

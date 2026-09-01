@@ -126,7 +126,7 @@ export default function SimpleStudentsPage() {
                   <td className="p-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center font-bold text-green-600">
-                        {student.full_name.charAt(0)}
+                        {(student.full_name || '?').charAt(0).toUpperCase()}
                       </div>
                       <span className="font-medium text-gray-900">{student.full_name}</span>
                     </div>

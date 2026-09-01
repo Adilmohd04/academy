@@ -8,13 +8,9 @@
 
 import axios, { AxiosInstance, AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 
-const STABLE_BACKEND_URL = 'https://academy-backend-git-dev-fixes-adilmohd04s-projects.vercel.app';
-const ENV_BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || '';
-const RESOLVED_API_URL =
-  !ENV_BACKEND_URL || ENV_BACKEND_URL.includes('academy-q5jv.vercel.app')
-    ? STABLE_BACKEND_URL
-    : ENV_BACKEND_URL;
-const API_URL = RESOLVED_API_URL.replace('localhost', '127.0.0.1');
+const FALLBACK_LOCAL_API_URL = 'http://127.0.0.1:5000';
+const ENV_BACKEND_URL = (process.env.NEXT_PUBLIC_API_URL || '').trim();
+const API_URL = (ENV_BACKEND_URL || FALLBACK_LOCAL_API_URL).replace('localhost', '127.0.0.1');
 
 interface ApiError {
   message?: string;
@@ -60,7 +56,11 @@ apiClient.interceptors.response.use(
     if (error.response) {
       // Server responded with error status
       const message = error.response.data?.message || 'An error occurred';
-      console.error('API Error:', message);
+      const isExpectedMissingCourse =
+        error.response.status === 404 && /course not found/i.test(String(message));
+      if (!isExpectedMissingCourse) {
+        console.error('API Error:', message);
+      }
     } else if (error.request) {
       // Request made but no response
       console.error('Network Error: No response from server');
@@ -84,6 +84,43 @@ interface UserUpdateData {
 interface GetUsersParams {
   [key: string]: unknown;
 }
+
+interface CourseUpdatePayload {
+  status?: string;
+  rejection_reason?: string;
+}
+
+interface ResourceCreatePayload {
+  title: string;
+  description: string | null;
+  type: string;
+  url: string;
+}
+
+interface SlotPricingPayload {
+  slot_id: string;
+  is_free?: boolean;
+  meeting_price?: number;
+}
+
+interface BookFinalExamInterviewPayload {
+  slot_id: string;
+  category_id?: string | null;
+  scheduled_date: string;
+  duration_minutes: number;
+  meeting_link?: string | null;
+}
+
+interface RescheduleFinalExamInterviewPayload {
+  slot_id: string;
+  scheduled_date: string;
+  duration_minutes: number;
+  meeting_link?: string | null;
+}
+
+const bearerHeaders = (token?: string | null) => (
+  token ? { Authorization: `Bearer ${token}` } : {}
+);
 
 const api = {
   // Health check
@@ -124,6 +161,10 @@ const api = {
       apiClient.get(`/api/courses/${courseId}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       }),
+    getByIdForBuilder: (courseId: string, token?: string | null) =>
+      apiClient.get(`/api/courses/${courseId}`, {
+        headers: bearerHeaders(token),
+      }),
     create: (data: {
       title: string;
       description: string;
@@ -152,6 +193,81 @@ const api = {
     getTeacherCourses: (token?: string | null) =>
       apiClient.get('/api/teacher/courses', {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
+      }),
+  },
+
+  // Admin endpoints
+  admin: {
+    getLegacyAllMeetings: (token?: string | null) =>
+      apiClient.get('/api/admin/all-meetings', {
+        headers: bearerHeaders(token),
+      }),
+    getTeacherSlots: (token?: string | null) =>
+      apiClient.get('/api/admin/teacher-slots', {
+        headers: bearerHeaders(token),
+      }),
+    getTeachers: (token?: string | null) =>
+      apiClient.get('/api/admin/teachers', {
+        headers: bearerHeaders(token),
+      }),
+    getTeacherSlotsByRange: (teacherId: string, startDate: string, endDate: string, token?: string | null) =>
+      apiClient.get('/api/admin/teacher-slots', {
+        params: {
+          teacher_id: teacherId,
+          start_date: startDate,
+          end_date: endDate,
+        },
+        headers: bearerHeaders(token),
+      }),
+    updateTeacherPrice: (clerkUserId: string, price: number, token?: string | null) =>
+      apiClient.post('/api/admin/teacher-price', {
+        clerk_user_id: clerkUserId,
+        price,
+      }, {
+        headers: bearerHeaders(token),
+      }),
+    updateTeacherFreeStatus: (teacherId: string, isFree: boolean, token?: string | null) =>
+      apiClient.post('/api/admin/teacher-free', {
+        teacher_id: teacherId,
+        is_free: isFree,
+      }, {
+        headers: bearerHeaders(token),
+      }),
+    updateSlotPricing: (payload: SlotPricingPayload, token?: string | null) =>
+      apiClient.post('/api/admin/slot-pricing', payload, {
+        headers: bearerHeaders(token),
+      }),
+    getAllMeetings: (token?: string | null) =>
+      apiClient.get('/api/meetings/all', {
+        headers: bearerHeaders(token),
+      }),
+    getCourses: (token?: string | null) =>
+      apiClient.get('/api/courses', {
+        headers: bearerHeaders(token),
+      }),
+    updateCourse: (courseId: string, data: CourseUpdatePayload, token?: string | null) =>
+      apiClient.put(`/api/courses/${courseId}`, data, {
+        headers: bearerHeaders(token),
+      }),
+    deleteCourse: (courseId: string, token?: string | null) =>
+      apiClient.delete(`/api/courses/${courseId}`, {
+        headers: bearerHeaders(token),
+      }),
+    getResources: (token?: string | null) =>
+      apiClient.get('/api/resources', {
+        headers: bearerHeaders(token),
+      }),
+    createResource: (data: ResourceCreatePayload, token?: string | null) =>
+      apiClient.post('/api/resources', data, {
+        headers: bearerHeaders(token),
+      }),
+    updateResourceStatus: (resourceId: string, status: 'approved' | 'rejected', token?: string | null) =>
+      apiClient.put(`/api/resources/${resourceId}/status`, { status }, {
+        headers: bearerHeaders(token),
+      }),
+    deleteResource: (resourceId: string, token?: string | null) =>
+      apiClient.delete(`/api/resources/${resourceId}`, {
+        headers: bearerHeaders(token),
       }),
   },
 
@@ -467,6 +583,12 @@ const api = {
       apiClient.get('/api/student/courses/enrolled', {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
       }),
+
+    // Enroll in a course
+    enrollInCourse: (courseId: string, token?: string | null) =>
+      apiClient.post(`/api/student/courses/${courseId}/enroll`, {}, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      }),
     
     // Create Razorpay payment order
     createPaymentOrder: (courseId: string, token?: string | null) =>
@@ -501,6 +623,43 @@ const api = {
     getPaymentSlip: (paymentId: string, token?: string | null) =>
       apiClient.get(`/api/student/payments/${paymentId}/slip`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {}
+      }),
+
+    // Get student final exam interview details
+    getExamInterviewDetails: (examId: string, token?: string | null) =>
+      apiClient.get(`/api/student/exams/${examId}/details`, {
+        headers: bearerHeaders(token),
+      }),
+
+    // Book a final exam interview slot
+    bookFinalExamInterview: (
+      examId: string,
+      payload: BookFinalExamInterviewPayload,
+      token?: string | null
+    ) =>
+      apiClient.post(`/api/student/final-exams/${examId}/interviews/book`, payload, {
+        headers: bearerHeaders(token),
+      }),
+
+    // Reschedule a booked final exam interview
+    rescheduleFinalExamInterview: (
+      examId: string,
+      interviewId: string,
+      payload: RescheduleFinalExamInterviewPayload,
+      token?: string | null
+    ) =>
+      apiClient.patch(`/api/student/final-exams/${examId}/interviews/${interviewId}/reschedule`, payload, {
+        headers: bearerHeaders(token),
+      }),
+
+    // Confirm a scheduled final exam interview
+    confirmFinalExamInterview: (
+      examId: string,
+      interviewId: string,
+      token?: string | null
+    ) =>
+      apiClient.post(`/api/student/final-exams/${examId}/interviews/${interviewId}/confirm`, undefined, {
+        headers: bearerHeaders(token),
       }),
   },
 

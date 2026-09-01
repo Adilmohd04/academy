@@ -18,6 +18,14 @@ const getCourseTeacherId = (courses: any): string | null => {
   return courses.teacher_id || null;
 };
 
+const isOwnedByTeacher = (
+  teacherId: string | null,
+  profileId: string | null | undefined,
+  clerkUserId: string | null | undefined
+): boolean => {
+  return !!teacherId && (teacherId === profileId || teacherId === clerkUserId);
+};
+
 // ============================================
 // COURSE CRUD OPERATIONS
 // ============================================
@@ -127,29 +135,68 @@ export const getCourseDetails = async (req: any, res: Response) => {
   try {
     const { courseId } = req.params;
     const userId = req.auth?.userId;
+    const role = req.auth?.role;
 
-    // Get teacher profile
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Resolve both canonical identities. Courses created through the current
+    // `/api/courses` flow store the Clerk id, while older courses store the
+    // profile UUID.
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('id, full_name, email')
       .eq('clerk_user_id', userId)
-      .single();
+      .maybeSingle();
 
-    if (profileError || !profile) {
+    if (profileError || (!profile && role !== 'admin')) {
       return res.status(404).json({ error: 'Teacher profile not found' });
     }
 
-    // Get course details
+    // Load the course first, then grant access to the owner, a co-teacher, or
+    // an administrator. Filtering the initial query by profile.id locked a
+    // teacher out of every newly-created (Clerk-id keyed) course.
     const { data: course, error: courseError } = await supabase
       .from('courses')
       .select('*')
       .eq('id', courseId)
-      .eq('teacher_id', profile.id)
-      .single();
+      .maybeSingle();
 
     if (courseError || !course) {
       return res.status(404).json({ error: 'Course not found' });
     }
+
+    const isOwner = course.teacher_id === userId || course.teacher_id === profile?.id;
+    let isCoTeacher = false;
+    if (!isOwner && role !== 'admin' && profile?.id) {
+      const { data: coTeacher } = await supabase
+        .from('course_teachers')
+        .select('id')
+        .eq('course_id', courseId)
+        .in('teacher_id', [profile.id, userId])
+        .limit(1)
+        .maybeSingle();
+      isCoTeacher = Boolean(coTeacher);
+    }
+
+    if (role !== 'admin' && !isOwner && !isCoTeacher) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
+    const [ownerByProfileId, ownerByClerkId] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .eq('id', course.teacher_id)
+        .maybeSingle(),
+      supabase
+        .from('profiles')
+        .select('id, full_name, email')
+        .eq('clerk_user_id', course.teacher_id)
+        .maybeSingle(),
+    ]);
+    const courseOwner = ownerByProfileId.data || ownerByClerkId.data || profile;
 
     // Get weeks with lessons, live sessions, co-teachers, and teacher profile in parallel
     const [weeksResult, sessionsResult, gradingResult, accessResult, coTeachersResult] = await Promise.all([
@@ -207,8 +254,10 @@ export const getCourseDetails = async (req: any, res: Response) => {
     res.json({
       course: {
         ...course,
-        teacher: { id: profile.id, full_name: profile.full_name, email: profile.email },
-        teacher_name: profile.full_name || profile.email,
+        teacher: courseOwner
+          ? { id: courseOwner.id, full_name: courseOwner.full_name, email: courseOwner.email }
+          : null,
+        teacher_name: courseOwner?.full_name || courseOwner?.email || 'Instructor',
         co_teachers: coTeachers
       },
       weeks: weeksResult.data || [],
@@ -412,7 +461,7 @@ export const updateCourse = async (req: any, res: Response) => {
 export const togglePublishCourse = async (req: any, res: Response) => {
   try {
     const { courseId } = req.params;
-    const { status } = req.body; // 'published' or 'draft'
+    const { status, is_published } = req.body;
     const userId = req.auth?.userId;
 
     // Get teacher profile
@@ -433,18 +482,29 @@ export const togglePublishCourse = async (req: any, res: Response) => {
       .eq('id', courseId)
       .single();
 
-    if (!course || course.teacher_id !== profile.id) {
+    const isOwner = course && (course.teacher_id === profile.id || course.teacher_id === userId);
+    if (!isOwner) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
     // Update status
-    const updateData: any = { 
-      status,
-      is_published: status === 'published',
+    const nextIsPublished =
+      typeof is_published === 'boolean'
+        ? is_published
+        : status === 'published';
+
+    const nextStatus =
+      typeof status === 'string' && status.length > 0
+        ? status
+        : (nextIsPublished ? 'published' : 'draft');
+
+    const updateData: any = {
+      status: nextStatus,
+      is_published: nextIsPublished,
       updated_at: new Date().toISOString()
     };
 
-    if (status === 'published') {
+    if (nextIsPublished) {
       updateData.published_at = new Date().toISOString();
     }
 
@@ -545,43 +605,93 @@ export const addWeek = async (req: any, res: Response) => {
       return res.status(404).json({ error: 'Teacher profile not found' });
     }
 
-    // Verify course ownership
+    // Verify course access (main teacher by profile/clerk ID OR co-teacher)
     const { data: course } = await supabase
       .from('courses')
       .select('teacher_id')
       .eq('id', courseId)
       .single();
 
-    if (!course || course.teacher_id !== profile.id) {
+    if (!course) {
+      return res.status(404).json({ error: 'Course not found' });
+    }
+
+    const isOwner = isOwnedByTeacher(course.teacher_id, profile.id, userId);
+
+    let isCoTeacher = false;
+    if (!isOwner) {
+      const { data: coTeacherRow } = await supabase
+        .from('course_teachers')
+        .select('id')
+        .eq('course_id', courseId)
+        .in('teacher_id', [profile.id, userId])
+        .limit(1)
+        .single();
+
+      isCoTeacher = !!coTeacherRow;
+    }
+
+    if (!isOwner && !isCoTeacher) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Get highest order_index
-    const { data: lastWeek } = await supabase
+    // Read existing weeks to compute safe week number and append order index.
+    const { data: existingWeeks, error: existingWeeksError } = await supabase
       .from('course_weeks')
-      .select('order_index')
-      .eq('course_id', courseId)
-      .order('order_index', { ascending: false })
-      .limit(1)
-      .single();
+      .select('week_number, order_index')
+      .eq('course_id', courseId);
 
-    const nextOrder = lastWeek ? (lastWeek.order_index || 0) + 1 : 0;
+    if (existingWeeksError) {
+      console.error('Error fetching existing weeks:', existingWeeksError);
+      return res.status(500).json({ error: 'Failed to validate week number' });
+    }
+
+    const usedWeekNumbers = new Set<number>(
+      (existingWeeks || [])
+        .map((w: any) => Number(w.week_number))
+        .filter((n: number) => Number.isInteger(n))
+    );
+
+    let safeWeekNumber = Number(week_number);
+    if (!Number.isInteger(safeWeekNumber) || safeWeekNumber <= 0) {
+      return res.status(400).json({ error: 'week_number must be a positive integer' });
+    }
+
+    // If requested week number is already used, choose the next free number.
+    if (usedWeekNumbers.has(safeWeekNumber)) {
+      safeWeekNumber = 1;
+      while (usedWeekNumbers.has(safeWeekNumber)) {
+        safeWeekNumber += 1;
+      }
+    }
+
+    const maxOrderIndex = (existingWeeks || []).reduce((max: number, w: any) => {
+      const value = Number(w.order_index);
+      return Number.isNaN(value) ? max : Math.max(max, value);
+    }, -1);
+
+    const nextOrder = maxOrderIndex + 1;
 
     // Create week
     const { data: week, error: weekError } = await supabase
       .from('course_weeks')
       .insert({
         course_id: courseId,
-        week_number,
+        week_number: safeWeekNumber,
         title,
         description,
         unlock_date,
+        is_published: false,
         order_index: nextOrder
       })
       .select()
       .single();
 
     if (weekError) {
+      if ((weekError as any).code === '23505') {
+        return res.status(409).json({ error: 'Week number already exists. Please try again.' });
+      }
+
       console.error('Error creating week:', weekError);
       return res.status(500).json({ error: 'Failed to create week' });
     }
@@ -617,7 +727,7 @@ export const updateWeek = async (req: any, res: Response) => {
     // Verify ownership through course
     const { data: week } = await supabase
       .from('course_weeks')
-      .select('course_id, courses!inner(teacher_id)')
+      .select('course_id, courses!inner(teacher_id, course_type)')
       .eq('id', weekId)
       .single();
 
@@ -626,9 +736,14 @@ export const updateWeek = async (req: any, res: Response) => {
     }
 
     const courseTeacherId = getCourseTeacherId(week.courses);
-    if (courseTeacherId !== profile.id) {
+    if (!isOwnedByTeacher(courseTeacherId, profile.id, userId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
+
+    // Extract course_type from the joined courses data
+    const courseType = Array.isArray(week.courses)
+      ? week.courses[0]?.course_type || null
+      : (week.courses as any)?.course_type || null;
 
     // Update week
     const { data: updatedWeek, error: updateError } = await supabase
@@ -646,28 +761,31 @@ export const updateWeek = async (req: any, res: Response) => {
       return res.status(500).json({ error: 'Failed to update week' });
     }
 
-    // When publishing a week, auto-publish all video/resource lessons in it
-    if (updateData.is_published === true) {
-      const { error: autoPublishError } = await supabase
-        .from('course_lessons')
-        .update({ is_published: true })
-        .eq('week_id', weekId)
-        .in('content_type', ['video', 'resource', 'text']);
-      
-      if (autoPublishError) {
-        console.error('Warning: Failed to auto-publish video/resource lessons:', autoPublishError);
+    // Skip week-to-lesson publish cascade for pre-recorded courses.
+    // Pre-recorded course weeks are containers only — publishing is controlled at the course level.
+    if (courseType !== 'pre-recorded') {
+      // When publishing a week, auto-publish all lessons in this week
+      if (updateData.is_published === true) {
+        const { error: autoPublishError } = await supabase
+          .from('course_lessons')
+          .update({ is_published: true })
+          .eq('week_id', weekId);
+        
+        if (autoPublishError) {
+          console.error('Warning: Failed to auto-publish lessons:', autoPublishError);
+        }
       }
-    }
 
-    // When unpublishing a week, also unpublish ALL lessons in it
-    if (updateData.is_published === false) {
-      const { error: unpublishError } = await supabase
-        .from('course_lessons')
-        .update({ is_published: false })
-        .eq('week_id', weekId);
-      
-      if (unpublishError) {
-        console.error('Warning: Failed to unpublish lessons:', unpublishError);
+      // When unpublishing a week, also unpublish ALL lessons in it
+      if (updateData.is_published === false) {
+        const { error: unpublishError } = await supabase
+          .from('course_lessons')
+          .update({ is_published: false })
+          .eq('week_id', weekId);
+        
+        if (unpublishError) {
+          console.error('Warning: Failed to unpublish lessons:', unpublishError);
+        }
       }
     }
 
@@ -710,7 +828,7 @@ export const deleteWeek = async (req: any, res: Response) => {
     }
 
     const courseTeacherId = getCourseTeacherId(week.courses);
-    if (courseTeacherId !== profile.id) {
+    if (!isOwnedByTeacher(courseTeacherId, profile.id, userId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -772,7 +890,7 @@ export const addLesson = async (req: any, res: Response) => {
     // Verify ownership
     const { data: week } = await supabase
       .from('course_weeks')
-      .select('course_id, is_published, courses!inner(teacher_id)')
+      .select('course_id, is_published, courses!inner(teacher_id, course_type)')
       .eq('id', weekId)
       .single();
 
@@ -781,9 +899,14 @@ export const addLesson = async (req: any, res: Response) => {
     }
 
     const courseTeacherId = getCourseTeacherId(week.courses);
-    if (courseTeacherId !== profile.id) {
+    if (!isOwnedByTeacher(courseTeacherId, profile.id, userId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
+
+    // Extract course_type from the joined courses data
+    const courseType = Array.isArray(week.courses)
+      ? week.courses[0]?.course_type || null
+      : (week.courses as any)?.course_type || null;
 
     // Get highest order_index
     const { data: lastLesson } = await supabase
@@ -811,8 +934,13 @@ export const addLesson = async (req: any, res: Response) => {
 
     // Videos and resources auto-publish when the parent week is published
     // Quiz and assignment default to draft (need individual publish)
+    // For pre-recorded courses, always default to draft — publishing is controlled at the course level
     if (content_type === 'video' || content_type === 'resource' || content_type === 'text') {
-      lessonInsert.is_published = week.is_published === true;
+      if (courseType === 'pre-recorded') {
+        lessonInsert.is_published = false;
+      } else {
+        lessonInsert.is_published = week.is_published === true;
+      }
     }
 
     // Include optional fields if provided
@@ -909,7 +1037,7 @@ export const updateLesson = async (req: any, res: Response) => {
     const weekData: any = Array.isArray(lesson.course_weeks) ? lesson.course_weeks[0] : lesson.course_weeks;
     const courseData: any = Array.isArray(weekData?.courses) ? weekData.courses[0] : weekData?.courses;
     
-    if (courseData?.teacher_id !== profile.id) {
+    if (!isOwnedByTeacher(courseData?.teacher_id, profile.id, userId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1024,7 +1152,7 @@ export const deleteLesson = async (req: any, res: Response) => {
     const weekData: any = Array.isArray(lesson.course_weeks) ? lesson.course_weeks[0] : lesson.course_weeks;
     const courseData: any = Array.isArray(weekData?.courses) ? weekData.courses[0] : weekData?.courses;
     
-    if (courseData?.teacher_id !== profile.id) {
+    if (!isOwnedByTeacher(courseData?.teacher_id, profile.id, userId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1086,7 +1214,7 @@ export const scheduleLiveSession = async (req: any, res: Response) => {
     // Verify course ownership
     const { data: course } = await supabase
       .from('courses')
-      .select('teacher_id')
+      .select('id, title, teacher_id')
       .eq('id', courseId)
       .single();
 
@@ -1176,7 +1304,7 @@ export const updateLiveSession = async (req: any, res: Response) => {
     }
 
     const courseTeacherId = getCourseTeacherId(session.courses);
-    if (courseTeacherId !== profile.id) {
+    if (!isOwnedByTeacher(courseTeacherId, profile.id, userId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1235,7 +1363,7 @@ export const deleteLiveSession = async (req: any, res: Response) => {
     }
 
     const courseTeacherId = getCourseTeacherId(session.courses);
-    if (courseTeacherId !== profile.id) {
+    if (!isOwnedByTeacher(courseTeacherId, profile.id, userId)) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
@@ -1289,7 +1417,7 @@ export const createAnnouncement = async (req: any, res: Response) => {
     // Verify course ownership
     const { data: course } = await supabase
       .from('courses')
-      .select('teacher_id')
+      .select('teacher_id, title')
       .eq('id', courseId)
       .single();
 
@@ -1313,6 +1441,18 @@ export const createAnnouncement = async (req: any, res: Response) => {
     if (announcementError) {
       console.error('Error creating announcement:', announcementError);
       return res.status(500).json({ error: 'Failed to create announcement' });
+    }
+
+    try {
+      await courseNotifications.notifyAnnouncementCreated(
+        courseId,
+        course?.title || 'Course',
+        title,
+        content.substring(0, 180),
+        announcement.id
+      );
+    } catch (notifErr) {
+      console.error('⚠️ Failed to send announcement notification:', notifErr);
     }
 
     res.status(201).json({ data: announcement });
@@ -1441,8 +1581,8 @@ export const markCourseComplete = async (req: Request, res: Response) => {
     // Get teacher profile
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('id')
-      .eq('clerk_user_id', userId)
+      .select('id, clerk_user_id')
+      .or(`clerk_user_id.eq.${userId},id.eq.${userId}`)
       .single();
 
     if (profileError || !profile) {
@@ -1460,12 +1600,16 @@ export const markCourseComplete = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Course not found' });
     }
 
-    if (course.teacher_id !== profile.id) {
+    const isOwner = course.teacher_id === profile.id || course.teacher_id === profile.clerk_user_id;
+    if (!isOwner) {
       return res.status(403).json({ error: 'Access denied' });
     }
 
     if (course.is_completed) {
-      return res.status(400).json({ error: 'Course already marked as complete' });
+      return res.json({
+        success: true,
+        message: 'Course is already marked as complete.'
+      });
     }
 
     // Mark course as complete

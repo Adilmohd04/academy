@@ -139,9 +139,12 @@ export const getCourseContentWithProgress = async (
 export const markLessonComplete = async (
   lessonId: string,
   studentId: string
-): Promise<void> => {
+): Promise<{ courseId: string | null; progressPercentage: number }> => {
   const client = await pool.connect();
-  
+
+  let courseId: string | null = null;
+  let progressPercentage = 0;
+
   try {
     await client.query('BEGIN');
 
@@ -164,7 +167,7 @@ export const markLessonComplete = async (
     );
 
     if (courseResult.rows.length > 0) {
-      const courseId = courseResult.rows[0].course_id;
+      courseId = courseResult.rows[0].course_id;
 
       // Calculate new progress
       const progressResult = await client.query(
@@ -179,7 +182,7 @@ export const markLessonComplete = async (
       );
 
       const { total_lessons, completed_lessons } = progressResult.rows[0];
-      const progress_percentage = total_lessons > 0 
+      progressPercentage = total_lessons > 0
         ? Math.round((completed_lessons / total_lessons) * 100)
         : 0;
 
@@ -188,7 +191,7 @@ export const markLessonComplete = async (
         `UPDATE enrollments 
          SET progress_percentage = $1, last_accessed = NOW()
          WHERE course_id = $2 AND student_id = $3`,
-        [progress_percentage, courseId, studentId]
+        [progressPercentage, courseId, studentId]
       );
     }
 
@@ -199,6 +202,8 @@ export const markLessonComplete = async (
   } finally {
     client.release();
   }
+
+  return { courseId, progressPercentage };
 };
 
 export const getLessonProgress = async (

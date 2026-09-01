@@ -7,6 +7,12 @@ module.exports = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['var(--font-sans)'],
+        serif: ['var(--font-serif)'],
+        fredoka: ['var(--font-fredoka)'],
+        cinzel: ['var(--font-cinzel)'],
+      },
       colors: {
         primary: {
           50: '#f0fdf4',

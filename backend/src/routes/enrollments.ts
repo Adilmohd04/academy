@@ -6,6 +6,10 @@ import * as assignmentManagementController from '../modules/teacher/controllers/
 import { supabase } from '../config/database';
 import * as emailService from '../modules/shared/services/emailService';
 import * as courseNotifications from '../services/courseNotificationService';
+import {
+  checkPrerequisites,
+  prerequisiteErrorPayload,
+} from '../modules/student/services/prerequisiteService';
 
 const router = express.Router();
 
@@ -126,37 +130,11 @@ router.post('/enrollments/enroll', requireAuth, async (req: any, res) => {
       return res.status(400).json({ error: 'This course requires payment' });
     }
 
-    // Check prerequisite courses if any
-    if (course.prerequisite_courses && Array.isArray(course.prerequisite_courses) && course.prerequisite_courses.length > 0) {
-      const { data: completedEnrollments } = await supabase
-        .from('enrollments')
-        .select('course_id, completed, courses(title)')
-        .eq('student_id', profile.id)
-        .in('course_id', course.prerequisite_courses);
-
-      const completedCourseIds = (completedEnrollments || [])
-        .filter((e: any) => e.completed)
-        .map((e: any) => e.course_id);
-
-      const missingPrerequisites = course.prerequisite_courses.filter(
-        (prereqId: string) => !completedCourseIds.includes(prereqId)
-      );
-
-      if (missingPrerequisites.length > 0) {
-        // Get missing course titles
-        const { data: missingCourses } = await supabase
-          .from('courses')
-          .select('title')
-          .in('id', missingPrerequisites);
-
-        const missingTitles = (missingCourses || []).map((c: any) => c.title).join(', ');
-        
-        return res.status(403).json({ 
-          error: 'Prerequisites not met',
-          message: `You must complete the following course(s) before enrolling: ${missingTitles}`,
-          missing_prerequisites: missingTitles
-        });
-      }
+    // Prerequisites are enforced by the shared gate so this path, the direct
+    // enrollment service, and the post-payment path cannot drift apart.
+    const prerequisites = await checkPrerequisites(course_id, profile.id);
+    if (!prerequisites.satisfied) {
+      return res.status(403).json(prerequisiteErrorPayload(prerequisites.missing));
     }
 
     // Check if already enrolled

@@ -9,18 +9,18 @@
  */
 
 import { supabase } from '../../../config/database';
-import QRCode from 'qrcode';
-
-const VERIFICATION_PORTAL_URL = process.env.VERIFICATION_PORTAL_URL || 'https://yourdomain.com/verify';
+import { issueCertificate as issueCertificateThroughLifecycle } from '../../certificate/services/issuanceService';
 
 interface Certificate {
   id: string;
   course_id: string;
   student_id: string;
+  certificate_number?: string;
   verification_code: string;
   pdf_url?: string;
   qr_code_url?: string;
-  final_grade: number;
+  final_grade?: number;
+  final_score?: number;
   completion_date: string;
   status: string;
   is_manual_override: boolean;
@@ -38,112 +38,43 @@ interface CertificateDetails {
 }
 
 /**
- * Generate unique verification code (XXXX-XXXX-XXXX format)
- */
-const generateVerificationCode = (): string => {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No I, O, 0, 1
-  let result = '';
-  
-  for (let i = 0; i < 12; i++) {
-    if (i === 4 || i === 8) {
-      result += '-';
-    }
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  
-  return result;
-};
-
-/**
- * Generate QR code as base64 data URL
- */
-const generateQRCode = async (verificationUrl: string): Promise<string> => {
-  try {
-    const qrDataUrl = await QRCode.toDataURL(verificationUrl, {
-      width: 200,
-      margin: 2,
-      color: {
-        dark: '#1B365D',
-        light: '#FFFFFF'
-      }
-    });
-    return qrDataUrl;
-  } catch (error) {
-    console.error('Error generating QR code:', error);
-    throw new Error('Failed to generate QR code');
-  }
-};
-
-/**
- * Issue a new certificate
+ * Legacy API adapter for certificate issuance.
+ *
+ * This module is still imported by older controller code.  It must not keep a
+ * second issuance implementation because that used to create incomplete rows
+ * that lacked template snapshots and could drift from public verification.
  */
 export const issueCertificate = async (
   courseId: string,
   studentId: string,
-  finalGrade: number,
+  _finalGrade: number,
   options?: {
     isManualOverride?: boolean;
     overrideBy?: string;
     overrideReason?: string;
   }
 ): Promise<Certificate> => {
-  try {
-    // Check if certificate already exists
-    const { data: existing } = await supabase
-      .from('certificates')
-      .select('*')
-      .eq('course_id', courseId)
-      .eq('student_id', studentId)
-      .maybeSingle();
-    
-    if (existing) {
-      return existing;
-    }
-    
-    // Generate unique verification code
-    let verificationCode = generateVerificationCode();
-    let codeExists = true;
-    
-    while (codeExists) {
-      const { data: check } = await supabase
-        .from('certificates')
-        .select('id')
-        .eq('verification_code', verificationCode)
-        .maybeSingle();
-
-      if (!check) {
-        codeExists = false;
-      } else {
-        verificationCode = generateVerificationCode();
+  const override = options?.isManualOverride
+    ? {
+        reason: String(options.overrideReason || '').trim(),
+        by: String(options.overrideBy || '').trim(),
       }
-    }
-    
-    // Generate QR code
-    const verificationUrl = `${VERIFICATION_PORTAL_URL}/${verificationCode}`;
-    const qrCodeDataUrl = await generateQRCode(verificationUrl);
-    
-    // Insert certificate
-    const { data: result, error } = await supabase
-      .from('certificates')
-      .insert({
-        course_id: courseId,
-        student_id: studentId,
-        verification_code: verificationCode,
-        qr_code_url: qrCodeDataUrl,
-        final_grade: finalGrade,
-        is_manual_override: options?.isManualOverride || false,
-        override_by: options?.overrideBy,
-        override_reason: options?.overrideReason,
-        status: 'active'
-      })
-      .select()
-      .single();
+    : undefined;
 
-    if (error) throw error;
-    return result;
-  } catch (error) {
-    throw error;
+  if (options?.isManualOverride && (!override?.reason || !override.by)) {
+    throw new Error('A manual certificate override requires an approver and reason');
   }
+
+  const result = await issueCertificateThroughLifecycle(courseId, studentId, { override });
+  if (result.ok === false) {
+    throw new Error(`Certificate issuance failed: ${result.error}`);
+  }
+
+  if (String(result.certificate?.status || '').toLowerCase() === 'revoked') {
+    throw new Error('Certificate is revoked. Use the approved reissue workflow instead.');
+  }
+
+  return result.certificate as Certificate;
 };
 
 /**
@@ -403,12 +334,24 @@ export const revokeCertificate = async (
   reason: string
 ): Promise<Certificate> => {
   try {
+    const { data: existing, error: existingError } = await supabase
+      .from('certificates')
+      .select('id, status')
+      .eq('id', certificateId)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+    if (!existing) throw new Error('Certificate not found');
+    if (String(existing.status || '').toLowerCase() === 'revoked') {
+      return existing as Certificate;
+    }
+
     const { data: result, error } = await supabase
       .from('certificates')
       .update({
         status: 'revoked',
         revoked_at: new Date().toISOString(),
-        revoked_reason: reason
+        revoke_reason: reason
       })
       .eq('id', certificateId)
       .select()
@@ -424,30 +367,17 @@ export const revokeCertificate = async (
 };
 
 /**
- * Reinstate a revoked certificate (admin only)
+ * Legacy reactivation is intentionally disabled.
+ *
+ * Changing a revoked row back to active would erase the meaning of its public
+ * verification history and reuse the old QR credential.  A future reissue
+ * workflow must create/rotate a fresh verification credential with a durable
+ * audit trail; this compatibility method must not bypass it.
  */
 export const reinstateCertificate = async (
-  certificateId: string
+  _certificateId: string
 ): Promise<Certificate> => {
-  try {
-    const { data: result, error } = await supabase
-      .from('certificates')
-      .update({
-        status: 'active',
-        revoked_at: null,
-        revoked_reason: null
-      })
-      .eq('id', certificateId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    if (!result) throw new Error('Certificate not found');
-    
-    return result;
-  } catch (error) {
-    throw error;
-  }
+  throw new Error('Certificate reinstatement is disabled. Use the approved reissue workflow.');
 };
 
 /**
@@ -590,23 +520,53 @@ export const generateCertificateHTML = async (
       throw new Error('Certificate not found');
     }
     
-    // Get default template
-    const { data: template, error } = await supabase
+    const { data: courseTemplate, error: courseTemplateError } = await supabase
       .from('certificate_templates')
-      .select('template_html')
-      .eq('is_default', true)
-      .eq('is_active', true)
-      .limit(1)
+      .select('*')
+      .eq('course_id', certDetails.certificate.course_id)
       .maybeSingle();
 
-    if (error) throw error;
+    if (courseTemplateError) throw courseTemplateError;
+
+    let template = courseTemplate;
+
+    const isApprovedTemplate = (candidate: any) => {
+      const status = candidate?.template_data?.approval_status;
+      return !status || status === 'approved';
+    };
+
+    if (template && !isApprovedTemplate(template)) {
+      template = null;
+    }
+
+    if (!template) {
+      const { data: defaultTemplate, error: defaultTemplateError } = await supabase
+        .from('certificate_templates')
+        .select('*')
+        .eq('is_default', true)
+        .maybeSingle();
+
+      if (defaultTemplateError) throw defaultTemplateError;
+      template = isApprovedTemplate(defaultTemplate) ? defaultTemplate : null;
+    }
+
     if (!template) throw new Error('No certificate template found');
-    
-    const templateHtml = template.template_html;
+
+    const templateHtml =
+      template.template_html ||
+      template.template_data?.template_html ||
+      template.template_data?.html ||
+      template.template_data?.content;
+
+    if (!templateHtml) {
+      throw new Error('Certificate template is missing HTML content');
+    }
+
     const cert = certDetails.certificate;
+    const certificateNumber = (cert as any).certificate_number || (cert as any).verification_code || cert.id;
     
     // Replace placeholders
-    const html = templateHtml
+    const html = String(templateHtml)
       .replace('{{STUDENT_NAME}}', certDetails.student_name)
       .replace('{{COURSE_TITLE}}', certDetails.course_title)
       .replace('{{FINAL_GRADE}}', cert.final_grade?.toString() || 'N/A')
@@ -617,6 +577,8 @@ export const generateCertificateHTML = async (
       }))
       .replace('{{QR_CODE_URL}}', cert.qr_code_url || '')
       .replace('{{VERIFICATION_CODE}}', cert.verification_code)
+      .replace('{{CERTIFICATE_NUMBER}}', certificateNumber)
+      .replace('{{CERTIFICATE_ID}}', certificateNumber)
       .replace('{{TEACHER_NAME}}', certDetails.teacher_name);
     
     return html;

@@ -83,3 +83,6 @@ export const errorResponse = (error: AppError | Error) => {
     statusCode: 500
   };
 };
+
+export const getErrorMessage = (error: unknown, fallback = 'Internal server error') =>
+  error instanceof Error ? error.message : fallback;

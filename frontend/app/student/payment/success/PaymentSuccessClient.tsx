@@ -41,6 +41,9 @@ export default function PaymentSuccessClient() {
   const { getToken } = useAuth();
 
   const paymentId = searchParams.get('payment_id');
+  const mode = searchParams.get('mode') || 'meeting';
+  const isCourseMode = mode === 'course';
+  const courseId = searchParams.get('course_id');
 
   const [paymentDetails, setPaymentDetails] = useState<PaymentDetails | null>(null);
   const [loading, setLoading] = useState(true);
@@ -187,13 +190,13 @@ export default function PaymentSuccessClient() {
       <div className="max-w-3xl mx-auto">
         {/* Back Button */}
         <button
-          onClick={() => router.push('/student/meetings')}
+          onClick={() => router.push(isCourseMode ? '/student/courses' : '/student/meetings')}
           className="mb-4 flex items-center gap-2 px-4 py-2 text-emerald-800/70 hover:text-emerald-950 hover:bg-white/50 rounded-lg transition"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
-          Back to My Meetings
+          {isCourseMode ? 'Back to My Courses' : 'Back to My Meetings'}
         </button>
 
         {/* Success Animation */}
@@ -206,7 +209,7 @@ export default function PaymentSuccessClient() {
             </div>
           </div>
           <h1 className="text-3xl font-bold text-emerald-950 mb-2 font-serif">Payment Successful! 🎉</h1>
-          <p className="text-emerald-800/70">Your meeting has been booked successfully</p>
+          <p className="text-emerald-800/70">{isCourseMode ? 'Your course enrollment is confirmed' : 'Your meeting has been booked successfully'}</p>
         </div>
 
         {/* Payment Details Card */}
@@ -227,8 +230,8 @@ export default function PaymentSuccessClient() {
               </div>
             </div>
 
-            {/* Islamic Topic Section */}
-            {paymentDetails?.meeting_request?.topic && (
+            {/* Topic Section (meeting mode) */}
+            {!isCourseMode && paymentDetails?.meeting_request?.topic && (
               <div className="bg-amber-50/50 border-2 border-amber-100 rounded-lg p-4">
                 <div className="flex items-start gap-2">
                   <span className="text-2xl">📚</span>
@@ -245,26 +248,38 @@ export default function PaymentSuccessClient() {
               </div>
             )}
 
-            <div className="border-t border-amber-100 pt-4">
-              <h3 className="font-semibold text-emerald-950 mb-3 font-serif">Meeting Details</h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-emerald-800/60">Student:</span>
-                  <span className="font-semibold text-emerald-950">{paymentDetails?.meeting_request?.student_name}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-emerald-800/60">Date:</span>
-                  <span className="font-semibold text-emerald-950">{paymentDetails?.meeting_request?.preferred_date}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-medium text-emerald-800/60">Time:</span>
-                  <span className="font-semibold text-emerald-950">
-                    {paymentDetails?.meeting_request?.time_slot?.start_time} - 
-                    {paymentDetails?.meeting_request?.time_slot?.end_time}
-                  </span>
+            {!isCourseMode && (
+              <div className="border-t border-amber-100 pt-4">
+                <h3 className="font-semibold text-emerald-950 mb-3 font-serif">Meeting Details</h3>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-emerald-800/60">Student:</span>
+                    <span className="font-semibold text-emerald-950">{paymentDetails?.meeting_request?.student_name}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-emerald-800/60">Date:</span>
+                    <span className="font-semibold text-emerald-950">{paymentDetails?.meeting_request?.preferred_date}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-emerald-800/60">Time:</span>
+                    <span className="font-semibold text-emerald-950">
+                      {paymentDetails?.meeting_request?.time_slot?.start_time} - 
+                      {paymentDetails?.meeting_request?.time_slot?.end_time}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
+
+            {isCourseMode && (
+              <div className="border-t border-amber-100 pt-4">
+                <h3 className="font-semibold text-emerald-950 mb-2 font-serif">Enrollment Details</h3>
+                <p className="text-sm text-emerald-800/75">
+                  Your payment is verified and your enrollment is now active.
+                  {courseId ? ` Course ID: ${courseId}` : ''}
+                </p>
+              </div>
+            )}
 
             <div className="bg-green-50 border-2 border-green-500 rounded-lg p-4">
               <p className="text-sm text-green-900 font-medium">
@@ -279,13 +294,22 @@ export default function PaymentSuccessClient() {
           <h3 className="font-bold text-emerald-900 mb-2 flex items-center font-serif">
             <span className="mr-2">📧</span> What Happens Next?
           </h3>
-          <ol className="text-sm text-emerald-800 space-y-2 list-decimal list-inside">
-            <li>Admin will assign a qualified teacher within 24 hours</li>
-            <li>You&apos;ll receive meeting link via email to your registered email</li>
-            <li>Teacher will also receive your details and meeting link</li>
-            <li>You&apos;ll get a reminder 1 hour before the meeting</li>
-            <li>Meeting will appear in your dashboard</li>
-          </ol>
+          {isCourseMode ? (
+            <ol className="text-sm text-emerald-800 space-y-2 list-decimal list-inside">
+              <li>Your enrollment is now active</li>
+              <li>The course appears in your My Courses dashboard</li>
+              <li>You can start learning immediately</li>
+              <li>Keep your payment receipt for reference</li>
+            </ol>
+          ) : (
+            <ol className="text-sm text-emerald-800 space-y-2 list-decimal list-inside">
+              <li>Admin will assign a qualified teacher within 24 hours</li>
+              <li>You&apos;ll receive meeting link via email to your registered email</li>
+              <li>Teacher will also receive your details and meeting link</li>
+              <li>You&apos;ll get a reminder 1 hour before the meeting</li>
+              <li>Meeting will appear in your dashboard</li>
+            </ol>
+          )}
         </div>
 
         {/* Important Note */}

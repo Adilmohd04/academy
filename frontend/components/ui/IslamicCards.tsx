@@ -22,15 +22,15 @@ export const IslamicCard: React.FC<IslamicCardProps> = ({
   gradient = false,
   border = true 
 }) => {
-  const baseClasses = "rounded-2xl backdrop-blur-sm transition-all duration-300";
-  const hoverClasses = hover ? "hover:shadow-2xl hover:-translate-y-1" : "";
-  const borderClasses = border ? "border border-islamic-primary-200/30" : "";
+  const baseClasses = "rounded-2xl transition-all duration-300 overflow-hidden relative shadow-sm";
+  const hoverClasses = hover ? "hover:shadow-xl hover:border-[#1B365D]/20 hover:-translate-y-0.5" : "";
+  const borderClasses = border ? "border border-[#E2E8F0]" : "";
   const gradientClasses = gradient 
-    ? "bg-gradient-to-br from-white/95 via-islamic-sand-50/95 to-islamic-emerald-50/90" 
-    : "bg-white/95";
+    ? "bg-gradient-to-br from-[#FDFBF7] to-white" 
+    : "bg-white";
   
   return (
-    <div className={`${baseClasses} ${hoverClasses} ${borderClasses} ${gradientClasses} shadow-lg ${className}`}>
+    <div className={`${baseClasses} ${hoverClasses} ${borderClasses} ${gradientClasses} ${className}`}>
       {children}
     </div>
   );
@@ -102,10 +102,10 @@ export const IslamicActionCard: React.FC<ActionCardProps> = ({
   description,
   onClick,
   href,
-  gradient = "from-islamic-primary-600 to-islamic-emerald-600"
+  gradient = "from-[#1B365D] to-[#152C4E]"
 }) => {
   const content = (
-    <div className={`group relative overflow-hidden rounded-2xl p-6 bg-gradient-to-br ${gradient} text-white cursor-pointer transform transition-all duration-300 hover:scale-105 hover:shadow-2xl`}>
+    <div className={`group relative overflow-hidden rounded-2xl p-6 bg-gradient-to-br ${gradient} text-white cursor-pointer transform transition-all duration-300 hover:-translate-y-1 hover:shadow-xl`}>
       {/* Decorative pattern overlay */}
       <div className="absolute inset-0 opacity-10">
         <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
@@ -170,10 +170,10 @@ export const IslamicInfoCard: React.FC<InfoCardProps> = ({
       title: 'text-amber-900'
     },
     neutral: {
-      border: 'border-islamic-primary-300',
-      bg: 'bg-islamic-sand-100/80',
-      icon: 'text-islamic-primary-600',
-      title: 'text-islamic-primary-900'
+      border: 'border-[#1B365D]/30',
+      bg: 'bg-[#FDFBF7]',
+      icon: 'text-[#1B365D]',
+      title: 'text-[#1B365D]'
     }
   };
 

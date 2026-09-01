@@ -1,5 +1,42 @@
 import { Request, Response } from 'express';
 import { supabase } from '../config/database';
+import { getErrorMessage } from '../utils/errors';
+import {
+  CourseContentRecord,
+  LANGUAGE_CODES,
+  LANGUAGE_COLUMN_MAP,
+  LanguageCode,
+  LanguageVersionMap,
+  LessonLanguageRecord,
+  LessonOwnershipRecord,
+  LessonOwnershipCourseRecord,
+} from '../types/content';
+
+const isLanguageCode = (value: string): value is LanguageCode =>
+  (LANGUAGE_CODES as readonly string[]).includes(value);
+
+const parseLanguageCode = (value: unknown): LanguageCode | null => {
+  const requested = typeof value === 'string' ? value : 'en';
+  return isLanguageCode(requested) ? requested : null;
+};
+
+const getOwningCourse = (lesson: LessonOwnershipRecord): LessonOwnershipCourseRecord | null => {
+  const week = lesson.week;
+  const weekData = Array.isArray(week) ? week[0] : week;
+  const course = weekData?.course;
+
+  if (!course) {
+    return null;
+  }
+
+  return Array.isArray(course) ? course[0] ?? null : course;
+};
+
+const getAvailableLanguages = (lesson: LessonLanguageRecord): LanguageVersionMap => ({
+  en: lesson.content_url_en,
+  ta: lesson.content_url_ta,
+  ar: lesson.content_url_ar,
+});
 
 /**
  * Add or update language version for a lesson
@@ -16,8 +53,7 @@ export const addLessonLanguage = async (req: Request, res: Response) => {
     }
 
     // Validate language
-    const validLanguages = ['en', 'ta', 'ar'];
-    if (!validLanguages.includes(language)) {
+    if (!isLanguageCode(language)) {
       return res.status(400).json({ 
         error: 'Invalid language',
         message: 'Language must be one of: en (English), ta (Tamil), ar (Arabic)'
@@ -39,9 +75,7 @@ export const addLessonLanguage = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Lesson not found' });
     }
 
-    const week = lesson.week as any;
-    const course = Array.isArray(week) ? week[0]?.course : week?.course;
-    const courseData = Array.isArray(course) ? course[0] : course;
+    const courseData = getOwningCourse(lesson as LessonOwnershipRecord);
 
     if (courseData?.teacher_id !== teacherId) {
       return res.status(403).json({ error: 'Forbidden: You do not own this lesson' });
@@ -65,9 +99,9 @@ export const addLessonLanguage = async (req: Request, res: Response) => {
       message: `${language.toUpperCase()} version updated successfully`,
       lesson: data
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error adding lesson language:', error);
-    res.status(500).json({ error: error.message || 'Failed to add lesson language' });
+    res.status(500).json({ error: getErrorMessage(error, 'Failed to add lesson language') });
   }
 };
 
@@ -78,7 +112,7 @@ export const addLessonLanguage = async (req: Request, res: Response) => {
 export const getLessonWithLanguage = async (req: Request, res: Response) => {
   try {
     const { lessonId } = req.params;
-    const language = (req.query.language as string) || 'en';
+    const language = parseLanguageCode(req.query.language);
     const studentId = req.auth?.userId;
 
     if (!studentId) {
@@ -86,8 +120,7 @@ export const getLessonWithLanguage = async (req: Request, res: Response) => {
     }
 
     // Validate language
-    const validLanguages = ['en', 'ta', 'ar'];
-    if (!validLanguages.includes(language)) {
+    if (!language) {
       return res.status(400).json({ error: 'Invalid language' });
     }
 
@@ -122,20 +155,19 @@ export const getLessonWithLanguage = async (req: Request, res: Response) => {
     }
 
     // Get the language-specific URL
-    const languageUrls: any = {
-      en: lesson.content_url_en,
-      ta: lesson.content_url_ta,
-      ar: lesson.content_url_ar
-    };
+    const languageUrls = getAvailableLanguages(lesson as LessonLanguageRecord);
 
     const selectedUrl = languageUrls[language];
+    const availableLanguages = Object.entries(languageUrls)
+      .filter(([, url]) => Boolean(url))
+      .map(([lang]) => lang as LanguageCode);
 
     // Check if lesson has the requested language
     if (!selectedUrl) {
       return res.status(404).json({ 
         error: 'Language not available',
         message: `This lesson is not available in ${language}`,
-        available_languages: Object.keys(languageUrls).filter(lang => languageUrls[lang])
+        available_languages: availableLanguages
       });
     }
 
@@ -144,15 +176,15 @@ export const getLessonWithLanguage = async (req: Request, res: Response) => {
       ...lesson,
       content_url: selectedUrl,
       selected_language: language,
-      available_languages: Object.keys(languageUrls).filter(lang => languageUrls[lang]),
+      available_languages: availableLanguages,
       // Remove language-specific columns from response
       content_url_en: undefined,
       content_url_ta: undefined,
       content_url_ar: undefined
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching lesson with language:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch lesson' });
+    res.status(500).json({ error: getErrorMessage(error, 'Failed to fetch lesson') });
   }
 };
 
@@ -163,7 +195,7 @@ export const getLessonWithLanguage = async (req: Request, res: Response) => {
 export const getCourseContentWithLanguage = async (req: Request, res: Response) => {
   try {
     const { courseId } = req.params;
-    const language = (req.query.language as string) || 'en';
+    const language = parseLanguageCode(req.query.language);
     const studentId = req.auth?.userId;
 
     if (!studentId) {
@@ -171,8 +203,7 @@ export const getCourseContentWithLanguage = async (req: Request, res: Response) 
     }
 
     // Validate language
-    const validLanguages = ['en', 'ta', 'ar'];
-    if (!validLanguages.includes(language)) {
+    if (!language) {
       return res.status(400).json({ error: 'Invalid language' });
     }
 
@@ -210,12 +241,14 @@ export const getCourseContentWithLanguage = async (req: Request, res: Response) 
     }
 
     // Filter lessons based on language availability
-    const columnName = `content_url_${language}`;
-    const filteredWeeks = course.weeks?.map((week: any) => ({
-      ...week,
-      lessons: week.lessons
-        ?.filter((lesson: any) => lesson[columnName]) // Only include lessons with this language
-        .map((lesson: any) => ({
+    const columnName = LANGUAGE_COLUMN_MAP[language];
+    const courseData = course as CourseContentRecord;
+    const filteredWeeks = (courseData.weeks ?? [])
+      .map((week) => ({
+        ...week,
+        lessons: (week.lessons ?? [])
+          .filter((lesson) => lesson[columnName]) // Only include lessons with this language
+          .map((lesson) => ({
           ...lesson,
           content_url: lesson[columnName],
           selected_language: language,
@@ -226,22 +259,22 @@ export const getCourseContentWithLanguage = async (req: Request, res: Response) 
           content_url_en: undefined,
           content_url_ta: undefined,
           content_url_ar: undefined
-        }))
-    }))
-    .filter((week: any) => week.lessons && week.lessons.length > 0); // Remove empty weeks
+          }))
+      }))
+      .filter((week) => week.lessons && week.lessons.length > 0); // Remove empty weeks
 
     res.json({
-      ...course,
+      ...courseData,
       weeks: filteredWeeks,
       selected_language: language,
       total_weeks: filteredWeeks?.length || 0,
-      total_lessons: filteredWeeks?.reduce((sum: number, week: any) => 
+      total_lessons: filteredWeeks?.reduce((sum: number, week) => 
         sum + (week.lessons?.length || 0), 0
       )
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching course content with language:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch course content' });
+    res.status(500).json({ error: getErrorMessage(error, 'Failed to fetch course content') });
   }
 };
 
@@ -274,10 +307,10 @@ export const getAllLessonLanguages = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Lesson not found' });
     }
 
-    res.json(lesson);
-  } catch (error: any) {
+    res.json(lesson as LessonLanguageRecord);
+  } catch (error: unknown) {
     console.error('Error fetching lesson languages:', error);
-    res.status(500).json({ error: error.message || 'Failed to fetch lesson languages' });
+    res.status(500).json({ error: getErrorMessage(error, 'Failed to fetch lesson languages') });
   }
 };
 
@@ -294,9 +327,7 @@ export const deleteLessonLanguage = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    // Validate language
-    const validLanguages = ['en', 'ta', 'ar'];
-    if (!validLanguages.includes(language)) {
+    if (!isLanguageCode(language)) {
       return res.status(400).json({ error: 'Invalid language' });
     }
 
@@ -311,9 +342,7 @@ export const deleteLessonLanguage = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Lesson not found' });
     }
 
-    const week = lesson.week as any;
-    const course = Array.isArray(week) ? week[0]?.course : week?.course;
-    const courseData = Array.isArray(course) ? course[0] : course;
+    const courseData = getOwningCourse(lesson as LessonOwnershipRecord);
 
     if (courseData?.teacher_id !== teacherId) {
       return res.status(403).json({ error: 'Forbidden' });
@@ -337,8 +366,8 @@ export const deleteLessonLanguage = async (req: Request, res: Response) => {
       message: `${language.toUpperCase()} version removed`,
       lesson: data
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error deleting lesson language:', error);
-    res.status(500).json({ error: error.message || 'Failed to delete lesson language' });
+    res.status(500).json({ error: getErrorMessage(error, 'Failed to delete lesson language') });
   }
 };

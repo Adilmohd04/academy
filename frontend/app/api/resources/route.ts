@@ -1,110 +1,166 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { currentUser } from '@clerk/nextjs/server';
+import { NextResponse } from 'next/server';
+
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
+import {
+  hasResourceInputError,
+  parseOptionalParentId,
+  parseResourceInput,
+} from '@/lib/server/resourceValidation';
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+type ResourceRecord = {
+  created_by: string | null;
+  [key: string]: unknown;
+};
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+type ProfileRecord = {
+  clerk_user_id: string;
+  full_name: string | null;
+};
 
-export async function GET(request: NextRequest) {
+/**
+ * The resource list is scoped from the authenticated database role, never a
+ * role query parameter supplied by the browser.  Old callers may still send
+ * ?role=..., but it is intentionally ignored.
+ */
+export async function GET() {
   try {
-    const user = await currentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authorization = await requireRole(['admin', 'teacher', 'student']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
     }
 
-    const { searchParams } = new URL(request.url);
-    const role = searchParams.get('role');
-    const clerkUserId = user.id;
-
-    // Get the profile ID from Clerk user ID
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, clerk_user_id')
-      .eq('clerk_user_id', clerkUserId)
-      .single();
-
-    if (profileError || !profileData) {
-      console.error('Error fetching profile:', profileError);
-      return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
-    }
-
-    const profileId = profileData.id;
-
+    const supabase = getSupabaseAdminClient();
     let query = supabase
       .from('resources')
-      .select('*, profiles(full_name)')
+      .select('*')
       .order('created_at', { ascending: false });
 
-    // If admin, they can see everything (or filter by status in UI)
-    if (role === 'admin') {
-      // No extra filter needed
-    } 
-    // If teacher, they see their own uploads
-    else if (role === 'teacher') {
-      query = query.eq('created_by', clerkUserId);
-    }
-    // If student (or others), they only see approved resources
-    else {
+    if (authorization.actor.role === 'teacher') {
+      query = query.eq('created_by', authorization.actor.userId);
+    } else if (authorization.actor.role === 'student') {
       query = query.eq('status', 'approved');
     }
 
     const { data, error } = await query;
-
     if (error) {
-      console.error('Error fetching resources:', error);
+      console.error('Unable to fetch resources:', error);
       return NextResponse.json({ error: 'Failed to fetch resources' }, { status: 500 });
     }
 
-    return NextResponse.json(data || []);
+    const resources = (data || []) as ResourceRecord[];
+    const creatorIds = Array.from(new Set(
+      resources
+        .map((resource) => resource.created_by)
+        .filter((creatorId): creatorId is string => Boolean(creatorId)),
+    ));
+
+    // resources.created_by is a Clerk ID rather than a foreign key. Hydrate
+    // display names explicitly instead of relying on a nonexistent relation.
+    let names = new Map<string, string | null>();
+    if (creatorIds.length) {
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('clerk_user_id, full_name')
+        .in('clerk_user_id', creatorIds);
+
+      if (profilesError) {
+        console.warn('Unable to hydrate resource creator names:', profilesError);
+      } else {
+        names = new Map(
+          ((profiles || []) as ProfileRecord[]).map((profile) => [
+            profile.clerk_user_id,
+            profile.full_name,
+          ]),
+        );
+      }
+    }
+
+    return NextResponse.json(
+      resources.map((resource) => ({
+        ...resource,
+        profiles: resource.created_by
+          ? { full_name: names.get(resource.created_by) || null }
+          : null,
+      })),
+    );
   } catch (error) {
-    console.error('Error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    console.error('Resource list failed:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
-    const user = await currentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authorization = await requireRole(['admin', 'teacher']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
     }
 
-    const body = await request.json();
-    const { title, description, type, url, category, parent_id } = body;
-    const userRole = user.publicMetadata?.role as string;
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
 
-    // Admins are auto-approved, others are pending
-    const status = userRole === 'admin' ? 'approved' : 'pending';
+    const parsed = parseResourceInput(body);
+    if (hasResourceInputError(parsed)) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+
+    const parentId = parseOptionalParentId(body);
+    if (parentId === undefined) {
+      return NextResponse.json({ error: 'Invalid parent resource' }, { status: 400 });
+    }
+
+    const supabase = getSupabaseAdminClient();
+    if (parentId) {
+      const { data: parent, error: parentError } = await supabase
+        .from('resources')
+        .select('id, created_by, type')
+        .eq('id', parentId)
+        .maybeSingle();
+
+      if (parentError) {
+        console.error('Unable to verify resource parent:', parentError);
+        return NextResponse.json({ error: 'Unable to create resource' }, { status: 500 });
+      }
+
+      if (!parent || parent.type !== 'folder') {
+        return NextResponse.json({ error: 'Parent folder not found' }, { status: 400 });
+      }
+
+      if (
+        authorization.actor.role !== 'admin' &&
+        parent.created_by !== authorization.actor.userId
+      ) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+    }
 
     const { data, error } = await supabase
       .from('resources')
-      .insert([
-        {
-          title,
-          description: description || '',
-          type,
-          url,
-          category: category || 'General',
-          status,
-          created_by: user.id,
-          parent_id: parent_id || null
-        }
-      ])
+      .insert({
+        ...parsed.value,
+        parent_id: parentId,
+        // Never accept an owner or approval status from the caller.
+        created_by: authorization.actor.userId,
+        status: authorization.actor.role === 'admin' ? 'approved' : 'pending',
+      })
       .select()
       .single();
 
     if (error) {
-      console.error('Error creating resource:', error);
+      console.error('Unable to create resource:', error);
       return NextResponse.json({ error: 'Failed to create resource' }, { status: 500 });
     }
 
-    return NextResponse.json(data);
+    return NextResponse.json(data, { status: 201 });
   } catch (error) {
-    console.error('Error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    console.error('Resource creation failed:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

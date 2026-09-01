@@ -1,11 +1,16 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
 
 export async function POST(request: NextRequest) {
   try {
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
+    }
+
     const body = await request.json();
     const { teacher_id, price } = body;
 
@@ -16,7 +21,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabaseAdminClient();
 
     // Update teacher price in profiles table
     const { data, error } = await supabase

@@ -1,27 +1,24 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  reactStrictMode: true,
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'images.unsplash.com',
-      },
-      {
-        protocol: 'https',
-        hostname: 'img.clerk.com',
-      },
-      {
-        protocol: 'https',
-        hostname: 'images.clerk.dev',
-      },
-    ],
-  },
-  typescript: {
-    ignoreBuildErrors: false,
-  },
-  // Allow Clerk to work across multiple domains
-    // Removed headers async function to avoid build warnings
+const path = require('path');
+
+// Disable SSL verification for development
+if (process.env.NODE_ENV === 'development') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 
-module.exports = nextConfig
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  // Reduce logging noise
+  logging: {
+    fetches: {
+      fullUrl: false,
+    },
+  },
+
+  // Set workspace root to fix lockfile warning
+  experimental: {
+    outputFileTracingRoot: path.join(__dirname, '../'),
+  },
+
+};
+
+module.exports = nextConfig;

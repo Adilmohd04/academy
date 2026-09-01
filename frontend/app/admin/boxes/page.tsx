@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth } from '@clerk/nextjs';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Package, Users, Clock, Calendar, CheckCircle, XCircle, AlertCircle, ExternalLink } from 'lucide-react';
 
 interface Student {
@@ -33,45 +33,59 @@ interface Box {
   students: Student[];
 }
 
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5000').replace('localhost', '127.0.0.1');
+
 export default function BoxApprovalPage() {
-  const { getToken } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const [boxes, setBoxes] = useState<Box[]>([]);
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [meetingLinks, setMeetingLinks] = useState<{[boxId: string]: string}>({});
 
-  useEffect(() => {
-    loadBoxes();
-  }, []);
-
-  const loadBoxes = async () => {
+  const loadBoxes = useCallback(async () => {
     try {
       setLoading(true);
       const token = await getToken();
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/boxes/pending`, {
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      const response = await fetch(`${API_URL}/api/boxes/pending`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      
-      if (response.ok) {
-        const result = await response.json();
-        setBoxes(result.data);
+
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || result.message || 'Failed to load boxes');
       }
-    } catch (error) {
+
+      setBoxes(Array.isArray(result.data) ? result.data : []);
+    } catch (error: any) {
       console.error('Error loading boxes:', error);
-      setMessage({ type: 'error', text: 'Failed to load boxes' });
+      setBoxes([]);
+      setMessage({ type: 'error', text: error?.message || 'Failed to load boxes' });
     } finally {
       setLoading(false);
     }
-  };
+  }, [getToken]);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      setLoading(false);
+      setMessage({ type: 'error', text: 'Please sign in again to review booking boxes.' });
+      return;
+    }
+    void loadBoxes();
+  }, [isLoaded, isSignedIn, loadBoxes]);
 
   const handleApproveBox = async (boxId: string) => {
     try {
       setApproving(boxId);
       const token = await getToken();
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
       
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/boxes/${boxId}/approve`,
+        `${API_URL}/api/boxes/${boxId}/approve`,
         {
           method: 'POST',
           headers: {
@@ -82,17 +96,23 @@ export default function BoxApprovalPage() {
         }
       );
 
+      const result = await response.json().catch(() => ({}));
       if (response.ok) {
-        const result = await response.json();
-        setMessage({ type: 'success', text: result.message });
-        loadBoxes();
+        const approvedCount = Number(result?.data?.approved || 0);
+        setMessage({
+          type: 'success',
+          text: approvedCount > 0
+            ? `Approved ${approvedCount} booking${approvedCount === 1 ? '' : 's'}.`
+            : 'Box approved successfully.',
+        });
+        void loadBoxes();
         setTimeout(() => setMessage(null), 3000);
       } else {
-        throw new Error('Failed to approve box');
+        throw new Error(result.error || result.message || 'Failed to approve box');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error approving box:', error);
-      setMessage({ type: 'error', text: 'Failed to approve box' });
+      setMessage({ type: 'error', text: error?.message || 'Failed to approve box' });
     } finally {
       setApproving(null);
     }

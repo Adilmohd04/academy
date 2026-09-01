@@ -1,13 +1,21 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
 import { NextResponse } from 'next/server'
-import { auth, currentUser } from '@clerk/nextjs/server'
-import { createClient } from '@supabase/supabase-js'
+import { auth, currentUser, clerkClient } from '@clerk/nextjs/server'
 
 export const dynamic = 'force-dynamic'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+const supabase = getSupabaseAdminClient()
+
+type ProfileRoleRow = {
+  role: string | null
+}
+
+type ProfileIdentityRow = {
+  id: string
+  clerk_user_id: string
+}
+
+const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export async function POST(req: Request) {
   try {
@@ -19,21 +27,33 @@ export async function POST(req: Request) {
     }
 
     // Check if user is admin by checking their role in database
-    const { data: adminProfile } = await supabase
+    const { data: adminProfileData } = await supabase
       .from('profiles')
       .select('role')
       .eq('clerk_user_id', userId)
       .single()
 
+    const adminProfile = adminProfileData as ProfileRoleRow | null
+
     if (!adminProfile || adminProfile.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 })
     }
 
-    const formData = await req.formData()
-    const profileId = formData.get('userId') as string
-    const newRole = formData.get('role') as string
+    const contentType = req.headers.get('content-type') || ''
+    let profileIdentifier = ''
+    let newRole = ''
 
-    if (!profileId || !newRole) {
+    if (contentType.includes('application/json')) {
+      const body = await req.json()
+      profileIdentifier = body.userId || body.clerk_user_id || body.profileId || ''
+      newRole = body.role || ''
+    } else {
+      const formData = await req.formData()
+      profileIdentifier = (formData.get('userId') || formData.get('clerk_user_id') || formData.get('profileId') || '') as string
+      newRole = (formData.get('role') || '') as string
+    }
+
+    if (!profileIdentifier || !newRole) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
@@ -42,28 +62,62 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Invalid role' }, { status: 400 })
     }
 
-    console.log(`🔄 Admin ${user.emailAddresses[0]?.emailAddress} changing user ${profileId} role to: ${newRole}`)
+    console.log(`🔄 Admin ${user.emailAddresses[0]?.emailAddress} changing user ${profileIdentifier} role to: ${newRole}`)
 
-    // Update user role in Supabase database (this is the backend update!)
-    const { data: updatedProfile, error } = await supabase
-      .from('profiles')
-      .update({ 
+    // Accept either a profile UUID or a Clerk user id from the admin UI.
+    let targetProfile: ProfileIdentityRow | null = null
+    if (UUID_V4_REGEX.test(profileIdentifier)) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, clerk_user_id')
+        .eq('id', profileIdentifier)
+        .single()
+
+      targetProfile = (data as ProfileIdentityRow | null) || null
+    }
+
+    if (!targetProfile) {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, clerk_user_id')
+        .eq('clerk_user_id', profileIdentifier)
+        .single()
+
+      targetProfile = (data as ProfileIdentityRow | null) || null
+    }
+
+    if (!targetProfile) {
+      return NextResponse.json({ error: 'User profile not found' }, { status: 404 })
+    }
+
+    // Update user role in Supabase database
+    const { data: updatedProfile, error } = await ((supabase.from('profiles') as any)
+      .update({
         role: newRole,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
-      .eq('id', profileId)
+      .eq('id', targetProfile.id)
       .select()
-      .single()
+      .single())
 
     if (error) {
       console.error('❌ Error updating role:', error)
       return NextResponse.json({ error: 'Failed to update role in database' }, { status: 500 })
     }
 
+    // Keep Clerk metadata in sync so auth middleware sees the new role immediately
+    try {
+      const clerk = await clerkClient()
+      await clerk.users.updateUserMetadata(updatedProfile.clerk_user_id, {
+        publicMetadata: { role: newRole },
+      })
+    } catch (metadataError) {
+      console.error('⚠️ Failed to sync Clerk metadata after role update:', metadataError)
+    }
+
     console.log(`✅ Role updated successfully in database:`, updatedProfile)
 
-    // Redirect back to admin page with success
-    return NextResponse.redirect(new URL('/admin?success=role-updated', req.url))
+    return NextResponse.json({ success: true, profile: updatedProfile })
   } catch (error) {
     console.error('❌ API Error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

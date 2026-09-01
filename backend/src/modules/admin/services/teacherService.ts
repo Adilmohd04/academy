@@ -37,9 +37,35 @@ export const getAllTeachers = async () => {
 
     console.log(`✅ Found ${teachers.length} teachers (role='teacher' only)`);
 
+    const canonicalTeachers = new Map<string, any>();
+
+    for (const teacher of teachers as any[]) {
+      const emailKey = (teacher.email || '').trim().toLowerCase();
+      const clerkKey = (teacher.clerk_user_id || '').trim();
+      const idKey = (teacher.id || '').trim();
+      const canonicalKey = emailKey || clerkKey || idKey;
+
+      if (!canonicalKey) {
+        continue;
+      }
+
+      const existing = canonicalTeachers.get(canonicalKey);
+      if (!existing) {
+        canonicalTeachers.set(canonicalKey, teacher);
+        continue;
+      }
+
+      const existingScore = Number(Boolean(existing.full_name)) + Number(Boolean(existing.email)) + Number(Boolean(existing.clerk_user_id));
+      const currentScore = Number(Boolean(teacher.full_name)) + Number(Boolean(teacher.email)) + Number(Boolean(teacher.clerk_user_id));
+
+      if (currentScore > existingScore) {
+        canonicalTeachers.set(canonicalKey, teacher);
+      }
+    }
+
     // Fetch pricing separately for each teacher using clerk_user_id
     const teachersWithPricing = await Promise.all(
-      teachers.map(async (teacher: any) => {
+      Array.from(canonicalTeachers.values()).map(async (teacher: any) => {
         const { data: pricing } = await supabase
           .from('teacher_pricing')
           .select('price_per_meeting, is_free, notes')

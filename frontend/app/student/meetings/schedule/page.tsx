@@ -168,9 +168,16 @@ function MeetingScheduleContent() {
       }, token);
 
       const meetingRequestId = response.data.id;
+      // The backend is the pricing authority. Browser query parameters and
+      // displayed slot prices never determine whether payment is required.
+      const resolvedAmount = Number(response.data?.amount);
+      const bookingAmount = Number.isFinite(resolvedAmount) && resolvedAmount >= 0
+        ? resolvedAmount
+        : meetingPrice;
+      setMeetingPrice(bookingAmount);
 
       // If meeting is free (price=0 or is_free flag), book directly without payment
-      if (meetingPrice === 0 || slotDetails?.is_free === true) {
+      if (bookingAmount === 0) {
         console.log('✅ Free slot confirmed (price=0 or is_free=true), booking directly...');
         try {
           await api.meetings.createFreeBooking({
@@ -189,7 +196,7 @@ function MeetingScheduleContent() {
         }
       }
 
-      router.push(`/student/payment?meeting_request_id=${meetingRequestId}&amount=${meetingPrice}&topic=${encodeURIComponent(slotDetails?.topic || '')}&description=${encodeURIComponent(slotDetails?.description || '')}`);
+      router.push(`/student/payment?meeting_request_id=${meetingRequestId}&amount=${bookingAmount}&topic=${encodeURIComponent(slotDetails?.topic || '')}&description=${encodeURIComponent(slotDetails?.description || '')}`);
 
     } catch (err: any) {
       console.error('Error creating booking:', err);

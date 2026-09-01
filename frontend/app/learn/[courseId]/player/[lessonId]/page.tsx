@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@clerk/nextjs';
 import { useParams, useRouter } from 'next/navigation';
 import { ChevronLeft, ChevronRight, CheckCircle, Loader2, FileText } from 'lucide-react';
+import DOMPurify from 'dompurify';
 import { IslamicButton } from '@/components/ui/IslamicButtons';
 import { IslamicCard } from '@/components/ui/IslamicCards';
 
@@ -130,7 +131,7 @@ export default function VideoPlayerPage() {
 
           {lesson.content && (
             <div className="prose max-w-none">
-              <div className="text-slate-700" dangerouslySetInnerHTML={{ __html: lesson.content }} />
+              <div className="text-slate-700" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(lesson.content) }} />
             </div>
           )}
         </IslamicCard>

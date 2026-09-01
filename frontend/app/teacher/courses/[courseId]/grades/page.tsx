@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 
 const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL;
+  process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
 interface Assignment {
   lesson_id: string;
@@ -58,7 +58,7 @@ interface Submission {
 export default function TeacherSubmissionsPage() {
   const params = useParams();
   const router = useRouter();
-  const { userId } = useAuth();
+  const { getToken } = useAuth();
   const courseId = params.courseId as string;
 
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -68,17 +68,19 @@ export default function TeacherSubmissionsPage() {
   const [filter, setFilter] = useState<"all" | "pending" | "graded">("all");
 
   useEffect(() => {
-    if (courseId && userId) {
-      loadData();
+    if (courseId) {
+      void loadData();
     }
-  }, [courseId, userId]);
+  }, [courseId]);
 
   const loadData = async () => {
     try {
       setLoading(true);
+      const token = await getToken();
+      if (!token) throw new Error("Your sign-in session is unavailable. Please sign in again.");
       const res = await fetch(
         `${API_URL}/api/teacher/courses/${courseId}/assignment-submissions`,
-        { headers: { "x-clerk-user-id": userId || "" } }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
       if (res.ok) {
         const data = await res.json();

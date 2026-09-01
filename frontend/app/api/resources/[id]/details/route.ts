@@ -1,66 +1,97 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { currentUser } from '@clerk/nextjs/server';
+import { NextResponse } from 'next/server';
+
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
+import {
+  hasResourceInputError,
+  parseResourceInput,
+} from '@/lib/server/resourceValidation';
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
 
 export const dynamic = 'force-dynamic';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+type ResourceOwner = {
+  created_by: string | null;
+};
 
 export async function PUT(
-  request: NextRequest,
-  { params }: { params: { id: string } }
+  request: Request,
+  { params }: { params: { id: string } },
 ) {
   try {
-    const user = await currentUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const authorization = await requireRole(['admin', 'teacher']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
     }
 
-    const { id } = params;
-    const body = await request.json();
-    const { title, description, type, url, category } = body;
-    const userRole = user.publicMetadata?.role as string;
+    const resourceId = params.id?.trim();
+    if (!resourceId) {
+      return NextResponse.json({ error: 'Resource ID is required' }, { status: 400 });
+    }
 
-    // Check if resource exists and who owns it
-    const { data: resource, error: fetchError } = await supabase
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+
+    const parsed = parseResourceInput(body);
+    if (hasResourceInputError(parsed)) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+
+    const supabase = getSupabaseAdminClient();
+    const { data: resource, error: lookupError } = await supabase
       .from('resources')
-      .select('user_id')
-      .eq('id', id)
-      .single();
+      // created_by is the resource ownership field, not user_id.
+      .select('created_by')
+      .eq('id', resourceId)
+      .maybeSingle();
 
-    if (fetchError || !resource) {
+    if (lookupError) {
+      console.error('Unable to look up resource for update:', lookupError);
+      return NextResponse.json({ error: 'Unable to update resource' }, { status: 500 });
+    }
+
+    const owner = resource as ResourceOwner | null;
+    if (!owner) {
       return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
     }
 
-    // Allow edit if admin or owner
-    if (userRole !== 'admin' && resource.user_id !== user.id) {
+    if (
+      authorization.actor.role !== 'admin' &&
+      owner.created_by !== authorization.actor.userId
+    ) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const { data, error } = await supabase
+    // The owner predicate is repeated in the write to prevent a TOCTOU race.
+    // Only validated, editable fields are included in parsed.value.
+    let updateQuery = supabase
       .from('resources')
-      .update({
-        title,
-        description,
-        type,
-        url,
-        category
-      })
-      .eq('id', id)
+      .update(parsed.value)
+      .eq('id', resourceId);
+
+    if (authorization.actor.role !== 'admin') {
+      updateQuery = updateQuery.eq('created_by', authorization.actor.userId);
+    }
+
+    const { data, error } = await updateQuery
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
-      console.error('Error updating resource:', error);
+      console.error('Unable to update resource:', error);
       return NextResponse.json({ error: 'Failed to update resource' }, { status: 500 });
+    }
+
+    if (!data) {
+      return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
     }
 
     return NextResponse.json(data);
   } catch (error) {
-    console.error('Error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    console.error('Resource update failed:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

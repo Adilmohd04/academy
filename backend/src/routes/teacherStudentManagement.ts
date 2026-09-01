@@ -1,6 +1,8 @@
 import express from 'express';
 import { requireAuth } from '../middleware/clerkAuth';
 import { supabase } from '../config/database';
+import { issueCertificate } from '../modules/certificate/services/issuanceService';
+import { revokeCertificate as revokeCertificateRecord } from '../modules/certificate/services/certificateService';
 
 const router = express.Router();
 
@@ -30,7 +32,26 @@ router.get('/teacher/courses/:courseId/students', requireAuth, async (req: any, 
       .eq('clerk_user_id', userId)
       .single();
 
-    if (!teacherProfile || course.teacher_id !== teacherProfile.id) {
+    if (!teacherProfile) {
+      return res.status(404).json({ error: 'Teacher profile not found' });
+    }
+
+    const isOwner = course.teacher_id === teacherProfile.id || course.teacher_id === userId;
+
+    let isCoTeacher = false;
+    if (!isOwner) {
+      const { data: coTeacherRow } = await supabase
+        .from('course_teachers')
+        .select('id')
+        .eq('course_id', courseId)
+        .in('teacher_id', [teacherProfile.id, userId])
+        .limit(1)
+        .single();
+
+      isCoTeacher = !!coTeacherRow;
+    }
+
+    if (!isOwner && !isCoTeacher) {
       return res.status(403).json({ error: 'Not authorized to view these students' });
     }
 
@@ -171,7 +192,9 @@ router.get('/teacher/courses/:courseId/students', requireAuth, async (req: any, 
           .select('id')
           .eq('student_id', studentClerkId) // certificates uses clerk_user_id
           .eq('course_id', courseId)
-          .single();
+          .in('status', ['active', 'awarded', 'issued'])
+          .limit(1)
+          .maybeSingle();
 
         return {
           id: enrollment.id,
@@ -204,8 +227,12 @@ router.get('/teacher/courses/:courseId/students', requireAuth, async (req: any, 
 router.put('/teacher/courses/:courseId/students/:studentId/certificate', requireAuth, async (req: any, res) => {
   try {
     const { courseId, studentId } = req.params;
-    const { issue } = req.body; // true to issue, false to revoke
+    const { issue, reason } = req.body || {}; // true to issue, false to revoke
     const userId = req.auth?.userId;
+
+    if (typeof issue !== 'boolean') {
+      return res.status(400).json({ error: 'issue must be a boolean' });
+    }
 
     // Verify teacher owns this course
     const { data: course } = await supabase
@@ -220,64 +247,85 @@ router.put('/teacher/courses/:courseId/students/:studentId/certificate', require
 
     const { data: teacherProfile } = await supabase
       .from('profiles')
-      .select('id, full_name')
+      .select('id')
       .eq('clerk_user_id', userId)
       .single();
 
-    if (!teacherProfile || course.teacher_id !== teacherProfile.id) {
+    if (!teacherProfile) {
+      return res.status(404).json({ error: 'Teacher profile not found' });
+    }
+
+    const isOwner = course.teacher_id === teacherProfile.id || course.teacher_id === userId;
+
+    let isCoTeacher = false;
+    if (!isOwner) {
+      const { data: coTeacherRow } = await supabase
+        .from('course_teachers')
+        .select('id')
+        .eq('course_id', courseId)
+        .in('teacher_id', [teacherProfile.id, userId])
+        .limit(1)
+        .single();
+
+      isCoTeacher = !!coTeacherRow;
+    }
+
+    if (!isOwner && !isCoTeacher) {
       return res.status(403).json({ error: 'Not authorized' });
     }
 
-    // Get student info
-    const { data: studentProfile } = await supabase
-      .from('profiles')
-      .select('full_name')
-      .eq('id', studentId)
-      .single();
-
     if (issue) {
-      // Issue certificate
-      const { data: existing } = await supabase
+      // Never insert a lightweight certificate row from this dashboard.  The
+      // lifecycle checks all eligibility gates and creates the unique public
+      // verification code + QR image before committing a record.
+      const result = await issueCertificate(courseId, studentId);
+      if (result.ok === false) {
+        return res.status(400).json({ error: result.error, unmet: result.unmet });
+      }
+
+      if (String(result.certificate?.status || '').toLowerCase() === 'revoked') {
+        return res.status(409).json({
+          error: 'Certificate is revoked. Use the approved reissue workflow instead.',
+        });
+      }
+
+      return res.status(result.alreadyIssued ? 200 : 201).json({
+        success: true,
+        alreadyIssued: result.alreadyIssued,
+        message: result.alreadyIssued ? 'Certificate already issued' : 'Certificate issued successfully',
+        certificate: result.certificate,
+      });
+    } else {
+      if (!String(reason || '').trim()) {
+        return res.status(400).json({ error: 'Revocation reason is required' });
+      }
+
+      // Revocation is a durable state transition.  Deleting the row would
+      // make an old QR look like an unknown certificate and erase the audit.
+      const { data: certificate, error: certificateError } = await supabase
         .from('certificates')
         .select('id')
         .eq('student_id', studentId)
         .eq('course_id', courseId)
-        .single();
+        .in('status', ['active', 'awarded', 'issued'])
+        .order('issued_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (!existing) {
-        const { error: insertError } = await supabase
-          .from('certificates')
-          .insert({
-            student_id: studentId,
-            course_id: courseId,
-            course_title: course.title,
-            student_name: studentProfile?.full_name || 'Student',
-            teacher_name: teacherProfile.full_name,
-            completion_date: new Date().toISOString(),
-            generated_at: new Date().toISOString(),
-          });
-
-        if (insertError) {
-          console.error('Error issuing certificate:', insertError);
-          return res.status(500).json({ error: 'Failed to issue certificate' });
-        }
+      if (certificateError || !certificate) {
+        return res.status(404).json({ error: 'Certificate not found' });
       }
 
-      res.json({ success: true, message: 'Certificate issued successfully' });
-    } else {
-      // Revoke certificate
-      const { error: deleteError } = await supabase
-        .from('certificates')
-        .delete()
-        .eq('student_id', studentId)
-        .eq('course_id', courseId);
-
-      if (deleteError) {
-        console.error('Error revoking certificate:', deleteError);
-        return res.status(500).json({ error: 'Failed to revoke certificate' });
+      const result = await revokeCertificateRecord(
+        certificate.id,
+        teacherProfile.id,
+        String(reason).trim(),
+      );
+      if (!result.success) {
+        return res.status(400).json({ error: result.error || 'Failed to revoke certificate' });
       }
 
-      res.json({ success: true, message: 'Certificate revoked successfully' });
+      return res.json({ success: true, message: 'Certificate revoked successfully' });
     }
   } catch (error: any) {
     console.error('Error in certificate update endpoint:', error);

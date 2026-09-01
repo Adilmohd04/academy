@@ -534,6 +534,104 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET || '',
 });
 
+const moneyAmount = (value: unknown): number | null => {
+  const amount = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+};
+
+const actorIdentityAliases = async (userId: string): Promise<Set<string>> => {
+  const aliases = new Set<string>([userId]);
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, clerk_user_id')
+    .eq('clerk_user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Unable to resolve payment actor profile:', error);
+    return aliases;
+  }
+
+  if (data?.id) aliases.add(data.id);
+  if (data?.clerk_user_id) aliases.add(data.clerk_user_id);
+  return aliases;
+};
+
+const ownsMeetingRequest = async (meetingRequest: any, userId: string): Promise<boolean> => {
+  const aliases = await actorIdentityAliases(userId);
+  return Boolean(meetingRequest?.student_id && aliases.has(meetingRequest.student_id));
+};
+
+const canAccessPayment = async (payment: any, userId: string, role?: string): Promise<boolean> => {
+  if (role === 'admin') return true;
+
+  if (payment?.meeting_request_id) {
+    const request = await meetingService.getMeetingRequestById(payment.meeting_request_id);
+    return ownsMeetingRequest(request, userId);
+  }
+
+  const aliases = await actorIdentityAliases(userId);
+
+  // Newer course orders retain their server-derived owner before an
+  // enrollment exists.  This is important because the order must be
+  // verifiable by its purchaser, not by an arbitrary authenticated user who
+  // knows an order id.  Keep the enrollment lookup below for older records.
+  const recordedOwner = payment?.student_clerk_id || payment?.payment_data?.student_clerk_id;
+  if (recordedOwner && aliases.has(recordedOwner)) {
+    return true;
+  }
+
+  // Course payments may also be recorded through a legacy enrollment
+  // relation. Resolve the current actor to either supported enrollment
+  // identity form.
+  if (payment?.id) {
+    const { data, error } = await supabase
+      .from('enrollments')
+      .select('student_id')
+      .eq('payment_id', payment.id)
+      .limit(1);
+
+    if (error) {
+      console.error('Unable to resolve payment enrollment ownership:', error);
+      return false;
+    }
+
+    return (data ?? []).some((enrollment: any) => aliases.has(enrollment.student_id));
+  }
+
+  return false;
+};
+
+const safePaymentForClient = (payment: any) => {
+  const {
+    razorpay_signature: _signature,
+    payment_data: _paymentData,
+    payment_email: _paymentEmail,
+    payment_contact: _paymentContact,
+    ...safePayment
+  } = payment || {};
+
+  return safePayment;
+};
+
+const validRazorpaySignature = (
+  orderId: string,
+  paymentId: string,
+  signature: string,
+  secret: string,
+): boolean => {
+  if (!secret || !signature) return false;
+
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(`${orderId}|${paymentId}`)
+    .digest('hex');
+
+  const received = Buffer.from(signature, 'utf8');
+  const expectedBuffer = Buffer.from(expected, 'utf8');
+  return received.length === expectedBuffer.length && crypto.timingSafeEqual(received, expectedBuffer);
+};
+
 // ============================================
 // RAZORPAY INTEGRATION
 // ============================================
@@ -544,29 +642,93 @@ const razorpay = new Razorpay({
  */
 export const createRazorpayOrder = async (req: Request, res: Response) => {
   try {
-    const { meeting_request_id, course_id, amount } = req.body;
+    const { meeting_request_id, course_id } = req.body || {};
     const userId = (req as any).auth?.userId;
 
-    if (!amount) {
-      return res.status(400).json({ error: 'Amount is required' });
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    if (
+      (typeof course_id !== 'string' && typeof course_id !== 'undefined') ||
+      (typeof meeting_request_id !== 'string' && typeof meeting_request_id !== 'undefined') ||
+      Boolean(course_id) === Boolean(meeting_request_id)
+    ) {
+      return res.status(400).json({
+        error: 'Provide exactly one valid meeting_request_id or course_id',
+      });
+    }
+
+    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+      console.error('Razorpay credentials are not configured');
+      return res.status(503).json({ error: 'Payments are temporarily unavailable' });
     }
 
     let notes: any = {};
     let receiptPrefix = 'rcpt';
     let shortId = '';
+    let amount: number;
 
     // Handle course enrollment payments
     if (course_id) {
       // Verify course exists
       const { data: course, error } = await supabase
         .from('courses')
-        .select('id, title, price, teacher_id')
+        .select('id, title, price, teacher_id, approval_status, status, is_published, enrollment_limit')
         .eq('id', course_id)
         .single();
 
       if (error || !course) {
         return res.status(404).json({ error: 'Course not found' });
       }
+
+      if (
+        course.approval_status !== 'approved' ||
+        (course.status !== 'published' && course.is_published !== true)
+      ) {
+        return res.status(403).json({ error: 'This course is not available for enrollment' });
+      }
+
+      const identityAliases = [...await actorIdentityAliases(userId)];
+      const { data: existingEnrollment, error: existingEnrollmentError } = await supabase
+        .from('enrollments')
+        .select('id')
+        .eq('course_id', course_id)
+        .in('student_id', identityAliases)
+        .limit(1);
+
+      if (existingEnrollmentError) {
+        console.error('Unable to check existing course enrollment:', existingEnrollmentError);
+        return res.status(500).json({ error: 'Unable to validate course enrollment' });
+      }
+
+      if ((existingEnrollment ?? []).length > 0) {
+        return res.status(409).json({ error: 'You are already enrolled in this course' });
+      }
+
+      const enrollmentLimit = Number(course.enrollment_limit || 0);
+      if (Number.isFinite(enrollmentLimit) && enrollmentLimit > 0) {
+        const { count, error: capacityError } = await supabase
+          .from('enrollments')
+          .select('id', { count: 'exact', head: true })
+          .eq('course_id', course_id)
+          .eq('status', 'active');
+
+        if (capacityError) {
+          console.error('Unable to check course capacity:', capacityError);
+          return res.status(500).json({ error: 'Unable to validate course capacity' });
+        }
+
+        if ((count || 0) >= enrollmentLimit) {
+          return res.status(409).json({ error: 'This course is full' });
+        }
+      }
+
+      const courseAmount = moneyAmount(course.price);
+      if (courseAmount === null || courseAmount <= 0) {
+        return res.status(400).json({ error: 'This course does not require a payment order' });
+      }
+      amount = courseAmount;
 
       // Get student profile
       const { data: profile } = await supabase
@@ -594,6 +756,17 @@ export const createRazorpayOrder = async (req: Request, res: Response) => {
       if (!meetingRequest) {
         return res.status(404).json({ error: 'Meeting request not found' });
       }
+      if (!await ownsMeetingRequest(meetingRequest, userId)) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      // The request amount was resolved from server-side slot/pricing rules
+      // at creation time. Never accept a browser-provided amount here.
+      const meetingAmount = moneyAmount(meetingRequest.amount);
+      if (meetingAmount === null || meetingAmount <= 0) {
+        return res.status(400).json({ error: 'This meeting does not require a payment order' });
+      }
+      amount = meetingAmount;
 
       notes = {
         meeting_request_id,
@@ -614,7 +787,7 @@ export const createRazorpayOrder = async (req: Request, res: Response) => {
     const timestamp = Date.now().toString().substring(7); // Last 6 digits
     
     const options = {
-      amount: amount * 100, // Convert to paise (smallest currency unit)
+      amount: Math.round(amount * 100), // Convert to paise (smallest currency unit)
       currency: 'INR',
       receipt: `${receiptPrefix}_${shortId}_${timestamp}`, // Max 40 chars
       notes
@@ -631,9 +804,16 @@ export const createRazorpayOrder = async (req: Request, res: Response) => {
     };
 
     if (course_id) {
-      // Note: payment_records doesn't have course_id or student_clerk_id columns.
-      // Course payment linkage is handled via enrollment's payment_id FK.
-      // Store course info in notes for reference only.
+      // These bindings originate only from the server-side course lookup.
+      // They let verification prove ownership before an enrollment has been
+      // created and prevent a browser from swapping in another course ID.
+      paymentData.course_id = course_id;
+      paymentData.student_clerk_id = userId;
+      paymentData.payment_data = {
+        source: 'course_enrollment',
+        course_id,
+        student_clerk_id: userId,
+      };
     }
 
     if (meeting_request_id) {
@@ -672,7 +852,7 @@ export const verifyRazorpayPayment = async (req: Request, res: Response) => {
       payment_method,
       payment_email,
       payment_contact,
-    } = req.body;
+    } = req.body || {};
     
     const userId = (req as any).auth?.userId;
 
@@ -683,69 +863,159 @@ export const verifyRazorpayPayment = async (req: Request, res: Response) => {
       });
     }
 
-    // Verify Razorpay signature
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const existingPayment = await paymentService.getPaymentByOrderId(razorpay_order_id);
+    if (!existingPayment) {
+      return res.status(404).json({ success: false, error: 'Payment order not found' });
+    }
+    if (!await canAccessPayment(existingPayment, userId, (req as any).auth?.role)) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+    const storedCourseId = existingPayment.course_id || existingPayment.payment_data?.course_id;
+    const storedMeetingRequestId = existingPayment.meeting_request_id;
+
+    // The resource being paid for is bound at order creation. Never let a
+    // client switch an order from one meeting/course to another at verify
+    // time, even if it has a valid signature for the original order.
+    if (storedMeetingRequestId) {
+      if (
+        course_id ||
+        (meeting_request_id && meeting_request_id !== storedMeetingRequestId)
+      ) {
+        return res.status(400).json({ success: false, error: 'Payment order does not match this meeting request' });
+      }
+    } else if (storedCourseId) {
+      if (
+        meeting_request_id ||
+        (course_id && course_id !== storedCourseId)
+      ) {
+        return res.status(400).json({ success: false, error: 'Payment order does not match this course' });
+      }
+    } else {
+      // There is no safe way to infer a resource for legacy, unbound orders.
+      // Reject rather than trusting a course_id supplied by the browser.
+      return res.status(409).json({
+        success: false,
+        error: 'This payment order is missing its server-side purchase binding',
+      });
+    }
+
+    if (storedMeetingRequestId) {
+      const request = await meetingService.getMeetingRequestById(storedMeetingRequestId);
+      const expectedAmount = moneyAmount(request?.amount);
+      if (expectedAmount === null || Math.abs(Number(existingPayment.amount) - expectedAmount) > 0.001) {
+        return res.status(409).json({
+          success: false,
+          error: 'This payment order no longer matches the server-calculated meeting price',
+        });
+      }
+    }
+
     const secret = process.env.RAZORPAY_KEY_SECRET || '';
-    const body = razorpay_order_id + '|' + razorpay_payment_id;
-    
-    const expectedSignature = crypto
-      .createHmac('sha256', secret)
-      .update(body)
-      .digest('hex');
+    if (!secret) {
+      console.error('RAZORPAY_KEY_SECRET is not configured');
+      return res.status(503).json({ success: false, error: 'Payments are temporarily unavailable' });
+    }
 
-    const isValidSignature = expectedSignature === razorpay_signature;
-
-    if (!isValidSignature) {
+    if (!validRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature, secret)) {
       return res.status(400).json({ 
         success: false,
         error: 'Invalid payment signature. Payment verification failed.' 
       });
     }
 
-    // Update payment record
-    const payment = await paymentService.updatePaymentRecord(razorpay_order_id, {
-      razorpay_payment_id,
-      razorpay_signature,
-      payment_method,
-      payment_email,
-      payment_contact,
-      payment_data: req.body,
-      status: 'success',
-    });
+    const terminalFailureStatuses = new Set(['failed', 'refunded', 'cancelled']);
+    if (terminalFailureStatuses.has(String(existingPayment.status || '').toLowerCase())) {
+      return res.status(409).json({
+        success: false,
+        error: 'This payment order can no longer be verified',
+      });
+    }
+
+    const alreadyVerified = ['success', 'captured'].includes(String(existingPayment.status || '').toLowerCase()) &&
+      Boolean(existingPayment.razorpay_payment_id);
+
+    if (alreadyVerified && existingPayment.razorpay_payment_id !== razorpay_payment_id) {
+      return res.status(409).json({
+        success: false,
+        error: 'This payment order was already verified with a different payment',
+      });
+    }
+
+    // Store only known server metadata. Do not persist arbitrary browser
+    // request bodies next to a payment record.
+    const verificationMetadata = {
+      source: storedCourseId ? 'course_enrollment' : 'meeting_booking',
+      ...(storedCourseId ? { course_id: storedCourseId, student_clerk_id: userId } : {}),
+      ...(storedMeetingRequestId ? { meeting_request_id: storedMeetingRequestId } : {}),
+    };
+
+    const payment = alreadyVerified
+      ? existingPayment
+      : await paymentService.updatePaymentRecord(razorpay_order_id, {
+          razorpay_payment_id,
+          razorpay_signature,
+          payment_method: typeof payment_method === 'string' ? payment_method.slice(0, 64) : undefined,
+          payment_email: typeof payment_email === 'string' ? payment_email.slice(0, 255) : undefined,
+          payment_contact: typeof payment_contact === 'string' ? payment_contact.slice(0, 32) : undefined,
+          payment_data: verificationMetadata,
+          status: 'success',
+        });
 
     // Handle course enrollment
-    if (course_id || payment.course_id) {
-      const enrollmentCourseId = course_id || payment.course_id;
+    if (storedCourseId) {
+      const enrollmentCourseId = storedCourseId;
       
       try {
         console.log('🔄 Creating enrollment for course:', enrollmentCourseId);
         
-        // Get student profile ID
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('clerk_user_id', userId)
-          .single();
+        const aliases = [...await actorIdentityAliases(userId)];
+        const { data: existingEnrollments, error: enrollmentLookupError } = await supabase
+          .from('enrollments')
+          .select('*')
+          .eq('course_id', enrollmentCourseId)
+          .in('student_id', aliases)
+          .limit(1);
 
-        if (!profile) {
-          throw new Error('Student profile not found');
+        if (enrollmentLookupError) {
+          throw enrollmentLookupError;
         }
 
-        // Create enrollment
-        const { data: enrollment, error: enrollError } = await supabase
-          .from('enrollments')
-          .insert({
-            student_id: profile.id,
-            course_id: enrollmentCourseId,
-            payment_status: 'completed',
-            payment_id: payment.id,
-            enrolled_at: new Date().toISOString()
-          })
-          .select()
-          .single();
+        let enrollment = existingEnrollments?.[0] || null;
+        if (!enrollment) {
+          const { data: createdEnrollment, error: enrollError } = await supabase
+            .from('enrollments')
+            .insert({
+              // Enrollments use Clerk IDs in the active course/student flow.
+              student_id: userId,
+              course_id: enrollmentCourseId,
+              status: 'active',
+              payment_status: 'completed',
+              payment_id: payment.id,
+              enrolled_at: new Date().toISOString()
+            })
+            .select()
+            .single();
 
-        if (enrollError) {
-          console.error('❌ Enrollment creation failed:', enrollError);
-          throw enrollError;
+          if (enrollError) {
+            // A simultaneous verify retry may have just inserted the same
+            // enrollment. Re-read before treating it as a real failure.
+            const { data: racedEnrollments } = await supabase
+              .from('enrollments')
+              .select('*')
+              .eq('course_id', enrollmentCourseId)
+              .in('student_id', aliases)
+              .limit(1);
+            enrollment = racedEnrollments?.[0] || null;
+            if (!enrollment) {
+              throw enrollError;
+            }
+          } else {
+            enrollment = createdEnrollment;
+          }
         }
 
         console.log('✅ Enrollment created successfully:', enrollment.id);
@@ -795,8 +1065,8 @@ export const verifyRazorpayPayment = async (req: Request, res: Response) => {
     }
     
     // Handle meeting booking (existing logic)
-    if (meeting_request_id || payment.meeting_request_id) {
-      const meetingReqId = meeting_request_id || payment.meeting_request_id;
+    if (storedMeetingRequestId) {
+      const meetingReqId = storedMeetingRequestId;
       
       if (!meetingReqId) {
         return res.status(400).json({
@@ -901,16 +1171,21 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
     const webhookSignature = req.headers['x-razorpay-signature'] as string;
     const webhookBody = req.body;
 
-    // Verify webhook signature (in production)
-    // const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
-    // const expectedSignature = crypto
-    //   .createHmac('sha256', secret)
-    //   .update(JSON.stringify(webhookBody))
-    //   .digest('hex');
-    //
-    // if (expectedSignature !== webhookSignature) {
-    //   return res.status(400).json({ error: 'Invalid webhook signature' });
-    // }
+    // Verify webhook signature
+    const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+    if (!secret) {
+      console.error('RAZORPAY_WEBHOOK_SECRET not configured');
+      return res.status(500).json({ error: 'Webhook secret not configured' });
+    }
+
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(JSON.stringify(webhookBody))
+      .digest('hex');
+
+    if (expectedSignature !== webhookSignature) {
+      return res.status(400).json({ error: 'Invalid webhook signature' });
+    }
 
     const { event, payload } = webhookBody;
 
@@ -952,13 +1227,21 @@ export const handleRazorpayWebhook = async (req: Request, res: Response) => {
 export const getPaymentById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = (req as any).auth?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
     const payment = await paymentService.getPaymentRecordById(id);
 
     if (!payment) {
       return res.status(404).json({ error: 'Payment not found' });
     }
 
-    res.json(payment);
+    if (!await canAccessPayment(payment, userId, (req as any).auth?.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    res.json(safePaymentForClient(payment));
   } catch (error: any) {
     console.error('Error fetching payment:', error);
     res.status(500).json({ error: error.message || 'Failed to fetch payment' });
@@ -1005,10 +1288,18 @@ export const getPaymentStats = async (req: Request, res: Response) => {
 export const generatePaymentReceipt = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const userId = (req as any).auth?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
     const payment = await paymentService.getPaymentRecordById(id);
 
     if (!payment) {
       return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    if (!await canAccessPayment(payment, userId, (req as any).auth?.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
     }
 
     // Fetch meeting request and slot info
@@ -1068,7 +1359,10 @@ export const generatePaymentReceipt = async (req: Request, res: Response) => {
     doc.text(`Receipt ID: ${id}`);
     doc.text(`Pay ID: ${payment.razorpay_payment_id || 'N/A'}`);
     doc.text(`Date: ${new Date(payment.created_at).toLocaleString()}`);
-    doc.text(`Amount Paid: ₹${(payment.amount / 100).toFixed(2)}`);
+    // Payment records store the server-calculated major currency amount;
+    // Razorpay receives the paise conversion separately when the order is
+    // created. Do not divide a stored receipt amount a second time.
+    doc.text(`Amount Paid: INR ${Number(payment.amount).toFixed(2)}`);
     doc.text(`Status: ${payment.status}`);
     doc.moveDown();
 

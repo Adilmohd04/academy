@@ -9,6 +9,7 @@
  */
 
 import { supabase } from '../../../config/database';
+import { issueCertificate as issueCertificateThroughLifecycle } from '../../certificate/services/issuanceService';
 
 export interface StudentGrade {
   id: string;
@@ -251,7 +252,11 @@ export const checkCertificateEligibility = async (
 };
 
 /**
- * Issue certificate (auto or manual override)
+ * Compatibility adapter for the legacy teacher grade screen.
+ *
+ * Issuance is intentionally delegated to the certificate lifecycle.  The old
+ * implementation inserted a lightweight certificate_url row, which skipped
+ * secure verification code/QR creation and could not be verified publicly.
  */
 export const issueCertificate = async (
   courseId: string,
@@ -262,60 +267,34 @@ export const issueCertificate = async (
     overrideReason?: string;
   }
 ): Promise<{ id: string; certificate_url: string }> => {
-  // Get final grade
-  const grade = await getStudentGrade(courseId, studentId);
-  
-  // Check if certificate already exists
-  const { data: existing } = await supabase
-    .from('certificates')
-    .select('id, certificate_url')
-    .eq('course_id', courseId)
-    .eq('student_id', studentId)
-    .single();
+  const override = options?.isManualOverride
+    ? {
+        reason: String(options.overrideReason || '').trim(),
+        by: String(options.overrideBy || '').trim(),
+      }
+    : undefined;
 
-  if (existing) {
-    return existing;
+  if (options?.isManualOverride && (!override?.reason || !override.by)) {
+    throw new Error('A manual certificate override requires an approver and reason');
   }
 
-  // Get course and student info for certificate
-  const { data: course } = await supabase
-    .from('courses')
-    .select('title')
-    .eq('id', courseId)
-    .single();
+  const result = await issueCertificateThroughLifecycle(courseId, studentId, { override });
+  if (result.ok === false) {
+    const unmet = result.unmet?.length ? ` (${result.unmet.join(', ')})` : '';
+    throw new Error(`Certificate issuance failed: ${result.error}${unmet}`);
+  }
 
-  const { data: student } = await supabase
-    .from('profiles')
-    .select('full_name')
-    .eq('clerk_user_id', studentId)
-    .single();
-
-  // Generate certificate URL (placeholder - actual PDF generation would go here)
-  const certificateUrl = `/certificates/${courseId}/${studentId}`;
-
-  // Insert certificate record
-  const { data: certificate, error } = await supabase
-    .from('certificates')
-    .insert([{
-      course_id: courseId,
-      student_id: studentId,
-      certificate_url: certificateUrl,
-      final_grade: grade?.final_grade,
-      is_manual_override: options?.isManualOverride || false,
-      override_by: options?.overrideBy,
-      override_reason: options?.overrideReason,
-      status: 'active'
-    }])
-    .select()
-    .single();
-
-  if (error) {
-    throw new Error(`Failed to issue certificate: ${error.message}`);
+  const certificate = result.certificate;
+  if (String(certificate?.status || '').toLowerCase() === 'revoked') {
+    throw new Error('Certificate is revoked. Use the approved reissue workflow instead.');
   }
 
   return {
     id: certificate.id,
-    certificate_url: certificate.certificate_url
+    // Retain the legacy response field without inventing an unverified URL.
+    // The canonical service supplies a QR-backed verification code; a PDF URL
+    // is present only after the renderer has generated the certificate.
+    certificate_url: certificate.pdf_url || certificate.certificate_url || '',
   };
 };
 

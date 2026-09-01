@@ -9,6 +9,14 @@ import * as courseService from '../services/courseService';
 import { supabase } from '../../../config/database';
 import { courseCache, cacheKeys, invalidateCache } from '../../../lib/cache';
 
+const isOwnedByTeacher = (
+  teacherId: string | null | undefined,
+  profileId: string | null | undefined,
+  clerkUserId: string | null | undefined
+): boolean => {
+  return !!teacherId && (teacherId === profileId || teacherId === clerkUserId);
+};
+
 /**
  * Create a new course (Teacher only)
  * POST /api/courses
@@ -33,7 +41,6 @@ export const createCourse = async (
       prerequisites,
       passing_threshold,
       course_image_url,
-      approval_status,
       // NEW PROFESSIONAL FIELDS
       learning_outcomes,
       skills_gained,
@@ -89,7 +96,9 @@ export const createCourse = async (
       prerequisites: prerequisites || null,
       passing_threshold: passing_threshold || 40,
       course_image_url: course_image_url || null,
-      approval_status: approval_status || 'draft',
+      // Course approval is an admin-controlled lifecycle transition. Never
+      // accept it from a teacher's request body at creation time.
+      approval_status: 'draft',
       // NEW PROFESSIONAL FIELDS
       learning_outcomes: learning_outcomes || null,
       skills_gained: skills_gained || null,
@@ -124,13 +133,25 @@ export const getAllCourses = async (
 ): Promise<void> => {
   try {
     const { status, teacher_id, is_published, approval_status } = req.query;
-    
-    const filters = {
-      status: status as string,
-      teacher_id: teacher_id as string,
-      is_published: is_published as string,
-      approval_status: approval_status as string,
-    };
+    const role = req.auth?.role;
+    const canSeeUnpublished = role === 'admin' || role === 'teacher';
+
+    // The generic course catalog is public. Never allow query parameters to
+    // expose drafts, pending submissions, rejected courses or private teacher
+    // records to students and anonymous visitors.
+    const filters = canSeeUnpublished
+      ? {
+          status: status as string,
+          teacher_id: teacher_id as string,
+          is_published: is_published as string,
+          approval_status: approval_status as string,
+        }
+      : {
+          status: 'published',
+          teacher_id: undefined,
+          is_published: undefined,
+          approval_status: 'approved',
+        };
 
     // Use cache for frequently accessed course lists (60 second TTL)
     const cacheKey = cacheKeys.allCourses(filters);
@@ -167,6 +188,29 @@ export const getCourseById = async (
     if (!course) {
       res.status(404).json({ error: 'Course not found' });
       return;
+    }
+
+    const publicCourse = course.status === 'published' && course.approval_status === 'approved';
+    if (!publicCourse) {
+      const role = req.auth?.role;
+      const userId = req.auth?.userId;
+      let canViewPrivateCourse = role === 'admin';
+
+      if (!canViewPrivateCourse && role === 'teacher' && userId) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('clerk_user_id', userId)
+          .maybeSingle();
+        canViewPrivateCourse = isOwnedByTeacher(course.teacher_id, profile?.id, userId);
+      }
+
+      if (!canViewPrivateCourse) {
+        // Use not-found rather than forbidden so an unpublished course cannot
+        // be enumerated by an unauthorised visitor.
+        res.status(404).json({ error: 'Course not found' });
+        return;
+      }
     }
 
     // Fetch co-teachers from course_teachers table
@@ -225,23 +269,27 @@ export const updateCourse = async (
   try {
     const { id } = req.params;
     const userId = req.auth?.userId;
-    const updates = req.body;
+    const role = req.auth?.role;
+    const updates = { ...(req.body || {}) };
 
     if (!userId) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
-    // Get the teacher's profile to find their profile ID
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('clerk_user_id', userId)
-      .single();
+    let profile: { id: string } | null = null;
+    if (role !== 'admin') {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('clerk_user_id', userId)
+        .single();
+      profile = data;
 
-    if (!profile) {
-      res.status(404).json({ error: 'Teacher profile not found' });
-      return;
+      if (!profile) {
+        res.status(404).json({ error: 'Teacher profile not found' });
+        return;
+      }
     }
 
     // Check if course exists and belongs to teacher
@@ -254,17 +302,34 @@ export const updateCourse = async (
     console.log('🔍 Course ownership check:', {
       courseId: id,
       courseTeacherId: course.teacher_id,
-      profileId: profile.id,
+      profileId: profile?.id,
       clerkUserId: userId,
-      match: course.teacher_id === profile.id
+      matchProfileId: course.teacher_id === profile?.id,
+      matchClerkUserId: course.teacher_id === userId
     });
 
-    // Check if course belongs to this teacher (compare with profile ID)
-    if (course.teacher_id !== profile.id) {
+    // course.teacher_id can be either profile UUID or clerk user ID
+    if (role !== 'admin' && !isOwnedByTeacher(course.teacher_id, profile?.id, userId)) {
       res.status(403).json({ 
         error: 'You can only update your own courses'
       });
       return;
+    }
+
+    // Publishing, approval, ownership and archival are controlled workflow
+    // transitions. A teacher editing course content must not be able to set
+    // those fields through this generic update endpoint.
+    if (role !== 'admin') {
+      for (const protectedField of [
+        'teacher_id',
+        'status',
+        'approval_status',
+        'is_published',
+        'published_at',
+        'archived_at',
+      ]) {
+        delete updates[protectedField];
+      }
     }
 
     const updatedCourse = await courseService.updateCourse(id, updates);
@@ -291,22 +356,26 @@ export const deleteCourse = async (
   try {
     const { id } = req.params;
     const userId = req.auth?.userId;
+    const role = req.auth?.role;
 
     if (!userId) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
-    // Get the teacher's profile to find their profile ID
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('clerk_user_id', userId)
-      .single();
+    let profile: { id: string } | null = null;
+    if (role !== 'admin') {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('clerk_user_id', userId)
+        .single();
+      profile = data;
 
-    if (!profile) {
-      res.status(404).json({ error: 'Teacher profile not found' });
-      return;
+      if (!profile) {
+        res.status(404).json({ error: 'Teacher profile not found' });
+        return;
+      }
     }
 
     // Check if course exists and belongs to teacher
@@ -316,7 +385,7 @@ export const deleteCourse = async (
       return;
     }
 
-    if (course.teacher_id !== profile.id) {
+    if (role !== 'admin' && !isOwnedByTeacher(course.teacher_id, profile?.id, userId)) {
       res.status(403).json({ error: 'You can only delete your own courses' });
       return;
     }

@@ -14,6 +14,7 @@
 import express, { Request, Response } from 'express';
 import '../types/express'; // Ensure type augmentation is loaded
 import { requireAuth, requireRole } from '../middleware/clerkAuth';
+import { getErrorMessage } from '../utils/errors';
 import * as courseApprovalController from '../modules/admin/controllers/courseApprovalController';
 import * as gradeCalculationService from '../modules/shared/services/gradeCalculationService';
 import * as enrollmentManagementService from '../modules/admin/services/enrollmentManagementService';
@@ -62,8 +63,8 @@ router.get('/enrollments', ...adminAuth, async (req, res) => {
       count: enrollments.length,
       data: enrollments
     });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    res.status(500).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -79,8 +80,8 @@ router.get('/courses/:courseId/enrollments', ...adminAuth, async (req, res) => {
       count: enrollments.length,
       data: enrollments
     });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    res.status(500).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -106,8 +107,8 @@ router.post('/enrollments/manual', ...adminAuth, async (req, res) => {
       message: 'Student enrolled successfully',
       data: enrollment
     });
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -122,8 +123,8 @@ router.delete('/enrollments/:enrollmentId', ...adminAuth, async (req, res) => {
       success: true,
       message: 'Enrollment removed'
     });
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -146,8 +147,8 @@ router.patch('/enrollments/:enrollmentId/status', ...adminAuth, async (req, res)
       success: true,
       data: enrollment
     });
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -162,8 +163,8 @@ router.get('/enrollments/stats', ...adminAuth, async (req, res) => {
       success: true,
       data: stats
     });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    res.status(500).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -195,8 +196,8 @@ router.post('/certificates/override', ...adminAuth, async (req, res) => {
       message: 'Certificate issued with admin override',
       data: certificate
     });
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -212,8 +213,8 @@ router.get('/courses/:courseId/grades', ...adminAuth, async (req, res) => {
       count: grades.length,
       data: grades
     });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
+  } catch (error: unknown) {
+    res.status(500).json({ error: getErrorMessage(error) });
   }
 });
 
@@ -228,8 +229,8 @@ router.post('/courses/:courseId/students/:studentId/recalculate-grade', ...admin
       success: true,
       data: result
     });
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
+  } catch (error: unknown) {
+    res.status(400).json({ error: getErrorMessage(error) });
   }
 });
 

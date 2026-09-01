@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import StudentDetailModal from './StudentDetailModal';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface StudentGrade {
   id: string;
   student_id: string;
@@ -36,7 +38,7 @@ interface GradingPolicy {
 export default function CourseStudentsPage() {
   const router = useRouter();
   const params = useParams();
-  const { userId } = useAuth();
+  const { getToken } = useAuth();
   const courseId = params.courseId as string;
 
   const [students, setStudents] = useState<StudentGrade[]>([]);
@@ -55,17 +57,20 @@ export default function CourseStudentsPage() {
   const [selectedStudentName, setSelectedStudentName] = useState<string>('');
 
   useEffect(() => {
-    fetchStudents();
-    fetchGradingPolicy();
+    if (!courseId) return;
+    void fetchStudents();
+    void fetchGradingPolicy();
   }, [courseId]);
 
   const fetchStudents = async () => {
     try {
+      const token = await getToken();
+      if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/students`,
+        `${API}/api/teacher/courses/${courseId}/students`,
         {
           headers: {
-            'x-clerk-user-id': userId || '',
+            Authorization: `Bearer ${token}`,
           },
         }
       );
@@ -86,11 +91,13 @@ export default function CourseStudentsPage() {
 
   const fetchGradingPolicy = async () => {
     try {
+      const token = await getToken();
+      if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/grading-policy`,
+        `${API}/api/teacher/courses/${courseId}/grading-policy`,
         {
           headers: {
-            'x-clerk-user-id': userId || '',
+            Authorization: `Bearer ${token}`,
           },
         }
       );
@@ -113,12 +120,14 @@ export default function CourseStudentsPage() {
 
     setCalculating(true);
     try {
+      const token = await getToken();
+      if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/calculate-internal-scores`,
+        `${API}/api/teacher/courses/${courseId}/calculate-internal-scores`,
         {
           method: 'POST',
           headers: {
-            'x-clerk-user-id': userId || '',
+            Authorization: `Bearer ${token}`,
           },
         }
       );
@@ -138,12 +147,14 @@ export default function CourseStudentsPage() {
 
   const saveGradingPolicy = async () => {
     try {
+      const token = await getToken();
+      if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/grading-policy`,
+        `${API}/api/teacher/courses/${courseId}/grading-policy`,
         {
           method: 'PUT',
           headers: {
-            'x-clerk-user-id': userId || '',
+            Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(gradingPolicy),

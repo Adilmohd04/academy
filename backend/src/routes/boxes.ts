@@ -1,9 +1,14 @@
 
 import express from 'express';
 import * as boxApprovalController from '../modules/admin/controllers/boxApprovalController';
-import { requireAuth } from '../middleware/clerkAuth';
+import { requireAuth, requireRole } from '../middleware/clerkAuth';
 
 const router = express.Router();
+
+// Box contents contain student contact and booking information. Every box
+// operation, including the read-only queue and cron-triggerable close action,
+// must be performed by an authenticated academy administrator.
+router.use(requireAuth, requireRole(['admin']));
 
 /**
  * Get all pending boxes (Admin only)
@@ -22,18 +27,18 @@ router.post('/auto-close', boxApprovalController.autoCloseExpiredBoxes);
  * Approve entire box (Admin only)
  * POST /api/boxes/:boxId/approve
  */
-router.post('/:boxId/approve', requireAuth, boxApprovalController.approveBox);
+router.post('/:boxId/approve', boxApprovalController.approveBox);
 
 /**
  * Generate Google Meet link and approve box (Admin only)
  * POST /api/boxes/:boxId/generate-meeting
  */
-router.post('/:boxId/generate-meeting', requireAuth, boxApprovalController.generateMeetingAndApprove);
+router.post('/:boxId/generate-meeting', boxApprovalController.generateMeetingAndApprove);
 
 /**
  * Close box manually (Admin only)
  * POST /api/boxes/:boxId/close
  */
-router.post('/:boxId/close', requireAuth, boxApprovalController.closeBox);
+router.post('/:boxId/close', boxApprovalController.closeBox);
 
 export default router;

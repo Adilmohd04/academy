@@ -67,32 +67,26 @@ export const getFinalExam = async (courseId: string) => {
   if (examError) throw examError;
   if (!exam) return null;
 
-  // Get questions with options using raw SQL for complex aggregation
-  const { data: questions, error: questionsError } = await supabase.rpc('exec_sql', {
-    sql_query: `SELECT q.*, 
-      COALESCE(
-        json_agg(
-          json_build_object(
-            'id', o.id,
-            'option_text', o.option_text,
-            'is_correct', o.is_correct,
-            'order_index', o.order_index
-          ) ORDER BY o.order_index
-        ) FILTER (WHERE o.id IS NOT NULL),
-        '[]'
-      ) as options
-    FROM final_exam_questions q
-    LEFT JOIN final_exam_options o ON q.id = o.question_id
-    WHERE q.exam_id = '${exam.id}'
-    GROUP BY q.id
-    ORDER BY q.order_index`
-  });
+  // Get questions with options using Supabase ORM (parameterized, no SQL injection risk)
+  const { data: questions, error: questionsError } = await supabase
+    .from('final_exam_questions')
+    .select('*, final_exam_options(*)')
+    .eq('exam_id', exam.id)
+    .order('order_index');
 
   if (questionsError) throw questionsError;
 
+  // Transform nested relation into expected format
+  const formattedQuestions = (questions || []).map((q: any) => ({
+    ...q,
+    options: (q.final_exam_options || [])
+      .sort((a: any, b: any) => a.order_index - b.order_index)
+      .map(({ question_id, ...opt }: any) => opt),
+  }));
+
   return {
     ...exam,
-    questions: questions || []
+    questions: formattedQuestions
   };
 };
 
@@ -258,13 +252,14 @@ export const deleteQuestion = async (questionId: string) => {
  * Recalculate total marks for an exam
  */
 const recalculateTotalMarks = async (examId: string) => {
-  // Get sum of marks
-  const { data, error } = await supabase.rpc('exec_sql', {
-    sql_query: `SELECT COALESCE(SUM(marks), 0) as total FROM final_exam_questions WHERE exam_id = '${examId}'`
-  });
+  // Get sum of marks using Supabase ORM (parameterized)
+  const { data, error } = await supabase
+    .from('final_exam_questions')
+    .select('marks')
+    .eq('exam_id', examId);
 
   if (error) throw error;
-  const totalMarks = data?.[0]?.total || 0;
+  const totalMarks = (data || []).reduce((sum: number, q: any) => sum + (q.marks || 0), 0);
 
   // Update the exam
   const { error: updateError } = await supabase
@@ -296,45 +291,60 @@ export const togglePublish = async (examId: string, isPublished: boolean) => {
  * Get exam marks summary (like quiz marks summary)
  */
 export const getExamMarksSummary = async (examId: string) => {
-  const { data: result, error } = await supabase.rpc('exec_sql', {
-    sql_query: `SELECT 
-      fe.total_marks,
-      fe.passing_marks,
-      COUNT(q.id) as question_count,
-      json_agg(
-        json_build_object(
-          'id', q.id,
-          'question_text', q.question_text,
-          'marks', q.marks,
-          'order_index', q.order_index
-        ) ORDER BY q.order_index
-      ) as questions
-    FROM final_exams fe
-    LEFT JOIN final_exam_questions q ON fe.id = q.exam_id
-    WHERE fe.id = '${examId}'
-    GROUP BY fe.id`
-  });
+  // Get exam details (parameterized)
+  const { data: exam, error: examError } = await supabase
+    .from('final_exams')
+    .select('total_marks, passing_marks')
+    .eq('id', examId)
+    .single();
 
-  if (error) throw error;
-  if (!result || result.length === 0) throw new Error('Exam not found');
+  if (examError) throw examError;
+  if (!exam) throw new Error('Exam not found');
 
-  return result[0];
+  // Get questions (parameterized)
+  const { data: questions, error: questionsError } = await supabase
+    .from('final_exam_questions')
+    .select('id, question_text, marks, order_index')
+    .eq('exam_id', examId)
+    .order('order_index');
+
+  if (questionsError) throw questionsError;
+
+  return {
+    ...exam,
+    question_count: (questions || []).length,
+    questions: questions || []
+  };
 };
 
 /**
  * Get all exam attempts for a course (teacher view)
  */
 export const getExamAttempts = async (courseId: string) => {
-  const { data: result, error } = await supabase.rpc('exec_sql', {
-    sql_query: `SELECT fea.*, fe.title as exam_title, fe.total_marks as max_marks,
-      p.full_name as student_name, p.email
-    FROM final_exam_attempts fea
-    JOIN final_exams fe ON fea.exam_id = fe.id
-    LEFT JOIN profiles p ON fea.student_id = p.clerk_user_id
-    WHERE fe.course_id = '${courseId}'
-    ORDER BY fea.submitted_at DESC NULLS LAST`
-  });
+  // First get the exam for this course (parameterized)
+  const { data: exam, error: examError } = await supabase
+    .from('final_exams')
+    .select('id, title, total_marks')
+    .eq('course_id', courseId)
+    .maybeSingle();
 
-  if (error) throw error;
-  return result || [];
+  if (examError) throw examError;
+  if (!exam) return [];
+
+  // Get attempts with student profiles (parameterized)
+  const { data: attempts, error: attemptsError } = await supabase
+    .from('final_exam_attempts')
+    .select('*, profiles!final_exam_attempts_student_id_fkey(full_name, email)')
+    .eq('exam_id', exam.id)
+    .order('submitted_at', { ascending: false, nullsFirst: false });
+
+  if (attemptsError) throw attemptsError;
+
+  return (attempts || []).map((attempt: any) => ({
+    ...attempt,
+    exam_title: exam.title,
+    max_marks: exam.total_marks,
+    student_name: attempt.profiles?.full_name,
+    email: attempt.profiles?.email,
+  }));
 };

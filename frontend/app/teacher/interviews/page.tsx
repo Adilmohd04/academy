@@ -49,7 +49,7 @@ interface InterviewDashboardData {
 }
 
 export default function TeacherInterviewsPage() {
-  const { getToken, userId } = useAuth();
+  const { getToken } = useAuth();
   const [interviews, setInterviews] = useState<Interview[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({ total: 0, upcoming: 0, completed: 0 });
@@ -72,8 +72,7 @@ export default function TeacherInterviewsPage() {
 
       const response = await fetch(`${API_URL}/api/teacher/interviews`, {
         headers: {
-          'x-clerk-user-id': userId || '',
-          'Authorization': `Bearer ${token}`
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         }
       });
 
@@ -99,8 +98,7 @@ export default function TeacherInterviewsPage() {
       const response = await fetch(`${API_URL}/api/teacher/interviews/${interviewId}/complete`, {
         method: 'PATCH',
         headers: {
-          'x-clerk-user-id': userId || '',
-          'Authorization': `Bearer ${token}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ grade, feedback })

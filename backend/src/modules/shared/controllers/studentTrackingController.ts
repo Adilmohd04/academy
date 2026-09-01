@@ -165,14 +165,15 @@ export const gradeAssignment = async (req: Request, res: Response): Promise<void
       return;
     }
 
-    if (grade === undefined || grade < 0) {
+    const numericGrade = Number(grade);
+    if (grade === undefined || !Number.isFinite(numericGrade) || numericGrade < 0) {
       res.status(400).json({ success: false, message: 'Valid grade is required' });
       return;
     }
 
     const result = await studentTrackingService.gradeAssignment(
       submissionId,
-      grade,
+      numericGrade,
       feedback,
       userId
     );

@@ -1,12 +1,12 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabaseAdminClient();
 
     // Fetch time slots with teacher information
     const { data: slots, error } = await supabase
@@ -57,12 +57,36 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const authorization = await requireRole(['admin', 'teacher']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
+    }
+
     const body = await request.json();
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = getSupabaseAdminClient();
+
+    // Teachers may create their own availability, but never availability for
+    // another teacher. Administrators retain the existing ability to create a
+    // slot for any teacher.
+    if (
+      authorization.actor.role === 'teacher' &&
+      body.teacher_id &&
+      body.teacher_id !== authorization.actor.profileId
+    ) {
+      return NextResponse.json(
+        { error: 'Teachers can only manage their own time slots' },
+        { status: 403 },
+      );
+    }
+
+    const slotPayload =
+      authorization.actor.role === 'teacher'
+        ? { ...body, teacher_id: authorization.actor.profileId }
+        : body;
 
     const { data, error } = await supabase
       .from('teacher_slot_availability')
-      .insert([body])
+      .insert([slotPayload])
       .select();
 
     if (error) {

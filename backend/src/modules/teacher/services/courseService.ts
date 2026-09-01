@@ -6,6 +6,50 @@
 
 import { supabase } from '../../../config/database';
 
+const flattenStringValues = (value: any): string[] => {
+  if (value === null || value === undefined) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => flattenStringValues(item));
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  return [];
+};
+
+const normalizePrerequisitesValue = (value: any): string => {
+  if (value === null || value === undefined) return '';
+
+  let current = value;
+
+  // Recover legacy values that were JSON-stringified multiple times.
+  for (let i = 0; i < 6; i += 1) {
+    if (typeof current !== 'string') break;
+    const trimmed = current.trim();
+    if (!trimmed) return '';
+    if (!(trimmed.startsWith('[') || trimmed.startsWith('"'))) break;
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed === current) break;
+      current = parsed;
+    } catch {
+      break;
+    }
+  }
+
+  if (Array.isArray(current)) {
+    return flattenStringValues(current).join(', ');
+  }
+
+  if (typeof current === 'string') {
+    return current.trim();
+  }
+
+  return String(current);
+};
+
 export interface Course {
   id: string;
   title: string;
@@ -217,6 +261,7 @@ export const getAllCourses = async (filters: CourseFilters = {}): Promise<Course
 
     return {
       ...course,
+      prerequisites: normalizePrerequisitesValue(course.prerequisites),
       profiles: teacherProfile ? { full_name: teacherProfile.full_name } : null,
       _count: { enrollments: enrollmentCounts[course.id] || 0 },
       co_teachers: coTeachers
@@ -334,7 +379,10 @@ export const getCourseById = async (id: string): Promise<Course | null> => {
     // Continue without sections if there's an error
   }
 
-  return data;
+  return {
+    ...data,
+    prerequisites: normalizePrerequisitesValue((data as any).prerequisites),
+  } as any;
 };
 
 /**
@@ -356,7 +404,8 @@ export const updateCourse = async (
     'course_type', 'instructors',
     'mentoring_text', 'mentoring_structured', 'schedule_frequency',
     'schedule_timezone', 'enrollment_deadline', 'course_format_description',
-    'start_date', 'end_date', 'available_slots'
+    'start_date', 'end_date', 'available_slots',
+    'grading_weights', 'passing_percentage', 'is_published'
   ];
 
   const sanitizedUpdates: Record<string, any> = {};
@@ -364,6 +413,10 @@ export const updateCourse = async (
     if (allowedDbColumns.includes(key) && (updates as any)[key] !== undefined) {
       sanitizedUpdates[key] = (updates as any)[key];
     }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(sanitizedUpdates, 'prerequisites')) {
+    sanitizedUpdates.prerequisites = normalizePrerequisitesValue(sanitizedUpdates.prerequisites);
   }
 
   const { data, error } = await supabase
@@ -418,6 +471,7 @@ export const approveCourse = async (id: string): Promise<Course> => {
     .update({ 
       approval_status: 'approved',
       status: 'published',
+      is_published: true,
       published_at: new Date().toISOString()
     })
     .eq('id', id)

@@ -15,6 +15,7 @@ import { Router, Request, Response } from 'express';
 import { requireAuth, requireRole } from '../middleware/clerkAuth';
 import { UserService } from '../modules/shared/services/userService';
 import { UserRole } from '../types';
+import { getErrorMessage } from '../utils/errors';
 
 const router = Router();
 
@@ -51,11 +52,11 @@ router.get('/profile', requireAuth, async (req: Request, res: Response) => {
       success: true,
       data: user,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch user profile',
-      error: error.message,
+      error: getErrorMessage(error),
     });
   }
 });
@@ -88,11 +89,11 @@ router.put('/profile', requireAuth, async (req: Request, res: Response) => {
       message: 'Profile updated successfully',
       data: user,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     res.status(500).json({
       success: false,
       message: 'Failed to update profile',
-      error: error.message,
+      error: getErrorMessage(error),
     });
   }
 });
@@ -124,11 +125,11 @@ router.get(
           offset: offset || 0,
         },
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       res.status(500).json({
         success: false,
         message: 'Failed to fetch users',
-        error: error.message,
+        error: getErrorMessage(error),
       });
     }
   }
@@ -162,11 +163,11 @@ router.put(
         message: 'User role updated successfully',
         data: user,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       res.status(500).json({
         success: false,
         message: 'Failed to update user role',
-        error: error.message,
+        error: getErrorMessage(error),
       });
     }
   }
@@ -185,11 +186,11 @@ router.get('/teachers', async (req: Request, res: Response) => {
       success: true,
       data: result.users,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch teachers',
-      error: error.message,
+      error: getErrorMessage(error),
     });
   }
 });
@@ -212,11 +213,11 @@ router.delete(
         success: true,
         message: 'User deleted successfully',
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       res.status(500).json({
         success: false,
         message: 'Failed to delete user',
-        error: error.message,
+        error: getErrorMessage(error),
       });
     }
   }

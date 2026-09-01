@@ -56,6 +56,22 @@ export const errorHandler = (
     });
   }
 
+  const payloadTooLarge =
+    (err as any)?.name === 'PayloadTooLargeError' ||
+    (err as any)?.type === 'entity.too.large' ||
+    (err as any)?.status === 413;
+
+  if (payloadTooLarge) {
+    res.status(413).json({
+      success: false,
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Request body is too large. Reduce the embedded background image size or save the template without the image.'
+      }
+    });
+    return;
+  }
+
   // Handle AppError instances
   if (err instanceof AppError) {
     res.status(err.statusCode).json(errorResponse(err));

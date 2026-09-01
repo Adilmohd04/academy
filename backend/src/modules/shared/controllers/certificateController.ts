@@ -6,7 +6,8 @@
 
 import { Request, Response } from 'express';
 import * as certificateService from '../services/certificateService';
-import { CertificatePdfService } from '../../../services/certificatePdfService';
+import { CertificatePdfService } from '../../certificate/services/certificatePdfService';
+import { getErrorMessage } from '../../../utils/errors';
 
 const pdfService = new CertificatePdfService();
 
@@ -35,11 +36,11 @@ export const issueCertificate = async (req: Request, res: Response) => {
       data: certificate,
       message: 'Certificate issued successfully'
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error issuing certificate:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to issue certificate'
+      error: getErrorMessage(error, 'Failed to issue certificate')
     });
   }
 };
@@ -75,11 +76,11 @@ export const verifyCertificate = async (req: Request, res: Response) => {
         verification_code: result.certificate.certificate.verification_code
       } : null
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error verifying certificate:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to verify certificate'
+      error: getErrorMessage(error, 'Failed to verify certificate')
     });
   }
 };
@@ -101,11 +102,11 @@ export const getMyCertificates = async (req: Request, res: Response) => {
       success: true,
       data: certificates
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching certificates:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to fetch certificates'
+      error: getErrorMessage(error, 'Failed to fetch certificates')
     });
   }
 };
@@ -130,11 +131,11 @@ export const getCertificate = async (req: Request, res: Response) => {
       success: true,
       data: certificate
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching certificate:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to fetch certificate'
+      error: getErrorMessage(error, 'Failed to fetch certificate')
     });
   }
 };
@@ -158,11 +159,11 @@ export const getAllCertificates = async (req: Request, res: Response) => {
       data: result.certificates,
       total: result.total
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching certificates:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to fetch certificates'
+      error: getErrorMessage(error, 'Failed to fetch certificates')
     });
   }
 };
@@ -189,11 +190,11 @@ export const revokeCertificate = async (req: Request, res: Response) => {
       data: certificate,
       message: 'Certificate revoked successfully'
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error revoking certificate:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to revoke certificate'
+      error: getErrorMessage(error, 'Failed to revoke certificate')
     });
   }
 };
@@ -212,11 +213,11 @@ export const reinstateCertificate = async (req: Request, res: Response) => {
       data: certificate,
       message: 'Certificate reinstated successfully'
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error reinstating certificate:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to reinstate certificate'
+      error: getErrorMessage(error, 'Failed to reinstate certificate')
     });
   }
 };
@@ -234,11 +235,11 @@ export const getVerificationStats = async (req: Request, res: Response) => {
       success: true,
       data: stats
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error fetching verification stats:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to fetch verification stats'
+      error: getErrorMessage(error, 'Failed to fetch verification stats')
     });
   }
 };
@@ -254,11 +255,11 @@ export const getCertificateHTML = async (req: Request, res: Response) => {
     
     res.setHeader('Content-Type', 'text/html');
     res.send(html);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error generating certificate HTML:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to generate certificate'
+      error: getErrorMessage(error, 'Failed to generate certificate')
     });
   }
 };
@@ -285,6 +286,7 @@ export const downloadCertificatePDF = async (req: Request, res: Response) => {
     // Generate PDF
     const pdfBuffer = await pdfService.generateCertificatePDF({
       id: certificate.id,
+      certificate_number: certificate.certificate_number,
       student_name,
       course_title,
       teacher_name: teacher_name || 'Islamic Academy',
@@ -299,11 +301,11 @@ export const downloadCertificatePDF = async (req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="certificate_${certificate.verification_code}.pdf"`);
     res.send(pdfBuffer);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error generating certificate PDF:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Failed to generate PDF'
+      error: getErrorMessage(error, 'Failed to generate PDF')
     });
   }
 };

@@ -12,6 +12,9 @@ interface Course {
   category: string;
   level: string;
   price: number;
+  approval_status?: 'draft' | 'pending_approval' | 'approved' | 'rejected';
+  teacher_name?: string;
+  teacher_email?: string;
   status: 'pending' | 'approved' | 'rejected';
   created_at: string;
   profiles?: {
@@ -55,7 +58,7 @@ type TabType = 'courses' | 'meetings';
 type BoxFilterType = 'all' | 'open' | 'closed' | 'approved' | 'missed';
 
 export default function ApprovalsPage() {
-  const { userId } = useAuth();
+  const { getToken, isLoaded } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('courses');
   const [courseFilter, setCourseFilter] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [boxFilter, setBoxFilter] = useState<BoxFilterType>('closed');
@@ -67,23 +70,37 @@ export default function ApprovalsPage() {
   const [expandedBoxes, setExpandedBoxes] = useState<{[id: string]: boolean}>({});
 
   useEffect(() => {
-    if (userId) {
+    if (isLoaded) {
       if (activeTab === 'courses') {
-        fetchCourses();
+        void fetchCourses();
       } else {
-        fetchBoxes();
+        void fetchBoxes();
       }
     }
-  }, [userId, activeTab]);
+  }, [isLoaded, activeTab]);
 
   const fetchCourses = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses`);
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/admin/courses`, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        }
+      });
       if (res.ok) {
         const response = await res.json();
         const coursesData = Array.isArray(response) ? response : (response.data || []);
-        setCourses(coursesData);
+        const normalizedCourses = coursesData
+          .filter((course: any) => ['pending_approval', 'approved', 'rejected'].includes(course.approval_status))
+          .map((course: any) => ({
+            ...course,
+            status:
+              course.approval_status === 'pending_approval'
+                ? 'pending'
+                : course.approval_status,
+          }));
+        setCourses(normalizedCourses);
       }
     } catch (error) {
       console.error('Error fetching courses:', error);
@@ -95,10 +112,11 @@ export default function ApprovalsPage() {
   const fetchBoxes = async () => {
     setLoading(true);
     try {
+      const token = await getToken();
       // Fetch all meeting bookings and group by slot (box)
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/meetings/admin/pending`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/meetings/admin/pending`, {
         headers: {
-          'x-clerk-user-id': userId || ''
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         }
       });
       if (res.ok) {
@@ -212,13 +230,13 @@ export default function ApprovalsPage() {
     if (!confirm('Approve this course?')) return;
     
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
-        method: 'PUT',
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/admin/courses/${courseId}/approve`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
-        },
-        body: JSON.stringify({ status: 'approved' })
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        }
       });
 
       if (res.ok) {
@@ -235,13 +253,14 @@ export default function ApprovalsPage() {
     if (!reason) return;
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
-        method: 'PUT',
+      const token = await getToken();
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/admin/courses/${courseId}/reject`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-clerk-user-id': userId || ''
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ status: 'rejected', rejection_reason: reason })
+        body: JSON.stringify({ reason })
       });
 
       if (res.ok) {
@@ -264,13 +283,14 @@ export default function ApprovalsPage() {
     
     setApprovingId(boxId);
     try {
+      const token = await getToken();
       // Approve all students in the box
       const approvalPromises = box.students.map(student =>
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/meetings/admin/${student.requestId}/approve`, {
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/meetings/admin/${student.requestId}/approve`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-clerk-user-id': userId || ''
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({ meetingLink: meetingLink || null })
         })
@@ -296,13 +316,14 @@ export default function ApprovalsPage() {
     
     setApprovingId(boxId);
     try {
+      const token = await getToken();
       // Reject all students in the box
       const rejectPromises = box.students.map(student =>
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/meetings/admin/${student.requestId}/reject`, {
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/meetings/admin/${student.requestId}/reject`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-clerk-user-id': userId || ''
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({ reason })
         })
@@ -500,7 +521,7 @@ export default function ApprovalsPage() {
                     </div>
                     <p className="text-slate-600 mb-3">{course.description}</p>
                     <div className="flex items-center gap-6 text-sm text-slate-500">
-                      <div><span className="font-medium">Teacher:</span> {course.profiles?.full_name}</div>
+                      <div><span className="font-medium">Teacher:</span> {course.teacher_name || course.profiles?.full_name || 'Unknown'}</div>
                       <div><span className="font-medium">Category:</span> {course.category}</div>
                       <div><span className="font-medium">Level:</span> {course.level}</div>
                       <div><span className="font-medium">Price:</span> {course.price === 0 ? 'Free' : `₹${course.price}`}</div>
@@ -526,7 +547,7 @@ export default function ApprovalsPage() {
                       </>
                     )}
                     <button
-                      onClick={() => window.open(`/admin/courses/${course.id}`, '_blank')}
+                      onClick={() => window.open(`/teacher/courses/${course.id}/builder?from=admin&tab=content`, '_blank')}
                       className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium whitespace-nowrap"
                     >
                       <Eye className="w-4 h-4" />
@@ -713,7 +734,7 @@ export default function ApprovalsPage() {
                       {/* Meeting Link Input (only for CLOSED boxes) */}
                       {box.status === 'CLOSED' && (
                         <div className="mt-4 p-4 bg-white rounded-lg border border-slate-200">
-                          <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
+                          <label className="text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
                             <LinkIcon className="w-4 h-4" />
                             Meeting Link for All Students (Google Meet / Zoom)
                           </label>

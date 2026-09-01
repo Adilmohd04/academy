@@ -1,12 +1,17 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
+import { isAuthorizationFailure, requireRole } from '@/lib/server/authorization';
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const authorization = await requireRole(['admin']);
+    if (isAuthorizationFailure(authorization)) {
+      return authorization.response;
+    }
+
+    const supabase = getSupabaseAdminClient();
 
     // Get all slots that have pending bookings (approved OR pending)
     const { data: bookings, error: bookingsError } = await supabase
@@ -37,7 +42,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get slot IDs
-    const slotIds = [...new Set(bookings.map(b => b.teacher_slot_id))];
+    const slotIds = Array.from(new Set(bookings.map((booking) => booking.teacher_slot_id)));
 
     // Get slots with their details - ONLY UPCOMING (today or future)
     const today = new Date().toISOString().split('T')[0];
@@ -69,7 +74,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get teacher profiles
-    const teacherIds = [...new Set(slots?.map(s => s.teacher_id) || [])];
+    const teacherIds = Array.from(new Set(slots?.map((slot) => slot.teacher_id) || []));
     const { data: teachers } = await supabase
       .from('profiles')
       .select('clerk_user_id, full_name, email')

@@ -5,10 +5,11 @@ import { useAuth } from '@clerk/nextjs';
 import { useEffect, useState } from 'react';
 import { 
   BookOpen, Users, DollarSign, BarChart, Settings, Edit, 
-  Loader2, ArrowRight, CheckCircle, AlertCircle 
+  Loader2, ArrowRight, CheckCircle, AlertCircle, Award
 } from 'lucide-react';
 import { IslamicCard } from '@/components/ui/IslamicCards';
 import { IslamicButton } from '@/components/ui/IslamicButtons';
+import { api } from '@/lib/api';
 
 interface Course {
   id: string;
@@ -27,7 +28,7 @@ interface Course {
 
 export default function CourseOverviewPage() {
   const params = useParams();
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   const router = useRouter();
   const courseId = params.courseId as string;
   
@@ -42,13 +43,9 @@ export default function CourseOverviewPage() {
 
   const fetchCourse = async () => {
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/courses/${courseId}`, {
-        headers: { 'x-clerk-user-id': userId || '' }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCourse(data);
-      }
+      const token = await getToken();
+      const response = await api.courses.getByIdForBuilder(courseId, token);
+      setCourse(response.data);
     } catch (error) {
       console.error('Error fetching course:', error);
     } finally {
@@ -101,14 +98,24 @@ export default function CourseOverviewPage() {
             </div>
           </div>
 
-          <IslamicButton
-            variant="primary"
-            onClick={() => router.push(`/builder/${courseId}/builder`)}
-            className="bg-emerald-600 hover:bg-emerald-700 text-lg px-8 py-3"
-          >
-            Go to Course Builder
-            <ArrowRight className="w-5 h-5 ml-2" />
-          </IslamicButton>
+          <div className="flex items-center gap-3">
+            <IslamicButton
+              variant="outline"
+              onClick={() => router.push(`/builder/${courseId}/certificate-design`)}
+              className="text-lg px-6 py-3"
+            >
+              <Award className="w-5 h-5 mr-2" />
+              Certificate Design
+            </IslamicButton>
+            <IslamicButton
+              variant="primary"
+              onClick={() => router.push(`/builder/${courseId}/builder`)}
+              className="bg-emerald-600 hover:bg-emerald-700 text-lg px-8 py-3"
+            >
+              Go to Course Builder
+              <ArrowRight className="w-5 h-5 ml-2" />
+            </IslamicButton>
+          </div>
         </div>
       </div>
 

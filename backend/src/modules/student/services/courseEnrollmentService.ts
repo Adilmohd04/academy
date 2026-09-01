@@ -1,4 +1,5 @@
 import { supabase } from '../../../config/database';
+import { checkPrerequisites } from './prerequisiteService';
 
 interface Course {
   id: string;
@@ -16,70 +17,40 @@ interface Course {
 }
 
 export const getBrowseCourses = async (studentId: string): Promise<Course[]> => {
-  // Get all published courses
+  // Get only published courses with approved status
   const { data: courses, error } = await supabase
     .from('courses')
-    .select(`
-      id,
-      title,
-      description,
-      course_image_url,
-      thumbnail_url,
-      teacher_id,
-      teacher_name,
-      price,
-      approval_status,
-      status,
-      category,
-      level,
-      enrollment_limit,
-      enrolled_count,
-      starts_at,
-      course_type
-    `)
+    .select(`*`)
     .eq('status', 'published')
+    .eq('approval_status', 'approved')
     .order('created_at', { ascending: false });
 
-  if (error) {
-    console.error('Error fetching browse courses:', error);
-    throw new Error('Failed to fetch courses');
-  }
+  if (error) throw error;
 
-  // Get student's enrollments to mark enrolled courses
+  // Get enrollments for this student
   const { data: enrollments } = await supabase
     .from('enrollments')
     .select('course_id')
     .eq('student_id', studentId);
 
-  const enrolledCourseIds = (enrollments || []).map(e => e.course_id);
+  const enrolledIds = (enrollments || []).map(e => e.course_id);
 
-  // Get lesson counts and enrollment counts for each course
-  const coursesWithDetails = await Promise.all(
-    (courses || []).map(async (course) => {
-      const { count: lessonCount } = await supabase
-        .from('course_weeks')
-        .select('lessons:course_lessons(id)', { count: 'exact', head: true })
-        .eq('course_id', course.id);
-
-      // Count active enrollments dynamically
-      const { count: activeEnrollments } = await supabase
-        .from('enrollments')
-        .select('id', { count: 'exact', head: true })
-        .eq('course_id', course.id)
-        .eq('status', 'active');
-
-      return {
-        ...course,
-        status: course.approval_status, // Map approval_status to status for interface
-        total_lessons: lessonCount || 0,
-        total_students: activeEnrollments || 0,
-        enrolled_count: activeEnrollments || 0,
-        is_enrolled: enrolledCourseIds.includes(course.id)
-      };
-    })
-  );
-
-  return coursesWithDetails;
+  // Filter out enrolled courses from browse list
+  return (courses || [])
+    .filter(c => !enrolledIds.includes(c.id))
+    .map(c => ({
+      id: c.id,
+      title: c.title,
+      description: c.description,
+      thumbnail_url: c.thumbnail_url,
+      teacher_id: c.teacher_id,
+      teacher_name: c.teacher_name || 'Teacher', // Use existing value or fallback
+      price: c.price,
+      status: 'available', // Simplified status for students
+      total_lessons: 0,
+      total_students: 0,
+      is_enrolled: false // Already filtered out, so always false
+    }));
 };
 
 export const enrollInCourse = async (
@@ -110,6 +81,17 @@ export const enrollInCourse = async (
     throw new Error('Course not found or not available');
   }
 
+  // This path previously selected prerequisite_courses without ever checking
+  // it. Defer to the shared gate rather than reimplementing the rule here.
+  const prerequisites = await checkPrerequisites(courseId, studentId);
+  if (!prerequisites.satisfied) {
+    throw new Error(
+      `You must complete the following course(s) before enrolling: ${prerequisites.missing
+        .map((course) => course.title)
+        .join(', ')}`,
+    );
+  }
+
   // Check enrollment capacity if set
   if (course.enrollment_limit && course.enrollment_limit > 0) {
     const currentEnrollments = course.enrolled_count || 0;
@@ -132,6 +114,9 @@ export const enrollInCourse = async (
 
   if (enrollError) {
     console.error('Error creating enrollment:', enrollError);
+    if ((enrollError as any)?.code === '23505') {
+      throw new Error('Already enrolled in this course');
+    }
     throw new Error('Failed to enroll in course');
   }
 

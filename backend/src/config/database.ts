@@ -11,37 +11,59 @@
  * - Consistent API across the codebase
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import path from 'path';
 
 // Load .env from backend directory
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-// Debug: Log database connection info
-console.log('🔍 Database Configuration:');
-console.log('  SUPABASE_URL:', process.env.SUPABASE_URL);
-console.log('  Service role key present:', !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-
-// Validate required environment variables
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('❌ Missing required Supabase environment variables');
-  console.error('   Required: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY');
+// In local/dev environments some Windows setups fail TLS chain validation for outbound fetch.
+// Allow opt-out via ALLOW_SELF_SIGNED_CERTS=false.
+if (process.env.NODE_ENV === 'development' && process.env.ALLOW_SELF_SIGNED_CERTS !== 'false') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  console.warn('⚠️  Development TLS verification is disabled (NODE_TLS_REJECT_UNAUTHORIZED=0)');
 }
 
+let cachedClient: SupabaseClient | null = null;
+
 /**
- * Supabase client - PRIMARY database interface
- * Uses service role key for full access (bypasses RLS for admin operations)
- * 
- * For user-scoped operations, create a new client with the user's JWT token
- * 
- * Type safety: Supabase client provides automatic type inference from the database schema.
- * For enhanced type safety, generate types with: npx supabase gen types typescript
+ * Several Next.js route handlers in ../../frontend import services from this
+ * package, so this module is evaluated by `next build` while it collects page
+ * data. The Next environment publishes the project URL under the public name,
+ * so accept either spelling rather than reporting a configured project as
+ * missing.
  */
-export const supabase = createClient(
-  process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-  {
+const resolveCredentials = () => ({
+  url: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+  serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+});
+
+/**
+ * Created on first use, not at import time.
+ *
+ * `createClient` throws when handed an empty URL, so building the client at
+ * module scope meant merely importing this file crashed anywhere the
+ * environment was not fully configured — which failed the entire production
+ * build of the frontend rather than the one request that needed a database.
+ */
+const resolveSupabaseClient = (): SupabaseClient => {
+  if (cachedClient) return cachedClient;
+
+  const { url, serviceRoleKey } = resolveCredentials();
+
+  console.log('🔍 Database Configuration:');
+  console.log('  SUPABASE_URL present:', !!url);
+  console.log('  Service role key present:', !!serviceRoleKey);
+
+  if (!url || !serviceRoleKey) {
+    console.error('❌ Missing required Supabase environment variables');
+    throw new Error(
+      'Supabase is not configured. Set SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY.',
+    );
+  }
+
+  cachedClient = createClient(url, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false
@@ -49,8 +71,27 @@ export const supabase = createClient(
     db: {
       schema: 'public'
     }
-  }
-);
+  });
+
+  return cachedClient;
+};
+
+/**
+ * Supabase client - PRIMARY database interface
+ * Uses service role key for full access (bypasses RLS for admin operations)
+ *
+ * For user-scoped operations, create a new client with the user's JWT token
+ *
+ * Exposed as a proxy so every existing `import { supabase }` call site keeps
+ * working unchanged while construction stays deferred to first property access.
+ */
+export const supabase = new Proxy({} as SupabaseClient, {
+  get: (_target, property) => {
+    const client = resolveSupabaseClient() as any;
+    const value = client[property];
+    return typeof value === 'function' ? value.bind(client) : value;
+  },
+});
 
 /**
  * Test database connection using Supabase client
@@ -67,101 +108,43 @@ export const testConnection = async (): Promise<boolean> => {
   }
 };
 
-/**
- * @deprecated Use supabase.from('table').select() instead
- * This function is kept for backward compatibility during migration
- */
+// --- Compatibility shim for legacy pool.connect() / pool.query() usage ---
+
 export const query = async (text: string, params?: any[]) => {
-  console.warn('⚠️ DEPRECATED: query() function is deprecated. Use supabase client directly.');
-  // Use Supabase RPC for raw SQL queries
-  const { data, error } = await supabase.rpc('execute_sql', { sql: text, params });
+  const { data, error } = await supabase.rpc('execute_sql', { sql: text, params: params || [] });
   if (error) throw error;
   return { rows: data || [], rowCount: data?.length || 0 };
 };
 
-/**
- * @deprecated Use supabase client directly - no need for manual connection management
- */
 export const getClient = async () => {
-  console.warn('⚠️ DEPRECATED: getClient() is deprecated. Use supabase client directly.');
-  throw new Error('getClient() is deprecated. Use supabase client directly.');
+  return createCompatibilityClient();
 };
 
-/**
- * TEMPORARY COMPATIBILITY LAYER
- * Adds pool.connect() and pool.query() methods to make old code work
- * TODO: Refactor all files to use Supabase client directly
- */
 const createCompatibilityClient = () => {
-  // Create a temporary client object that mimics pg-pool behavior
   const mockClient = {
     query: async (text: string, params?: any[]) => {
-      // Execute raw SQL using Supabase
-      try {
-        const result = await supabase.rpc('exec_sql', { 
-          query: text,
-          params: params || []
-        });
-        
-        // If RPC doesn't exist, try direct query parsing
-        if (result.error && result.error.code === '42883') {
-          return await executeQueryHeuristic(text, params);
-        }
-        
-        const { data, error } = result;
-        
-        if (error) {
-          // Try heuristic execution
-          return await executeQueryHeuristic(text, params);
-        }
-        return { rows: data || [], rowCount: data?.length || 0 };
-      } catch (err) {
-        // Fallback to heuristic execution
-        return await executeQueryHeuristic(text, params);
-      }
+      const { data, error } = await supabase.rpc('execute_sql', {
+        sql: text,
+        params: params || [],
+      });
+      if (error) throw error;
+      return { rows: data || [], rowCount: data?.length || 0 };
     },
     release: () => {
       // No-op since Supabase manages connections
     }
   };
-  
   return mockClient;
 };
 
-/**
- * Heuristic query executor - parses simple SQL and converts to Supabase calls
- */
-async function executeQueryHeuristic(sql: string, params: any[] = []) {
-  const trimmedSql = sql.trim().toUpperCase();
-  
-  // Simple SELECT parser
-  if (trimmedSql.startsWith('SELECT')) {
-    const match = sql.match(/FROM\s+(\w+)/i);
-    if (match) {
-      const table = match[1];
-      const { data, error } = await supabase.from(table).select('*');
-      if (error) throw error;
-      return { rows: data || [], rowCount: data?.length || 0 };
-    }
-  }
-  
-  // For complex queries, return empty result with warning
-  console.warn('⚠️ Complex SQL query detected - returning empty result:', sql.substring(0, 100));
-  return { rows: [], rowCount: 0 };
-}
-
-// Create enhanced Supabase client with compatibility methods
 const enhancedSupabase = Object.assign(supabase, {
   connect: async () => {
-    console.warn('⚠️ DEPRECATED: pool.connect() is deprecated. Returning compatibility client.');
     return createCompatibilityClient();
   },
   query: async (text: string, params?: any[]) => {
-    console.warn('⚠️ DEPRECATED: pool.query() is deprecated. Use supabase.from() instead.');
-    const client = await createCompatibilityClient();
+    const client = createCompatibilityClient();
     return client.query(text, params);
   }
 });
 
-// Default export for backward compatibility - now exports enhanced supabase
 export default enhancedSupabase;

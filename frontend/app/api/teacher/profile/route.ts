@@ -1,13 +1,10 @@
+import { getSupabaseAdminClient } from '@/lib/server/supabaseAdmin';
 import { NextResponse } from 'next/server'
 import { auth } from '@clerk/nextjs/server'
-import { createClient } from '@supabase/supabase-js'
 
 export const dynamic = 'force-dynamic'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+const supabase = getSupabaseAdminClient()
 
 export async function GET() {
   try {
@@ -29,6 +26,10 @@ export async function GET() {
       return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
     }
 
+    if (!profile) {
+      return NextResponse.json({ error: 'Profile not found' }, { status: 404 })
+    }
+
     // Fetch teacher pricing information
     const { data: pricingData } = await supabase
       .from('teacher_pricing')
@@ -36,13 +37,14 @@ export async function GET() {
       .eq('teacher_id', userId)
       .single()
 
+    const pricing = pricingData ?? { price_per_meeting: 0, is_free: true }
+
     // Combine profile with pricing info (default to free if no pricing record)
-    const profileWithPricing = {
-      ...profile,
-      teacher_price: pricingData?.price_per_meeting ?? 0,
-      hourly_price: pricingData?.price_per_meeting ?? 0,
-      is_free: pricingData?.is_free ?? true, // Default to FREE if no pricing record
-    }
+    const profileWithPricing = Object.assign({}, profile as Record<string, unknown>, {
+      teacher_price: pricing.price_per_meeting,
+      hourly_price: pricing.price_per_meeting,
+      is_free: pricing.is_free,
+    })
 
     // Fetch meetings for this teacher
     const { data: meetings, error: meetingsError } = await supabase

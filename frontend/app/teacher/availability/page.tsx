@@ -26,6 +26,8 @@ import { IslamicPatternBackground } from '@/components/ui/IslamicPatterns';
 import { IslamicPageHeader } from '@/components/ui/IslamicPageHeader';
 import { TeacherPageContainer } from '@/components/ui/TeacherPageContainer';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface TimeSlot {
   id: string;
   slot_name: string;
@@ -89,9 +91,12 @@ export default function TeacherAvailabilityPage() {
 
   // Load time slots and existing availability
   useEffect(() => {
-    loadData();
-    loadTeacherPricing();
-  }, [selectedWeek]);
+    void loadData();
+    // `user` is populated asynchronously by Clerk. Include its id in the
+    // dependency list so the pricing request is not silently skipped on the
+    // initial render and never retried.
+    void loadTeacherPricing();
+  }, [selectedWeek, user?.id]);
 
   const loadTeacherPricing = async () => {
     try {
@@ -99,15 +104,17 @@ export default function TeacherAvailabilityPage() {
       const userId = user?.id;
       if (!userId) return;
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/teacher-pricing/${userId}`, {
+      const response = await fetch(`${API}/api/teacher-pricing/${userId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (response.ok) {
         const data = await response.json();
         setTeacherPricing({
-          is_free: data.is_free || false,
-          price_per_meeting: data.price_per_meeting || null
+          // The public pricing endpoint returns camelCase `{ price, isFree }`.
+          // Keep snake_case fallback for an older deployed backend contract.
+          is_free: data.isFree ?? data.is_free ?? false,
+          price_per_meeting: data.price ?? data.price_per_meeting ?? null
         });
       }
     } catch (error) {

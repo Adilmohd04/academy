@@ -4,11 +4,7 @@
  * Starts the Express application.
  */
 
-// Disable SSL verification for corporate proxy environments.
-// In real production with proper certs, set ALLOW_SELF_SIGNED_CERTS=false.
-if (process.env.ALLOW_SELF_SIGNED_CERTS !== 'false') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-}
+// NOTE: TLS verification is always enabled. See database.ts for details.
 
 // ── Raise Node.js HTTP agent limits ──────────────────────────────────
 // Default maxSockets is Infinity, but the DNS resolver and OS ephemeral

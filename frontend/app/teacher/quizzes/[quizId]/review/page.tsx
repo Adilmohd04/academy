@@ -2,8 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
+import { useAuth } from '@clerk/nextjs';
 import { Users, CheckCircle, XCircle, Edit2, Save, X } from 'lucide-react';
 import IslamicLoader from '@/components/shared/IslamicLoader';
+
+const API = process.env.NEXT_PUBLIC_API_URL || '';
 
 interface QuizAttempt {
   id: string;
@@ -26,6 +29,7 @@ interface QuizAttempt {
 
 export default function QuizReviewPage() {
   const params = useParams();
+  const { getToken } = useAuth();
   const quizId = params.quizId as string;
 
   const [attempts, setAttempts] = useState<QuizAttempt[]>([]);
@@ -35,6 +39,15 @@ export default function QuizReviewPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const getAuthHeaders = async (includeJson = false) => {
+    const token = await getToken();
+    if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
+    return {
+      ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
+      Authorization: `Bearer ${token}`,
+    };
+  };
+
   useEffect(() => {
     fetchAttempts();
   }, [quizId]);
@@ -42,11 +55,9 @@ export default function QuizReviewPage() {
   const fetchAttempts = async () => {
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/quizzes/${quizId}/attempts/all`,
+        `${API}/api/quizzes/${quizId}/attempts/all`,
         {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          }
+          headers: await getAuthHeaders()
         }
       );
 
@@ -77,13 +88,10 @@ export default function QuizReviewPage() {
     setSaving(true);
     try {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/quiz-attempts/${selectedAttempt.id}/score`,
+        `${API}/api/quiz-attempts/${selectedAttempt.id}/score`,
         {
           method: 'PUT',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json'
-          },
+          headers: await getAuthHeaders(true),
           body: JSON.stringify({ score: newScore })
         }
       );

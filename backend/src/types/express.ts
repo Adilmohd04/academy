@@ -14,7 +14,7 @@ declare global {
         orgId?: string;
         role?: string;
         email?: string;
-        [key: string]: any;
+        [key: string]: unknown;
       };
     }
   }

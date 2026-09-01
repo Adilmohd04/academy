@@ -265,6 +265,10 @@ export const removeCoTeacher = async (courseId: string, teacherClerkId: string) 
 
 export const updateCoursePrice = async (courseId: string, price: number) => {
   try {
+    if (!Number.isFinite(price) || price < 0 || price > 1_000_000) {
+      throw new Error('Price must be a finite amount between 0 and 1,000,000');
+    }
+
     // Update both price and is_free flag
     // is_free should be true only when price is 0, false otherwise
     const { data, error } = await supabase

@@ -109,17 +109,17 @@ router.get('/courses/:courseId/students/grades', requireAuth, async (req: Reques
 
           // Calculate averages
           const quizScores = weeks
-            .filter((w) => w.quiz_score !== undefined && w.quiz_score !== null)
-            .map((w) => (w.quiz_score! / (w.quiz_max_score || 100)) * 100);
+            .filter((w: any) => w.quiz_score !== undefined && w.quiz_score !== null)
+            .map((w: any) => (w.quiz_score! / (w.quiz_max_score || 100)) * 100);
           const quizAverage = quizScores.length > 0
-            ? quizScores.reduce((sum, score) => sum + score, 0) / quizScores.length
+            ? quizScores.reduce((sum: any, score: any) => sum + score, 0) / quizScores.length
             : 0;
 
           const assignmentScores = weeks
-            .filter((w) => w.assignment_score !== undefined && w.assignment_score !== null)
-            .map((w) => (w.assignment_score! / (w.assignment_max_score || 100)) * 100);
+            .filter((w: any) => w.assignment_score !== undefined && w.assignment_score !== null)
+            .map((w: any) => (w.assignment_score! / (w.assignment_max_score || 100)) * 100);
           const assignmentAverage = assignmentScores.length > 0
-            ? assignmentScores.reduce((sum, score) => sum + score, 0) / assignmentScores.length
+            ? assignmentScores.reduce((sum: any, score: any) => sum + score, 0) / assignmentScores.length
             : 0;
 
           return {

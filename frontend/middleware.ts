@@ -1,4 +1,4 @@
-﻿import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
+import { clerkClient, clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server'
 import { NextResponse } from 'next/server'
 
 const isPublicRoute = createRouteMatcher([
@@ -6,6 +6,7 @@ const isPublicRoute = createRouteMatcher([
   '/sign-in(.*)',
   '/sign-up(.*)',
   '/clear-session(.*)',
+  '/verify(.*)',
   '/api/student/courses/browse(.*)',
   '/api/enrollments/my-courses(.*)',
   '/api/webhooks(.*)',
@@ -15,64 +16,54 @@ const isPublicRoute = createRouteMatcher([
   '/.well-known(.*)',
 ])
 
-// Helper to get user role from Supabase
-async function getUserRole(userId: string, sessionClaims?: any): Promise<string | null> {
-  console.log('🔑 Getting role for userId:', userId?.substring(0, 10))
-  
-  // 1. Try to get role from session claims (fastest)
-  if (sessionClaims?.metadata?.role) {
-    console.log('✅ Role from session claims:', sessionClaims.metadata.role)
-    return sessionClaims.metadata.role;
-  }
-  
-  // 2. Fallback to Supabase fetch (slower)
+// The previous 1200ms budget expired routinely on a cold session, and every
+// expiry silently downgraded the user to "student".
+const LOOKUP_TIMEOUT_MS = 3000
+
+type UserRole = 'admin' | 'teacher' | 'student'
+
+const roleHomePath = (role: UserRole) => `/${role}`
+
+async function getUserRole(sessionClaims: any, userId: string): Promise<string | null> {
+  // 1. Try Claims
+  const roleFromClaims =
+    sessionClaims?.metadata?.role ||
+    sessionClaims?.publicMetadata?.role ||
+    sessionClaims?.role ||
+    null
+
+  if (typeof roleFromClaims === 'string') return roleFromClaims;
+
+  // Claims are fast. If they are not available on a first login, allow
+  // one short Clerk lookup, but never hold navigation open indefinitely.
   try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-    if (!supabaseUrl || !supabaseKey) {
-      console.error('❌ Missing Supabase credentials')
-      return null
-    }
-
-    console.log('🔍 Fetching role from Supabase for clerk_user_id:', userId)
-    const response = await fetch(
-      `${supabaseUrl}/rest/v1/profiles?clerk_user_id=eq.${userId}&select=role`,
-      {
-        headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-        },
-        cache: 'no-store',
-      }
-    )
-
-    if (!response.ok) {
-      console.error('❌ Failed to fetch user role:', response.status, await response.text())
-      return 'student' // Default to student if profile not found
-    }
-
-    const data = await response.json()
-    console.log('📋 Supabase response:', data)
-    
-    if (data && data.length > 0 && data[0].role) {
-      console.log('✅ Role from Supabase:', data[0].role)
-      return data[0].role
-    }
-    
-    console.log('⚠️ No role found in Supabase, defaulting to student')
-    return 'student' // Default to student if no role found
-  } catch (error) {
-    console.error('❌ Error fetching user role:', error)
-    return 'student' // Default to student on error
+    // Clerk v5 exposes a synchronous client factory. Await the user lookup
+    // itself so this works both with the current SDK and a slow first session.
+    const client = clerkClient();
+    const lookup = client.users
+      .getUser(userId)
+      .then((user) => user.publicMetadata?.role);
+    const roleFromClerk = await Promise.race([
+      lookup,
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), LOOKUP_TIMEOUT_MS)),
+    ]);
+    if (typeof roleFromClerk === 'string') return roleFromClerk;
+  } catch {
+    // Fall through when the optional lookup is unavailable.
   }
+
+  // Unknown, not "student". Defaulting to a concrete role here sent teachers
+  // and admins to the student portal whenever claims were missing and the
+  // lookup timed out, and the backend — which resolves the real role — then
+  // rejected their student API calls with 403.
+  return null;
 }
 
 export default clerkMiddleware(async (auth, request) => {
   const pathname = request.nextUrl.pathname
 
   // Skip middleware for static files and Next.js internals
-  if (pathname.startsWith('/_next/') || pathname.startsWith('/static/')) {
+  if (pathname.startsWith('/_next/') || pathname.startsWith('/static/') || pathname.startsWith('/landing/')) {
     return NextResponse.next()
   }
 
@@ -85,78 +76,50 @@ export default clerkMiddleware(async (auth, request) => {
   const { userId, sessionClaims } = await auth()
   
   if (!userId) {
-    console.log('❌ No userId, redirecting to sign-in:', pathname)
     return NextResponse.redirect(new URL('/sign-in', request.url))
   }
 
-  console.log('✅ Authenticated:', { pathname, userId: userId.substring(0, 10) })
+  // Send users to their role's home. When the role cannot be resolved, fall
+  // through rather than guessing — guessing is what routed teachers into the
+  // student portal.
+  if (pathname === '/dashboard' || pathname === '/') {
+    const role = await getUserRole(sessionClaims, userId)
 
-  // Handle /dashboard redirect - send users to their role page
-  if (pathname === '/dashboard') {
-    const role = await getUserRole(userId, sessionClaims)
-    console.log('📊 Dashboard redirect, role:', role)
-    
-    if (role === 'admin') {
-      console.log('→ Redirecting to /admin')
-      return NextResponse.redirect(new URL('/admin', request.url))
-    } else if (role === 'teacher') {
-      console.log('→ Redirecting to /teacher')
-      return NextResponse.redirect(new URL('/teacher', request.url))
-    } else {
-      console.log('→ Redirecting to /student (default)')
-      return NextResponse.redirect(new URL('/student', request.url))
+    if (role === 'admin' || role === 'teacher' || role === 'student') {
+      return NextResponse.redirect(new URL(roleHomePath(role), request.url))
     }
-  }
 
-  // Redirect root authenticated users to their dashboard
-  if (pathname === '/' && userId) {
-    const role = await getUserRole(userId, sessionClaims)
-    console.log('🏠 Root redirect, role:', role)
-    
-    if (role === 'admin') {
-      console.log('→ Redirecting to /admin')
-      return NextResponse.redirect(new URL('/admin', request.url))
-    } else if (role === 'teacher') {
-      console.log('→ Redirecting to /teacher')
-      return NextResponse.redirect(new URL('/teacher', request.url))
-    } else {
-      console.log('→ Redirecting to /student (default)')
-      return NextResponse.redirect(new URL('/student', request.url))
-    }
+    return NextResponse.next()
   }
 
   // Role-based route protection
   if (pathname.startsWith('/teacher') || pathname.startsWith('/student') || pathname.startsWith('/admin') || pathname.startsWith('/learn')) {
-    const role = await getUserRole(userId, sessionClaims)
-    
-    if (!role) {
-      // If we can't get role, allow access but log error
-      console.error('Could not verify user role for:', userId)
-      return NextResponse.next()
-    }
+    const role = await getUserRole(sessionClaims, userId)
 
     // Allow /learn for all authenticated users (students, teachers, admins)
     if (pathname.startsWith('/learn')) {
       return NextResponse.next()
     }
 
-    const requestedRole = pathname.split('/')[1] // Extract 'teacher', 'student', or 'admin'
-    
-    // Admin can access all pages (admin, teacher, student)
-    if (role === 'admin') {
+    const requestedRole = pathname.split('/')[1] // 'teacher' | 'student' | 'admin'
+
+    // Which portals each role may open. Admin sees everything; everyone else is
+    // confined to their own. The backend re-checks every request, so this is a
+    // navigation guard, not the security boundary.
+    const allowedPortals: Record<UserRole, string[]> = {
+      admin: ['admin', 'teacher', 'student'],
+      teacher: ['teacher'],
+      student: ['student'],
+    }
+
+    // An unresolved role must not trigger a redirect — that misroutes real
+    // teachers and admins. Let it through; the API still enforces the role.
+    if (role !== 'admin' && role !== 'teacher' && role !== 'student') {
       return NextResponse.next()
     }
-    
-    // Teachers can only access /teacher
-    if (role === 'teacher' && requestedRole !== 'teacher') {
-      console.log(`Redirecting teacher from /${requestedRole} to /teacher`)
-      return NextResponse.redirect(new URL('/teacher', request.url))
-    }
-    
-    // Students can only access /student
-    if (role === 'student' && requestedRole !== 'student') {
-      console.log(`Redirecting student from /${requestedRole} to /student`)
-      return NextResponse.redirect(new URL('/student', request.url))
+
+    if (!allowedPortals[role].includes(requestedRole)) {
+      return NextResponse.redirect(new URL(roleHomePath(role), request.url))
     }
   }
 
@@ -165,7 +128,7 @@ export default clerkMiddleware(async (auth, request) => {
 
 export const config = {
   matcher: [
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|mp4|webm|mov|m4v|mp3|wav|ogg|m4a|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
     '/(api|trpc)(.*)',
   ],
 }

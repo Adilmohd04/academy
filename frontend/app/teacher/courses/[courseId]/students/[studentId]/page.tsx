@@ -38,7 +38,7 @@ interface Assignment {
 export default function StudentDetailsPage() {
   const params = useParams();
   const router = useRouter();
-  const { userId } = useAuth();
+  const { getToken } = useAuth();
   const courseId = params.courseId as string;
   const studentId = params.studentId as string;
 
@@ -48,16 +48,17 @@ export default function StudentDetailsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (userId) fetchStudentDetails();
-  }, [courseId, studentId, userId]);
+    if (courseId && studentId) void fetchStudentDetails();
+  }, [courseId, studentId, getToken]);
 
   const fetchStudentDetails = async () => {
     try {
+      const token = await getToken();
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/courses/${courseId}/students/${studentId}/tracking`,
+        `${process.env.NEXT_PUBLIC_API_URL || ''}/api/courses/${courseId}/students/${studentId}`,
         {
           headers: {
-            'x-clerk-user-id': userId || ''
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           }
         }
       );
@@ -65,9 +66,9 @@ export default function StudentDetailsPage() {
       if (!response.ok) throw new Error('Failed to fetch student details');
 
       const data = await response.json();
-      setLessons(data.lessons);
-      setQuizzes(data.quizzes);
-      setAssignments(data.assignments);
+      setLessons(data.lessons || []);
+      setQuizzes(data.quizzes || []);
+      setAssignments(data.assignments || []);
     } catch (error) {
       console.error('Error fetching student details:', error);
     } finally {

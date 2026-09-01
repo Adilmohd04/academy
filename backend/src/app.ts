@@ -47,6 +47,7 @@ import resourceRoutes from './routes/resources';
 import discussionRoutes from './routes/discussions';
 import adminRoutes from './routes/admin';
 import adminCourseRoutes from './routes/adminCourses';
+import courseEquivalenceRoutes from './routes/courseEquivalences';
 import teacherCourseManagementRoutes from './routes/teacherCourseManagement';
 import teacherCoursesRoutes from './routes/teacherCourses';
 import courseSectionsRoutes from './routes/courseSections';
@@ -57,6 +58,9 @@ import assignmentRoutes from './routes/assignments';
 import finalExamRoutes from './routes/finalExams';
 import teacherInterviewsRoutes from './routes/teacherInterviewsRoutes';
 import certificateRoutes from './routes/certificates';
+import certificateLifecycleRoutes from './routes/certificateLifecycle';
+import certificateExceptionRequestRoutes from './routes/certificateExceptionRequests';
+import certificateVerificationRoutes from './routes/certificateVerification';
 import examMarksRoutes from './modules/shared/routes/examMarks';
 import weekDraftRoutes from './modules/shared/routes/weekDraft';
 import liveClassesRoutes from './modules/shared/routes/liveClasses';
@@ -78,6 +82,7 @@ import studentGradesRoutes from './routes/studentGrades';
 import { startClassNotificationJob } from './jobs/classNotifications';
 import { verifyEmailConfig } from './services/emailNotifications';
 import { startFinalExamInterviewReminderJob } from './jobs/finalExamInterviewReminders';
+import { startCertificateBackstopJob } from './jobs/certificateBackstopJob';
 
 class App {
   public app: Application;
@@ -93,24 +98,40 @@ class App {
    * Initialize all middlewares
    */
   private initializeMiddlewares(): void {
-    // Trust reverse proxies (required for accurate IP/rate-limit in production)
-    this.app.set('trust proxy', 1);
+    // Trust only the explicitly configured proxy chain. A blanket/default
+    // `trust proxy` setting lets directly connected browsers spoof
+    // X-Forwarded-For and bypass IP-based public verification rate limits.
+    this.app.set('trust proxy', config.trustProxy);
 
     // Remove identifying header
     this.app.disable('x-powered-by');
 
     // CORS configuration - Handle multiple origins including dev ports
     const allowedOrigins = config.corsOrigin.split(',').map(origin => origin.trim()).filter(Boolean);
-    // Add common dev ports
-    allowedOrigins.push('http://localhost:3001', 'http://localhost:3002');
+    // Add frontend URL from env (production)
+    if (config.frontendUrl && !allowedOrigins.includes(config.frontendUrl)) {
+      allowedOrigins.push(config.frontendUrl);
+    }
+    // Add common dev ports (both localhost and 127.0.0.1 host variants)
+    allowedOrigins.push(
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:3002',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001',
+      'http://127.0.0.1:3002'
+    );
 
     const isAllowedOrigin = (origin?: string) => {
-      if (!origin) return true;
+      if (!origin) return process.env.NODE_ENV !== 'production';
       if (allowedOrigins.includes(origin)) return true;
 
       try {
         const parsed = new URL(origin);
-        return parsed.hostname.endsWith('.vercel.app');
+        if (allowedOrigins.some(ao => { try { return new URL(ao).hostname === parsed.hostname; } catch { return false; } })) return true;
+        // Allow any localhost / 127.0.0.1 origin in development
+        if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') return true;
+        return false;
       } catch {
         return false;
       }
@@ -158,8 +179,9 @@ class App {
     this.app.options('*', cors(corsOptions));
 
     // Body parsing (bounded payloads to reduce memory pressure under heavy traffic)
-    this.app.use(express.json({ limit: '1mb' }));
-    this.app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+    // Certificate template saves can include large JSON payloads and image data.
+    this.app.use(express.json({ limit: '20mb' }));
+    this.app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
     // Compression for responses
     this.app.use(compression());
@@ -210,7 +232,6 @@ class App {
     this.app.use('/api/health', healthRoutes);
     this.app.use('/api/users', userRoutes);
     this.app.use('/api', courseRoutes);
-    this.app.use('/api', courseContentRoutes);
     this.app.use('/api', courseProgressRoutes);
     this.app.use('/api', enrollmentRoutes);
     this.app.use('/api', meetingRoutes);
@@ -225,6 +246,7 @@ class App {
     this.app.use('/api', discussionRoutes);
     this.app.use('/api/admin', adminRoutes);
     this.app.use('/api/admin', adminCourseRoutes);
+    this.app.use('/api/admin', courseEquivalenceRoutes);
     this.app.use('/api/teacher', teacherCourseManagementRoutes);
     this.app.use('/api/teacher', teacherCoursesRoutes);
     this.app.use('/api', leaderboardRoutes);
@@ -234,6 +256,9 @@ class App {
     this.app.use('/api', finalExamRoutes);
     this.app.use('/api', teacherInterviewsRoutes);
     this.app.use('/api', certificateRoutes);
+    this.app.use('/api', certificateLifecycleRoutes);
+    this.app.use('/api', certificateExceptionRequestRoutes);
+    this.app.use('/api', certificateVerificationRoutes);
     this.app.use('/api/exam-marks', examMarksRoutes);
     this.app.use('/api/drafts', weekDraftRoutes);
     this.app.use('/api/live-classes', liveClassesRoutes);
@@ -241,13 +266,15 @@ class App {
     this.app.use('/api/teacher', teacherAutosaveRoutes);
     this.app.use('/api/teacher', teacherAnalyticsRoutes);
     this.app.use('/api', courseWeeksRoutes);
+    // Register the locked-down legacy content routes after the canonical
+    // course-scoped curriculum API so they cannot shadow it.
+    this.app.use('/api', courseContentRoutes);
     this.app.use('/api', languageRoutes);
     this.app.use('/api/user', userPreferenceRoutes);
     this.app.use('/api/student', studentExamRoutes);
     this.app.use('/api/notification-center', notificationCenterRoutes);
     this.app.use('/api', teacherStudentManagementRoutes); // ✅ Comprehensive student tracking with grades
     this.app.use('/api', studentTrackingRoutes); // ✅ Detailed per-student tracking (quiz attempts, assignment submissions)
-    this.app.use('/api', enrollmentRoutes);
     this.app.use('/api', courseSectionsRoutes);
     this.app.use('/api/student', studentCourseRoutes);
     this.app.use('/api/teacher', teacherGradesRoutes);
@@ -287,6 +314,13 @@ class App {
       } else {
         console.warn('⚠️  Email service not configured properly - notifications disabled');
         console.warn('   Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env to enable');
+      }
+
+      // Certificate issuance backstop — runs regardless of email config.
+      try {
+        startCertificateBackstopJob();
+      } catch (jobError) {
+        console.error('⚠️  Failed to start certificate backstop job:', jobError);
       }
       
       // Start server with a large TCP listen backlog (default 511 is too low for 10K)

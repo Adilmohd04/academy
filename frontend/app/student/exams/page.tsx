@@ -21,8 +21,7 @@ export default function StudentExamPage() {
       const token = await getToken()
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/student/exams/upcoming`, {
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'x-clerk-user-id': userId || ''
+          'Authorization': `Bearer ${token}`
         }
       })
       if (res.ok) {
@@ -54,7 +53,7 @@ export default function StudentExamPage() {
       {upcomingExams.length > 0 ? (
         <div className="space-y-6">
           {upcomingExams.map((exam) => (
-            <FinalExamInterview key={exam.id} exam={exam} studentId="student-id" />
+            <FinalExamInterview key={exam.id} exam={exam} studentId={userId || ''} />
           ))}
         </div>
       ) : (

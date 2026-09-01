@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 
 export const dynamic = 'force-dynamic';
@@ -43,19 +43,29 @@ const fetchFromBackend = async (
     targetUrl.searchParams.set('x-vercel-protection-bypass', bypassSecret);
   }
 
-  const response = await fetch(targetUrl.toString(), {
-    method: 'GET',
-    headers: proxyHeaders,
-    cache: 'no-store',
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
 
-  const text = await response.text();
-  const contentType = response.headers.get('content-type') || 'application/json';
+  try {
+    const response = await fetch(targetUrl.toString(), {
+      method: 'GET',
+      headers: proxyHeaders,
+      cache: 'no-store',
+      signal: controller.signal,
+    });
 
-  return { response, text, contentType };
+    clearTimeout(timeoutId);
+    const text = await response.text();
+    const contentType = response.headers.get('content-type') || 'application/json';
+
+    return { response, text, contentType };
+  } catch (error) {
+    clearTimeout(timeoutId);
+    throw error;
+  }
 };
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const { userId, getToken } = await auth();
     const backendUrl = resolveBackendUrl();
@@ -63,14 +73,23 @@ export async function GET(request: NextRequest) {
     const bypassSecret = getProtectionBypassSecret();
     const token = await getToken();
 
-    const resolvedUserId = userId || request.headers.get('x-clerk-user-id') || '';
-    const resolvedAuthorization = request.headers.get('authorization') || (token ? `Bearer ${token}` : '');
+    if (!userId) {
+      return NextResponse.json({ success: false, message: 'Unauthorized' }, { status: 401 });
+    }
+
+    const internalAuthSecret = process.env.INTERNAL_AUTH_SHARED_SECRET || '';
+    const resolvedAuthorization = token ? `Bearer ${token}` : '';
 
     const proxyHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(resolvedUserId ? { 'x-clerk-user-id': resolvedUserId } : {}),
       ...(resolvedAuthorization
         ? { Authorization: resolvedAuthorization }
+        : {}),
+      ...(internalAuthSecret
+        ? {
+            'x-internal-auth-user-id': userId,
+            'x-internal-auth-secret': internalAuthSecret,
+          }
         : {}),
       ...(bypassSecret
         ? {

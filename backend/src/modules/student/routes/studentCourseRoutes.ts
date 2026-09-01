@@ -4,7 +4,7 @@
  */
 
 import express from 'express';
-import { requireAuth } from '../../../middleware/clerkAuth';
+import { requireAuth, requireRole } from '../../../middleware/clerkAuth';
 import * as courseController from '../controllers/courseController';
 import * as paymentController from '../controllers/paymentController';
 import * as lessonController from '../controllers/lessonController';
@@ -32,12 +32,12 @@ router.get('/courses/enrolled', requireAuth, courseController.getMyEnrolledCours
 router.get('/enrollments/course/:courseId', requireAuth, courseController.getEnrollmentForCourse);
 
 // Payment and enrollment
-router.post('/payment/create', requireAuth, paymentController.createPaymentOrder);
-router.post('/payment/verify', requireAuth, paymentController.verifyPayment);
+router.post('/payment/create', requireAuth, requireRole(['student']), paymentController.createPaymentOrder);
+router.post('/payment/verify', requireAuth, requireRole(['student']), paymentController.verifyPayment);
 
 // Payment history
-router.get('/payments', requireAuth, paymentController.getPaymentHistory);
-router.get('/payments/:paymentId/slip', requireAuth, paymentController.getPaymentSlip);
+router.get('/payments', requireAuth, requireRole(['student']), paymentController.getPaymentHistory);
+router.get('/payments/:paymentId/slip', requireAuth, requireRole(['student']), paymentController.getPaymentSlip);
 
 // Lesson-specific routes (quiz and assignments)
 router.get('/lessons/:lessonId/quiz', requireAuth, lessonController.getLessonQuiz);

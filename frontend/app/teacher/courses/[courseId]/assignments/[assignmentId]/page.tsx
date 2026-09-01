@@ -6,12 +6,14 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Upload, FileText, CheckCircle, Clock, XCircle } from 'lucide-react';
 import Link from 'next/link';
 
+const API = process.env.NEXT_PUBLIC_API_URL || '';
+
 interface Assignment {
   id: string;
   title: string;
-  content_url: string; // Instructions
+  content_url?: string; // Instructions
   assignment_type: 'audio' | 'video' | 'document' | 'pdf';
-  deadline: string;
+  deadline?: string;
   is_published: boolean;
 }
 
@@ -20,7 +22,7 @@ interface Submission {
   student_id: string;
   student_name: string;
   student_email: string;
-  submission_url: string;
+  submission_url?: string;
   submitted_at: string;
   grade?: number;
   feedback?: string;
@@ -29,7 +31,7 @@ interface Submission {
 
 export default function AssignmentViewPage() {
   const params = useParams();
-  const { userId } = useAuth();
+  const { getToken } = useAuth();
   const courseId = params.courseId as string;
   const assignmentId = params.assignmentId as string;
   
@@ -38,38 +40,62 @@ export default function AssignmentViewPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (userId && courseId && assignmentId) {
-      fetchData();
+    if (courseId && assignmentId) {
+      void fetchData();
     }
-  }, [userId, courseId, assignmentId]);
+  }, [courseId, assignmentId]);
 
   const fetchData = async () => {
     try {
-      // Fetch assignment details
-      const assignmentRes = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/lessons/${assignmentId}`,
-        {
-          headers: { 'x-clerk-user-id': userId || '' }
-        }
+      setLoading(true);
+      const token = await getToken();
+      if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
+      const headers = { Authorization: `Bearer ${token}` };
+
+      // The course builder stores assignment activities as lessons.  The old
+      // page called a non-existent `/teacher/lessons/:id` endpoint and then
+      // looked for a separate legacy assignment record, so every builder
+      // link landed on an empty state.  Use the canonical lesson-based
+      // submissions endpoint instead and select this lesson from its payload.
+      const response = await fetch(
+        `${API}/api/teacher/courses/${courseId}/assignment-submissions`,
+        { headers }
       );
-      
-      if (assignmentRes.ok) {
-        const data = await assignmentRes.json();
-        setAssignment(data.lesson);
+
+      if (!response.ok) {
+        throw new Error('Unable to load assignment submissions.');
       }
 
-      // Fetch submissions
-      const submissionsRes = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/assignments/${assignmentId}/submissions`,
-        {
-          headers: { 'x-clerk-user-id': userId || '' }
-        }
+      const data = await response.json();
+      const lesson = (data.assignments || []).find(
+        (item: any) => item.lesson_id === assignmentId
       );
-      
-      if (submissionsRes.ok) {
-        const data = await submissionsRes.json();
-        setSubmissions(data.submissions || []);
+
+      if (!lesson) {
+        setAssignment(null);
+        setSubmissions([]);
+        return;
       }
+
+      setAssignment({
+        id: lesson.lesson_id,
+        title: lesson.title || 'Assignment',
+        content_url: lesson.instructions || lesson.description || undefined,
+        assignment_type: lesson.assignment_type || 'document',
+        deadline: lesson.deadline || undefined,
+        is_published: lesson.is_published !== false,
+      });
+
+      const assignmentSubmissions: Submission[] = (
+        (data.submissions || [])
+          .filter((submission: any) => submission.lesson_id === assignmentId)
+          .map((submission: any) => ({
+            ...submission,
+            submission_url: submission.file_url || submission.link_url || undefined,
+            status: submission.status === 'graded' ? 'graded' : 'pending',
+          }))
+      );
+      setSubmissions(assignmentSubmissions);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
@@ -79,13 +105,15 @@ export default function AssignmentViewPage() {
 
   const gradeSubmission = async (submissionId: string, grade: number, feedback: string) => {
     try {
+      const token = await getToken();
+      if (!token) throw new Error('Your sign-in session is unavailable. Please sign in again.');
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/teacher/submissions/${submissionId}/grade`,
+        `${API}/api/teacher/courses/${courseId}/submissions/${submissionId}/grade`,
         {
-          method: 'PUT',
+          method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-clerk-user-id': userId || ''
+            Authorization: `Bearer ${token}`
           },
           body: JSON.stringify({ grade, feedback })
         }
@@ -236,15 +264,19 @@ export default function AssignmentViewPage() {
                       <p className="text-sm text-gray-600 mb-3">
                         Submitted: {new Date(submission.submitted_at).toLocaleString()}
                       </p>
-                      <a
-                        href={submission.submission_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700 text-sm font-medium"
-                      >
-                        <FileText className="w-4 h-4" />
-                        View Submission
-                      </a>
+                      {submission.submission_url ? (
+                        <a
+                          href={submission.submission_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700 text-sm font-medium"
+                        >
+                          <FileText className="w-4 h-4" />
+                          View Submission
+                        </a>
+                      ) : (
+                        <p className="text-sm text-gray-500">Text submission</p>
+                      )}
                       {submission.grade !== undefined && (
                         <div className="mt-3 p-3 bg-gray-50 rounded-lg">
                           <p className="text-sm font-medium text-gray-900">Grade: {submission.grade}/100</p>

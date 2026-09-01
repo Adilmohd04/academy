@@ -74,7 +74,8 @@ router.get(
             teacher_id
           )
         `)
-        .eq('teacher_slot_availability.teacher_id', profile.id)
+        // Availability rows use the Clerk identifier, not profiles.id.
+        .eq('teacher_slot_availability.teacher_id', profile.clerk_user_id)
         .order('created_at', { ascending: false });
 
       if (meetingsError) {

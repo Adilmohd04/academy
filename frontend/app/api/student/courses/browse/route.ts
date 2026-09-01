@@ -1,13 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_BACKEND_URL = 'https://academy-backend-git-dev-fixes-adilmohd04s-projects.vercel.app';
+const DEFAULT_LOCAL_BACKEND_URL = 'http://127.0.0.1:5000';
+const DEFAULT_REMOTE_BACKEND_URL = 'https://academy-backend-git-dev-fixes-adilmohd04s-projects.vercel.app';
 
 const resolveBackendUrl = () => {
   const envUrl = process.env.BACKEND_API_URL || process.env.NEXT_PUBLIC_API_URL || '';
-  if (!envUrl) return DEFAULT_BACKEND_URL;
+  if (!envUrl) {
+    return process.env.NODE_ENV === 'development'
+      ? DEFAULT_LOCAL_BACKEND_URL
+      : DEFAULT_REMOTE_BACKEND_URL;
+  }
   return envUrl.replace(/\/$/, '');
 };
 
@@ -55,22 +60,30 @@ const fetchFromBackend = async (
   return { response, text, contentType };
 };
 
-export async function GET(request: NextRequest) {
+const BACKEND_PATH = '/api/student/courses/browse';
+
+export async function GET() {
   try {
+    // The backend route serving this path is behind requireAuth, and the browse
+    // page needs `is_enrolled` to hide courses the student already has. Without
+    // a forwarded token every request came back 401. Resolved server-side, the
+    // same way the sibling my-courses proxy does it.
     const { userId, getToken } = await auth();
+    const token = await getToken();
+
     const backendUrl = resolveBackendUrl();
     const fallbackBackendUrl = resolveFallbackBackendUrl();
     const bypassSecret = getProtectionBypassSecret();
-    const token = await getToken();
-
-    const resolvedUserId = userId || request.headers.get('x-clerk-user-id') || '';
-    const resolvedAuthorization = request.headers.get('authorization') || (token ? `Bearer ${token}` : '');
+    const internalAuthSecret = process.env.INTERNAL_AUTH_SHARED_SECRET || '';
 
     const proxyHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(resolvedUserId ? { 'x-clerk-user-id': resolvedUserId } : {}),
-      ...(resolvedAuthorization
-        ? { Authorization: resolvedAuthorization }
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(internalAuthSecret && userId
+        ? {
+            'x-internal-auth-user-id': userId,
+            'x-internal-auth-secret': internalAuthSecret,
+          }
         : {}),
       ...(bypassSecret
         ? {
@@ -82,7 +95,7 @@ export async function GET(request: NextRequest) {
 
     let { response, text, contentType } = await fetchFromBackend(
       backendUrl,
-      '/api/student/courses/published',
+      BACKEND_PATH,
       proxyHeaders,
       bypassSecret
     );
@@ -96,7 +109,7 @@ export async function GET(request: NextRequest) {
       console.warn('[Proxy] Primary backend blocked by Vercel protection, retrying fallback backend.');
       const fallbackResult = await fetchFromBackend(
         fallbackBackendUrl,
-        '/api/student/courses/published',
+        BACKEND_PATH,
         proxyHeaders,
         bypassSecret
       );

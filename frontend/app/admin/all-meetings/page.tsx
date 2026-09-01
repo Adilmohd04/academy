@@ -43,10 +43,19 @@ export default function AllMeetingsPage() {
   const fetchMeetings = async () => {
     try {
       const token = await getToken();
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+
+      // `/api/admin/all-meetings` is a same-origin, role-protected proxy.
+      // Calling it directly avoids sending a browser request to the Express
+      // backend's non-existent `/api/admin/all-meetings` endpoint.
       const response = await fetch('/api/admin/all-meetings', {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to load meetings.');
+      }
+
       setMeetings(Array.isArray(data) ? data : []);
       setLoading(false);
     } catch (error) {
@@ -103,8 +112,8 @@ export default function AllMeetingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 p-8">
-      <div className="max-w-7xl mx-auto">
+    <div className="admin-page-wrap space-y-6">
+      <div>
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center space-x-4">

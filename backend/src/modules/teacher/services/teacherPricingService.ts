@@ -3,6 +3,37 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const MAX_MEETING_PRICE = 1_000_000;
+
+const assertValidMeetingPrice = (price: number): void => {
+  if (!Number.isFinite(price) || price < 0 || price > MAX_MEETING_PRICE) {
+    throw new Error(`Price must be a finite amount between 0 and ${MAX_MEETING_PRICE}`);
+  }
+};
+
+/**
+ * Pricing rows use the Clerk identifier, not the profile UUID.  Resolve it
+ * once at the boundary so an admin cannot create pricing records for a
+ * deleted user or a non-teacher profile.
+ */
+const requireTeacherPricingTarget = async (teacherId: string): Promise<void> => {
+  if (typeof teacherId !== 'string' || !teacherId.trim()) {
+    throw new Error('Teacher ID is required');
+  }
+
+  const result = await pool.query(
+    `SELECT clerk_user_id
+       FROM profiles
+      WHERE clerk_user_id = $1
+        AND role = 'teacher'
+      LIMIT 1`,
+    [teacherId],
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error('Teacher not found');
+  }
+};
 
 /**
  * Get price for a specific teacher
@@ -100,6 +131,9 @@ export const setTeacherPrice = async (
   notes?: string
 ): Promise<void> => {
   try {
+    await requireTeacherPricingTarget(teacherId);
+    assertValidMeetingPrice(price);
+
     const isFree = price === 0;
     
     // Update teacher pricing
@@ -122,7 +156,7 @@ export const setTeacherPrice = async (
       // Get the teacher's profile ID (teacher_slot_availability uses profile.id)
       const { data: profile } = await supabase
         .from('profiles')
-        .select('id')
+        .select('clerk_user_id')
         .eq('clerk_user_id', teacherId)
         .single();
 
@@ -131,7 +165,7 @@ export const setTeacherPrice = async (
         await supabase
           .from('teacher_slot_availability')
           .update({ is_free: true })
-          .eq('teacher_id', profile.id);
+          .eq('teacher_id', profile.clerk_user_id);
 
         console.log(`✅ Updated all slots for teacher ${teacherId} to FREE`);
       }
@@ -157,6 +191,7 @@ export const setTeacherFree = async (
  */
 export const resetTeacherToGlobalPrice = async (teacherId: string): Promise<void> => {
   try {
+    await requireTeacherPricingTarget(teacherId);
     await pool.query(
       `DELETE FROM teacher_pricing WHERE teacher_id = $1`,
       [teacherId]
